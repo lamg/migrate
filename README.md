@@ -9,7 +9,6 @@ Migrate is a tool for migrating databases in a declarative way. It can be used f
 
 ```shell
 git clone https://github.com/lamg/migrate
-git clone https://github.com/lamg/Migrate.SqlParser
 cd migrate
 dotnet restore
 cd Cli
