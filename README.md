@@ -2,7 +2,7 @@
 
 Migrate is a tool for migrating databases in a declarative way. It can be used from the command line or as a library.
 
-# Installation
+## Installation
 
 - Install [dotnet 8.0][0]
 - Run the following script to install the command line tool
@@ -20,19 +20,19 @@ fi
 ln -s bin/release/net8.0/linux-x64/publish/mig $DEST 
 ```
 
-# Usage
+## Usage
 
 See [usage](doc/usage.md)
 
-# Why Migrate?
+## Why Migrate?
 
 See [motivation](doc/motivation.md)
 
-# Contributing
+## Contributing
 
 See [contributing_guideline](doc/contributing_guideline.md)
 
-# License
+## License
 
 [Apache 2.0][1]
 

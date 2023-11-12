@@ -99,7 +99,7 @@ date: 2023-11-07T15:40:03.285+00:00
 ✅ step 0: Added "user"
 ```
 
-# Pulling the latest data from production
+## Pulling the latest data from production
 
 The `mig pull` command allows you to download the latest database from a production environment.
 In order to work you need to set an environment variable with the path to a shell script which
