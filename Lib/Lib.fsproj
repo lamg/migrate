@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net8.0</TargetFramework>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <PackageId>Migrate</PackageId>
+        <Version>0.0.1</Version>
+        <Authors>Luis Ángel Méndez Gort</Authors>
+        <AssemblyName>Migrate</AssemblyName>
+        <RootNamespace>Migrate</RootNamespace>
+    </PropertyGroup>
+    <ItemGroup>
+        <Compile Include="Types.fs"/>
+        <Compile Include="Print.fs"/>
+        <Compile Include="DbUtil.fs"/>
+        <Compile Include="SqlGeneration/Util.fs"/>
+        <Compile Include="SqlGeneration\Expr.fs"/>
+        <Compile Include="SqlGeneration/InsertInto.fs"/>
+        <Compile Include="SqlGeneration/Index.fs"/>
+        <Compile Include="SqlGeneration/Table.fs"/>
+        <Compile Include="SqlGeneration/WithSelect.fs"/>
+        <Compile Include="SqlGeneration/View.fs"/>
+        <Compile Include="SqlGeneration/Row.fs"/>
+        <Compile Include="SqlGeneration/Column.fs"/>
+        <Compile Include="DbProject/ParseDbToml.fs"/>
+        <Compile Include="DbProject/BuildProject.fs"/>
+        <Compile Include="DbProject/LoadProjectFiles.fs"/>
+        <Compile Include="DbProject/InitProject.fs"/>
+        <Compile Include="DbProject\LoadDbSchema.fs"/>
+        <Compile Include="Calculation\Solver.fs"/>
+        <Compile Include="Calculation\Migration.fs"/>
+        <Compile Include="Execution\MigrationStore.fs"/>
+        <Compile Include="Execution\MigrationPrint.fs"/>
+        <Compile Include="Execution\Commit.fs"/>
+        <Compile Include="Execution\Report.fs"/>
+        <Compile Include="Checks\Algorithms.fs"/>
+        <Compile Include="Checks\TypeChecker.fs"/>
+        <Compile Include="Checks\RelationsSummary.fs"/>
+        <Compile Include="Cli.fs"/>
+        <EmbeddedResource Include="Execution/store_schema.sql"/>
+    </ItemGroup>
+    <ItemGroup>
+        <PackageReference Include="Dapper.FSharp" Version="4.7.0"/>
+        <PackageReference Include="MBW.Utilities.ManagedSqlite.Sql" Version="0.11.0"/>
+        <PackageReference Include="SQLitePCLRaw.core" Version="2.1.6"/>
+        <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0-rc.2.23480.1"/>
+        <PackageReference Include="Nuget.Versioning" Version="6.7.0"/>
+        <PackageReference Include="SqlPrettify" Version="1.0.3"/>
+        <PackageReference Include="Tomlyn" Version="0.16.2"/>
+    </ItemGroup>
+    <ItemGroup>
+        <Compile Include="properties/AssemblyInfo.fs"/>
+        <None Remove="properties/AssemblyInfo.fs"/>
+        <Content Include="properties/AssemblyInfo.fs" CopyToOutputDirectory="PreserveNewest"/>
+    </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\SqlParser\Lib\SqlParser.fsproj"/>
+    </ItemGroup>
+</Project>
