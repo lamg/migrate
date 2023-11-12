@@ -111,9 +111,9 @@ db_file = "schema.sql"
 pull_script = new_db_pull_var
 ```
 
+The shell script could look this way:
+
 ```shell file:new_db_pull.sh
 rm /path/to/local/new_db.sqlite3
-rm /path/to/local/new_db_migrations.sqlite3
 scp user@server_ip:/path/to/new_db.sqlite3 /path/to/local/new_db.sqlite3
-scp user@server_ip:/path/to/new_db_migrations.sqlite3 /path/to/local/new_db_migrations.sqlite3
 ```
