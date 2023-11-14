@@ -20,31 +20,31 @@ open Types
 let private toArr = ErrorMessageList.ToSortedArray
 
 let rec private flattenErr (line: int) (col: int) (e: ErrorMessage) =
-    let flatten messages l c =
-        messages |> toArr |> Seq.map (flattenErr l c) |> Seq.concat |> Seq.toList
+  let flatten messages l c =
+    messages |> toArr |> Seq.map (flattenErr l c) |> Seq.concat |> Seq.toList
 
-    match e with
-    | :? ErrorMessage.NestedError as e -> flatten e.Messages (int e.Position.Line) (int e.Position.Column)
-    | :? ErrorMessage.ExpectedString as e -> [ Some(line, col, $"expected {e.String}") ]
-    | :? ErrorMessage.CompoundError as e ->
-        flatten e.NestedErrorMessages (int e.NestedErrorPosition.Line) (int e.NestedErrorPosition.Column)
-        |> Seq.toList
-    | :? ErrorMessage.Expected as e -> [ Some(line, col, e.Label) ]
-    | _ -> [ None ]
+  match e with
+  | :? ErrorMessage.NestedError as e -> flatten e.Messages (int e.Position.Line) (int e.Position.Column)
+  | :? ErrorMessage.ExpectedString as e -> [ Some(line, col, $"expected {e.String}") ]
+  | :? ErrorMessage.CompoundError as e ->
+    flatten e.NestedErrorMessages (int e.NestedErrorPosition.Line) (int e.NestedErrorPosition.Column)
+    |> Seq.toList
+  | :? ErrorMessage.Expected as e -> [ Some(line, col, e.Label) ]
+  | _ -> [ None ]
 
 
 let private pointTo (sql: string) (line: int) (col: int) =
-    let srcLine =
-        sql.Split "\n" |> Array.tryItem (int (line - 1)) |> Option.defaultValue ""
+  let srcLine =
+    sql.Split "\n" |> Array.tryItem (int (line - 1)) |> Option.defaultValue ""
 
-    let pointer = String.replicate (col + line.ToString().Length) " " + "^"
-    $"{line}|{srcLine}\n{pointer}"
+  let pointer = String.replicate (col + line.ToString().Length) " " + "^"
+  $"{line}|{srcLine}\n{pointer}"
 
 let parseSql (file: string) (sql: string) : Result<SqlFile, string> =
-    match sql, runParserOnString Statements.statements () file sql with
-    | _, Success(v, _, p) ->
-        // printfn $"ended in {p}"
-        Result.Ok v
-    | _, Failure(e, s, _) ->
-        $"{e}:\n{pointTo sql (int s.Position.Line) (int s.Position.Column)}"
-        |> Result.Error
+  match sql, runParserOnString Statements.statements () file sql with
+  | _, Success(v, _, p) ->
+    // printfn $"ended in {p}"
+    Result.Ok v
+  | _, Failure(e, s, _) ->
+    $"{e}:\n{pointTo sql (int s.Position.Line) (int s.Position.Column)}"
+    |> Result.Error

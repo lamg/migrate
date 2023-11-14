@@ -12,4 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module Program = let [<EntryPoint>] main _ = 0
+module Program =
+  [<EntryPoint>]
+  let main _ = 0

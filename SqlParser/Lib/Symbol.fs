@@ -15,29 +15,29 @@
 module SqlParser.Symbol
 
 type Symbol =
-    | Eq
-    | Semicolon
-    | Comma
-    | Dot
-    | OPar
-    | CPar
-    | DoubleQuote
-    | Asterisk
-    | Gt
-    | Lte
-    | Concat
-    | Composite of Keyword.Keyword list
+  | Eq
+  | Semicolon
+  | Comma
+  | Dot
+  | OPar
+  | CPar
+  | DoubleQuote
+  | Asterisk
+  | Gt
+  | Lte
+  | Concat
+  | Composite of Keyword.Keyword list
 
 let string =
-    Map
-        [ Eq, "="
-          Semicolon, ";"
-          Comma, ","
-          Dot, "."
-          OPar, "("
-          CPar, ")"
-          DoubleQuote, "\""
-          Asterisk, "*"
-          Gt, ">"
-          Lte, "<="
-          Concat, "||" ]
+  Map
+    [ Eq, "="
+      Semicolon, ";"
+      Comma, ","
+      Dot, "."
+      OPar, "("
+      CPar, ")"
+      DoubleQuote, "\""
+      Asterisk, "*"
+      Gt, ">"
+      Lte, "<="
+      Concat, "||" ]

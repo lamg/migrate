@@ -23,41 +23,41 @@ module K = Keyword
 module S = Symbol
 
 type Statement =
-    | CreateTable of CreateTable
-    | CreateView of CreateView
-    | CreateIndex of CreateIndex
-    | InsertInto of InsertInto
+  | CreateTable of CreateTable
+  | CreateView of CreateView
+  | CreateIndex of CreateIndex
+  | InsertInto of InsertInto
 
 let statement =
-    let table = CreateTable.createTable |>> CreateTable
+  let table = CreateTable.createTable |>> CreateTable
 
-    let view = CreateView.view |>> CreateView
+  let view = CreateView.view |>> CreateView
 
-    let index = CreateIndex.createIndex |>> CreateIndex
+  let index = CreateIndex.createIndex |>> CreateIndex
 
-    let insert = InsertInto.insertInto |>> InsertInto
+  let insert = InsertInto.insertInto |>> InsertInto
 
-    let s = keyword K.Create >>. (table <|> view <|> index) <|> insert
-    spaceComments >>. s
+  let s = keyword K.Create >>. (table <|> view <|> index) <|> insert
+  spaceComments >>. s
 
 let statements =
-    let emptyFile =
-        { tables = []
-          views = []
-          indexes = []
-          inserts = [] }
+  let emptyFile =
+    { tables = []
+      views = []
+      indexes = []
+      inserts = [] }
 
-    many statement
-    |>> List.fold
-        (fun acc ->
-            function
-            | CreateTable t -> { acc with tables = t :: acc.tables }
-            | CreateView v -> { acc with views = v :: acc.views }
-            | CreateIndex i -> { acc with indexes = i :: acc.indexes }
-            | InsertInto i -> { acc with inserts = i :: acc.inserts })
-        emptyFile
-    |>> fun r ->
-        { tables = List.rev r.tables
-          views = List.rev r.views
-          indexes = List.rev r.indexes
-          inserts = List.rev r.inserts }
+  many statement
+  |>> List.fold
+    (fun acc ->
+      function
+      | CreateTable t -> { acc with tables = t :: acc.tables }
+      | CreateView v -> { acc with views = v :: acc.views }
+      | CreateIndex i -> { acc with indexes = i :: acc.indexes }
+      | InsertInto i -> { acc with inserts = i :: acc.inserts })
+    emptyFile
+  |>> fun r ->
+    { tables = List.rev r.tables
+      views = List.rev r.views
+      indexes = List.rev r.indexes
+      inserts = List.rev r.inserts }

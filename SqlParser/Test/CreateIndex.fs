@@ -20,11 +20,11 @@ open Util
 
 [<Fact>]
 let createIndex () =
-    let cases =
-        [ "INDEX IF NOT EXISTS index0 ON table0(id);",
-          { name = "index0"
-            table = "table0"
-            column = "id" } ]
+  let cases =
+    [ "INDEX IF NOT EXISTS index0 ON table0(id);",
+      { name = "index0"
+        table = "table0"
+        column = "id" } ]
 
-    cases
-    |> List.iteri (fun i -> parseStatementTest $"createIndex-{i}" SqlParser.CreateIndex.createIndex)
+  cases
+  |> List.iteri (fun i -> parseStatementTest $"createIndex-{i}" SqlParser.CreateIndex.createIndex)

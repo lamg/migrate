@@ -23,19 +23,19 @@ module S = Symbol
 
 let insertInto =
 
-    parse {
-        do! keyword K.Insert
-        do! keyword K.Into
-        let! tableName = ident
-        let! columns = sepBy1 ident (symbol S.Comma) |> parens
-        do! keyword K.Values
+  parse {
+    do! keyword K.Insert
+    do! keyword K.Into
+    let! tableName = ident
+    let! columns = sepBy1 ident (symbol S.Comma) |> parens
+    do! keyword K.Values
 
-        let row = sepBy1 Scalar.literal (symbol S.Comma) |> parens
-        let! values = sepBy1 row (symbol S.Comma)
-        do! symbol S.Semicolon
+    let row = sepBy1 Scalar.literal (symbol S.Comma) |> parens
+    let! values = sepBy1 row (symbol S.Comma)
+    do! symbol S.Semicolon
 
-        return
-            { table = tableName
-              columns = columns
-              values = values }
-    }
+    return
+      { table = tableName
+        columns = columns
+        values = values }
+  }

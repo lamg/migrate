@@ -19,7 +19,7 @@ open SqlParser.Types
 open Util
 
 let text0 =
-    "
+  "
 CREATE TABLE table0(
   id integer NOT NULL,
   name text NOT NULL
@@ -43,51 +43,51 @@ CREATE INDEX IF NOT EXISTS table0_id ON table0(id);
 
 [<Fact>]
 let parseText0 () =
-    let expectedTables =
-        [ { name = "table0"
-            columns =
-              [ { name = "id"
-                  ``type`` = SqlInteger
-                  constraints = [ NotNull ] }
-                { name = "name"
-                  ``type`` = SqlText
-                  constraints = [ NotNull ] } ]
+  let expectedTables =
+    [ { name = "table0"
+        columns =
+          [ { name = "id"
+              ``type`` = SqlInteger
+              constraints = [ NotNull ] }
+            { name = "name"
+              ``type`` = SqlText
+              constraints = [ NotNull ] } ]
 
-            constraints = [] }
-          { name = "table1"
-            columns =
-              [ { name = "id"
-                  ``type`` = SqlText
-                  constraints = [ NotNull ] } ]
+        constraints = [] }
+      { name = "table1"
+        columns =
+          [ { name = "id"
+              ``type`` = SqlText
+              constraints = [ NotNull ] } ]
 
-            constraints = [ Unique [ "id" ] ] }
-          { name = "table2"
-            columns =
-              [ { name = "id"
-                  ``type`` = SqlText
-                  constraints = [ PrimaryKey None ] } ]
-            constraints = [] } ]
+        constraints = [ Unique [ "id" ] ] }
+      { name = "table2"
+        columns =
+          [ { name = "id"
+              ``type`` = SqlText
+              constraints = [ PrimaryKey None ] } ]
+        constraints = [] } ]
 
-    let expectedIndexes =
-        [ { name = "table0_id"
-            table = "table0"
-            column = "id" } ]
+  let expectedIndexes =
+    [ { name = "table0_id"
+        table = "table0"
+        column = "id" } ]
 
-    let r = SqlParser.Parser.parseSql "text0" text0
+  let r = SqlParser.Parser.parseSql "text0" text0
 
-    match r with
-    | Ok f ->
-        Assert.Equal(3, f.tables.Length)
-        Assert.Equal(0, f.views.Length)
-        Assert.Equal(0, f.inserts.Length)
-        Assert.Equal(1, f.indexes.Length)
+  match r with
+  | Ok f ->
+    Assert.Equal(3, f.tables.Length)
+    Assert.Equal(0, f.views.Length)
+    Assert.Equal(0, f.inserts.Length)
+    Assert.Equal(1, f.indexes.Length)
 
-        Assert.Equal<List<CreateTable>>(expectedTables, f.tables)
-        Assert.Equal<List<CreateIndex>>(expectedIndexes, f.indexes)
-    | Error e -> Assert.Fail e
+    Assert.Equal<List<CreateTable>>(expectedTables, f.tables)
+    Assert.Equal<List<CreateIndex>>(expectedIndexes, f.indexes)
+  | Error e -> Assert.Fail e
 
 let text1 =
-    "
+  "
 -- view for creating a batch of the next profiles to be updated
 CREATE VIEW view0 AS
 SELECT id AS x
@@ -104,71 +104,71 @@ WHERE
 
 [<Fact>]
 let parseText1 () =
-    // empty select statement
-    let empty =
-        { distinct = false
-          columns = []
-          from = []
-          where = None
-          groupBy = []
-          having = None
-          orderBy = None
-          limit = None
-          offset = None }
+  // empty select statement
+  let empty =
+    { distinct = false
+      columns = []
+      from = []
+      where = None
+      groupBy = []
+      having = None
+      orderBy = None
+      limit = None
+      offset = None }
 
-    let r = SqlParser.Parser.parseSql "text1" text1
+  let r = SqlParser.Parser.parseSql "text1" text1
 
-    match r with
-    | Ok f ->
-        Assert.Equal(0, f.tables.Length)
-        Assert.Equal(2, f.views.Length)
-        Assert.Equal(0, f.inserts.Length)
-        Assert.Equal(0, f.indexes.Length)
+  match r with
+  | Ok f ->
+    Assert.Equal(0, f.tables.Length)
+    Assert.Equal(2, f.views.Length)
+    Assert.Equal(0, f.inserts.Length)
+    Assert.Equal(0, f.indexes.Length)
 
-        let view0 =
-            { name = "view0"
-              select =
-                { withAliases = []
-                  select =
-                    { empty with
-                        columns = [ Alias { expr = col "id"; alias = "x" } ]
-                        from = [ table "t0" ]
-                        limit = Some 100 } } }
+    let view0 =
+      { name = "view0"
+        select =
+          { withAliases = []
+            select =
+              { empty with
+                  columns = [ Alias { expr = col "id"; alias = "x" } ]
+                  from = [ table "t0" ]
+                  limit = Some 100 } } }
 
-        let view1 =
-            { name = "view1"
-              select =
-                { withAliases = []
-                  select =
-                    { empty with
-                        columns = [ col "id" ]
-                        from = [ table "t1" ]
-                        where =
-                            Some(
-                                sand
-                                    (Not(
-                                        In
-                                            { left = col "id"
-                                              right =
-                                                SubQuery
-                                                    { withAliases = []
-                                                      select =
-                                                        { empty with
-                                                            columns = [ col "id" ]
-                                                            from = [ table "t2" ] } } }
-                                    ))
-                                    (Not(
-                                        In
-                                            { left = col "id"
-                                              right =
-                                                SubQuery
-                                                    { withAliases = []
-                                                      select =
-                                                        { empty with
-                                                            columns = [ col "id" ]
-                                                            from = [ table "t3" ] } } }
-                                    ))
-                            ) } } }
+    let view1 =
+      { name = "view1"
+        select =
+          { withAliases = []
+            select =
+              { empty with
+                  columns = [ col "id" ]
+                  from = [ table "t1" ]
+                  where =
+                    Some(
+                      sand
+                        (Not(
+                          In
+                            { left = col "id"
+                              right =
+                                SubQuery
+                                  { withAliases = []
+                                    select =
+                                      { empty with
+                                          columns = [ col "id" ]
+                                          from = [ table "t2" ] } } }
+                        ))
+                        (Not(
+                          In
+                            { left = col "id"
+                              right =
+                                SubQuery
+                                  { withAliases = []
+                                    select =
+                                      { empty with
+                                          columns = [ col "id" ]
+                                          from = [ table "t3" ] } } }
+                        ))
+                    ) } } }
 
-        Assert.Equal<CreateView list>([ view0; view1 ], f.views)
-    | Error e -> Assert.Fail e
+    Assert.Equal<CreateView list>([ view0; view1 ], f.views)
+  | Error e -> Assert.Fail e

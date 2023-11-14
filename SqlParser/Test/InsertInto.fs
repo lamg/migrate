@@ -21,15 +21,15 @@ open Util
 
 [<Fact>]
 let insertInto () =
-    let cases =
-        [ "INSERT INTO table0(id, age) VALUES (1, 2);",
-          { table = "table0"
-            columns = [ "id"; "age" ]
-            values = [ [ Integer 1; Integer 2 ] ] }
-          "INSERT INTO table0(id, age) VALUES(id, age);",
-          { table = "table0"
-            columns = [ "id"; "age" ]
-            values = [ [ envVar "id"; envVar "age" ] ] } ]
+  let cases =
+    [ "INSERT INTO table0(id, age) VALUES (1, 2);",
+      { table = "table0"
+        columns = [ "id"; "age" ]
+        values = [ [ Integer 1; Integer 2 ] ] }
+      "INSERT INTO table0(id, age) VALUES(id, age);",
+      { table = "table0"
+        columns = [ "id"; "age" ]
+        values = [ [ envVar "id"; envVar "age" ] ] } ]
 
-    cases
-    |> List.iteri (fun i -> parseStatementTest $"insertInto-{i}" SqlParser.InsertInto.insertInto)
+  cases
+  |> List.iteri (fun i -> parseStatementTest $"insertInto-{i}" SqlParser.InsertInto.insertInto)

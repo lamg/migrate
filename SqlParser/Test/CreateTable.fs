@@ -21,45 +21,45 @@ open Util
 
 [<Fact>]
 let createTable () =
-    let cases =
-        [ "TABLE table0 (id integer NOT NULL);",
-          { name = "table0"
-            columns =
-              [ { name = "id"
-                  ``type`` = SqlInteger
-                  constraints = [ NotNull ] } ]
-            constraints = [] }
-          "TABLE table0 (id integer PRIMARY KEY);",
-          { name = "table0"
-            columns =
-              [ { name = "id"
-                  ``type`` = SqlInteger
-                  constraints = [ PrimaryKey None ] } ]
-            constraints = [] }
-          "TABLE t0 (id integer NOT NULL, UNIQUE(id));",
-          { name = "t0"
-            columns =
-              [ { name = "id"
-                  ``type`` = SqlInteger
-                  constraints = [ NotNull ] } ]
-            constraints = [ Unique [ "id" ] ] }
-          "TABLE t0 (id integer, name text, PRIMARY KEY(id, name));",
-          { name = "t0"
-            columns =
-              [ { name = "id"
-                  ``type`` = SqlInteger
-                  constraints = [] }
-                { name = "name"
-                  ``type`` = SqlText
-                  constraints = [] } ]
-            constraints = [ PrimaryKeyCols [ "id"; "name" ] ] }
-          "TABLE t0(id integer PRIMARY KEY AUTOINCREMENT);",
-          { name = "t0"
-            columns =
-              [ { name = "id"
-                  ``type`` = SqlInteger
-                  constraints = [ PrimaryKey(Some Autoincrement) ] } ]
-            constraints = [] } ]
+  let cases =
+    [ "TABLE table0 (id integer NOT NULL);",
+      { name = "table0"
+        columns =
+          [ { name = "id"
+              ``type`` = SqlInteger
+              constraints = [ NotNull ] } ]
+        constraints = [] }
+      "TABLE table0 (id integer PRIMARY KEY);",
+      { name = "table0"
+        columns =
+          [ { name = "id"
+              ``type`` = SqlInteger
+              constraints = [ PrimaryKey None ] } ]
+        constraints = [] }
+      "TABLE t0 (id integer NOT NULL, UNIQUE(id));",
+      { name = "t0"
+        columns =
+          [ { name = "id"
+              ``type`` = SqlInteger
+              constraints = [ NotNull ] } ]
+        constraints = [ Unique [ "id" ] ] }
+      "TABLE t0 (id integer, name text, PRIMARY KEY(id, name));",
+      { name = "t0"
+        columns =
+          [ { name = "id"
+              ``type`` = SqlInteger
+              constraints = [] }
+            { name = "name"
+              ``type`` = SqlText
+              constraints = [] } ]
+        constraints = [ PrimaryKeyCols [ "id"; "name" ] ] }
+      "TABLE t0(id integer PRIMARY KEY AUTOINCREMENT);",
+      { name = "t0"
+        columns =
+          [ { name = "id"
+              ``type`` = SqlInteger
+              constraints = [ PrimaryKey(Some Autoincrement) ] } ]
+        constraints = [] } ]
 
-    cases
-    |> List.iteri (fun i -> parseStatementTest $"createTable-{i}" SqlParser.CreateTable.createTable)
+  cases
+  |> List.iteri (fun i -> parseStatementTest $"createTable-{i}" SqlParser.CreateTable.createTable)

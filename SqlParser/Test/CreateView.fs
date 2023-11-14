@@ -19,24 +19,24 @@ open SqlParser.Types
 open Util
 
 let empty =
-    { columns = []
-      distinct = false
-      from = []
-      where = None
-      groupBy = []
-      having = None
-      orderBy = None
-      limit = None
-      offset = None }
+  { columns = []
+    distinct = false
+    from = []
+    where = None
+    groupBy = []
+    having = None
+    orderBy = None
+    limit = None
+    offset = None }
 
 [<Fact>]
 let createView () =
-    let cases =
-        [ "VIEW v AS SELECT * FROM t",
-          { name = "v"
-            select =
-              { withAliases = []
-                select = { empty with from = [ table "t" ] } } } ]
+  let cases =
+    [ "VIEW v AS SELECT * FROM t",
+      { name = "v"
+        select =
+          { withAliases = []
+            select = { empty with from = [ table "t" ] } } } ]
 
-    cases
-    |> List.iteri (fun i -> parseStatementTest $"createView-{i}" SqlParser.CreateView.view)
+  cases
+  |> List.iteri (fun i -> parseStatementTest $"createView-{i}" SqlParser.CreateView.view)

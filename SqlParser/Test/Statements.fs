@@ -19,34 +19,34 @@ open SqlParser.Types
 open Util
 
 let empty =
-    { columns = []
-      distinct = false
-      from = []
-      where = None
-      groupBy = []
-      having = None
-      orderBy = None
-      limit = None
-      offset = None }
+  { columns = []
+    distinct = false
+    from = []
+    where = None
+    groupBy = []
+    having = None
+    orderBy = None
+    limit = None
+    offset = None }
 
 [<Fact>]
 let statement () =
-    let cases =
-        [ "CREATE TABLE t0(id integer NOT NULL); CREATE VIEW v0 AS SELECT * FROM t0;",
-          { tables =
-              [ { name = "t0"
-                  columns =
-                    [ { name = "id"
-                        ``type`` = SqlInteger
-                        constraints = [ NotNull ] } ]
-                  constraints = [] } ]
-            views =
-              [ { name = "v0"
-                  select =
-                    { withAliases = []
-                      select = { empty with from = [ table "t0" ] } } } ]
-            inserts = []
-            indexes = [] } ]
+  let cases =
+    [ "CREATE TABLE t0(id integer NOT NULL); CREATE VIEW v0 AS SELECT * FROM t0;",
+      { tables =
+          [ { name = "t0"
+              columns =
+                [ { name = "id"
+                    ``type`` = SqlInteger
+                    constraints = [ NotNull ] } ]
+              constraints = [] } ]
+        views =
+          [ { name = "v0"
+              select =
+                { withAliases = []
+                  select = { empty with from = [ table "t0" ] } } } ]
+        inserts = []
+        indexes = [] } ]
 
-    cases
-    |> List.iteri (fun i -> parseStatementTest $"statement-{i}" SqlParser.Statements.statements)
+  cases
+  |> List.iteri (fun i -> parseStatementTest $"statement-{i}" SqlParser.Statements.statements)

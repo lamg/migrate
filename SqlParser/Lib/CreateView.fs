@@ -21,10 +21,10 @@ open Types
 module K = Keyword
 
 let view =
-    parse {
-        do! keyword K.View
-        let! name = ident
-        do! keyword K.As
-        let! select = Select.withSelect
-        return { name = name; select = select }
-    }
+  parse {
+    do! keyword K.View
+    let! name = ident
+    do! keyword K.As
+    let! select = Select.withSelect
+    return { name = name; select = select }
+  }

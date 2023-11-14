@@ -22,17 +22,17 @@ module K = Keyword
 module S = Symbol
 
 let createIndex: Parser<CreateIndex, unit> =
-    parse {
-        do! keyword K.Index
-        let! _ = opt (keyword K.If >>. keyword K.Not >>. keyword K.Exists)
-        let! indexName = ident
-        do! keyword K.On
-        let! tableName = ident
-        let! column = ident |> parens
-        do! symbol S.Semicolon
+  parse {
+    do! keyword K.Index
+    let! _ = opt (keyword K.If >>. keyword K.Not >>. keyword K.Exists)
+    let! indexName = ident
+    do! keyword K.On
+    let! tableName = ident
+    let! column = ident |> parens
+    do! symbol S.Semicolon
 
-        return
-            { name = indexName
-              table = tableName
-              column = column }
-    }
+    return
+      { name = indexName
+        table = tableName
+        column = column }
+  }
