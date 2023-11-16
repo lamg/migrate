@@ -3,10 +3,16 @@
         <Version>0.0.1</Version>
         <OutputType>Exe</OutputType>
         <TargetFramework>net8.0</TargetFramework>
-        <PublishSingleFile>true</PublishSingleFile>
-        <PublishReadyToRun>true</PublishReadyToRun>
+        <PackAsTool>true</PackAsTool>
+        <ToolCommandName>mig</ToolCommandName>
+        <PackageOutputPath>./nupkg</PackageOutputPath>
+        <PackageProjectUrl>https://github.com/lamg/migrate</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/lamg/migrate</RepositoryUrl>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <InvariantGlobalization>true</InvariantGlobalization>
         <AssemblyName>mig</AssemblyName>
+        <PackageId>migtool</PackageId>
         <RootNamespace>CliMigrate</RootNamespace>
     </PropertyGroup>
 
@@ -23,6 +29,10 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Lib\Lib.fsproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="..\README.md" Pack="true" PackagePath="\"/>
     </ItemGroup>
 
 </Project>
