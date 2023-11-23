@@ -53,10 +53,28 @@ let primaryKey =
     return PrimaryKey autoInc
   }
 
+let foreignKey =
+  parse {
+    do! keyword K.Foreign
+    do! keyword K.Key
+    let! cols = parens (sepBy1 ident (symbol S.Comma))
+    do! keyword K.References
+    let! refTable = ident
+    let! refCols = parens (sepBy1 ident (symbol S.Comma))
+
+    return
+      Choice1Of2(
+        ForeignKey
+          { columns = cols
+            refTable = refTable
+            refColumns = refCols }
+      )
+  }
 
 let colOrConstraint: Parser<Choice<ColumnConstraint, ColumnDef>, unit> =
   unique
   <|> primaryKeyCols
+  <|> foreignKey
   <|> parse {
     let! name = ident
 

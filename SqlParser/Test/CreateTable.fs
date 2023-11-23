@@ -59,7 +59,21 @@ let createTable () =
           [ { name = "id"
               ``type`` = SqlInteger
               constraints = [ PrimaryKey(Some Autoincrement) ] } ]
-        constraints = [] } ]
+        constraints = [] }
+      "TABLE t0(id integer PRIMARY KEY AUTOINCREMENT, userId text NOT NULL, FOREIGN KEY (userId) REFERENCES user(id));",
+      { name = "t0"
+        columns =
+          [ { name = "id"
+              ``type`` = SqlInteger
+              constraints = [ PrimaryKey(Some Autoincrement) ] }
+            { name = "userId"
+              ``type`` = SqlText
+              constraints = [ NotNull ] } ]
+        constraints =
+          [ ForeignKey
+              { columns = [ "userId" ]
+                refTable = "user"
+                refColumns = [ "id" ] } ] } ]
 
   cases
   |> List.iteri (fun i -> parseStatementTest $"createTable-{i}" SqlParser.CreateTable.createTable)

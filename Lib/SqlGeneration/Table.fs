@@ -27,6 +27,10 @@ let sqlConstraint =
   | Default v -> $"""DEFAULT {sqlExpr (fun _ -> "") v}"""
   | Unique [] -> "UNIQUE"
   | Unique xs -> $"UNIQUE({sepComma id xs})"
+  | ForeignKey f ->
+    let cols = f.columns |> sepComma id
+    let refCols = f.refColumns |> sepComma id
+    $"FOREIGN KEY({cols}) REFERENCES {f.refTable}({refCols})"
 
 let sqlColType =
   function

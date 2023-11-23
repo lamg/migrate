@@ -103,12 +103,18 @@ type SqlType =
 
 type Autoincrement = Autoincrement
 
+type ForeignKey =
+  { columns: string list
+    refTable: string
+    refColumns: string list }
+
 type ColumnConstraint =
   | PrimaryKey of Autoincrement option
   | PrimaryKeyCols of string list
   | NotNull
   | Unique of string list
   | Default of Expr
+  | ForeignKey of ForeignKey
 
 type ColumnDef =
   { name: string
