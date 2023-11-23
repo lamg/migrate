@@ -9,7 +9,7 @@
         <AssemblyName>Migrate</AssemblyName>
         <RootNamespace>Migrate</RootNamespace>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-        <Title>Handlerive migrations for SQLite</Title>
+        <Title>Declarative migrations for SQLite</Title>
         <PackageReadmeFile>README.md</PackageReadmeFile>
         <Description>Handlerive migrations for SQLite</Description>
         <PackageProjectUrl>https://github.com/lamg/migrate</PackageProjectUrl>
