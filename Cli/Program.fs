@@ -204,9 +204,6 @@ let main args =
       | Some(Version _) ->
         Assembly.GetExecutingAssembly().GetName().Version.ToString() |> printfn "%s"
         0
-      | Some c ->
-        Print.printRed $"unrecognized command {c}"
-        1
       | None ->
         Print.printRed "no command given"
         1
