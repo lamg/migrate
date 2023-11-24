@@ -201,6 +201,9 @@ let main args =
       | Some(Init _) -> failwith "violated project init precondition"
       | Some(Status _) -> Cli.status p
       | Some(Relations flags) -> relations p flags
+      | Some(Version _) ->
+        Assembly.GetExecutingAssembly().GetName().Version.ToString() |> printfn "%s"
+        0
       | Some c ->
         Print.printRed $"unrecognized command {c}"
         1

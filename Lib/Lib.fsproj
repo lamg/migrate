@@ -3,12 +3,11 @@
         <TargetFramework>net8.0</TargetFramework>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <PackageId>MigrateLib</PackageId>
-        <Version>0.0.2</Version>
+        <Version>0.0.4</Version>
         <Authors>Luis Ángel Méndez Gort</Authors>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Migrate</AssemblyName>
         <RootNamespace>Migrate</RootNamespace>
-        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
         <Title>Declarative migrations for SQLite</Title>
         <PackageReadmeFile>README.md</PackageReadmeFile>
         <Description>Declarative migrations for SQLite</Description>
@@ -49,6 +48,7 @@
     <ItemGroup>
         <PackageReference Include="Dapper.FSharp" Version="4.7.0"/>
         <PackageReference Include="MBW.Utilities.ManagedSqlite.Sql" Version="0.11.0"/>
+        <PackageReference Include="MigrateLib.SqlParser" Version="0.0.4"/>
         <PackageReference Include="SQLitePCLRaw.core" Version="2.1.6"/>
         <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0"/>
         <PackageReference Include="Nuget.Versioning" Version="6.7.0"/>
@@ -59,9 +59,6 @@
         <Compile Include="properties/AssemblyInfo.fs"/>
         <None Remove="properties/AssemblyInfo.fs"/>
         <Content Include="properties/AssemblyInfo.fs" CopyToOutputDirectory="PreserveNewest"/>
-    </ItemGroup>
-    <ItemGroup>
-        <ProjectReference Include="..\SqlParser\Lib\SqlParser.fsproj"/>
     </ItemGroup>
     <ItemGroup>
         <None Include="..\README.md" Pack="true" PackagePath="\"/>
