@@ -34,6 +34,8 @@ let printColor (print: string -> unit) color s =
 
 let stdPrint x = printfn $"{x}"
 let errPrint x = eprintfn $"{x}"
+
+let printError = printColor errPrint ConsoleColor.Red
 let printGreen = printColor stdPrint ConsoleColor.Green
 let printRed = printColor stdPrint ConsoleColor.Red
 let printYellow = printColor stdPrint ConsoleColor.Yellow
@@ -70,7 +72,7 @@ let literalWithEnv =
     | None -> ExpectingEnvVar v |> raise
   | x -> x
 
-let printError (e: QueryError) =
+let printQueryErr (e: QueryError) =
   printYellow "running:"
   printfn $"{e.sql}"
   printYellow "got error"
@@ -79,8 +81,8 @@ let printError (e: QueryError) =
 let joinSql (xs: string list) =
   xs |> String.concat ";\n" |> (fun s -> $"{s};")
 
-let joinSqlPretty =
-  List.map (SqlPrettify.SqlPrettify.Pretty >> _.TrimEnd()) >> joinSql
+let joinSqlPretty xs =
+  xs |> List.map (SqlPrettify.SqlPrettify.Pretty >> _.TrimEnd()) |> joinSql
 
 let colorizeSql sql =
   let keywordPattern =

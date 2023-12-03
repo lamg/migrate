@@ -158,11 +158,19 @@ let addView () =
   let dbSchema = schemaWithView "view0"
   let r = migration dbSchema p
 
+  let sqlView0 =
+    Migrate.SqlGeneration.View.sqlCreateView dbSchema.views.Head
+    |> Migrate.Print.joinSqlPretty
+
+  let sqlView1 =
+    Migrate.SqlGeneration.View.sqlCreateView p.source.views.Head
+    |> Migrate.Print.joinSqlPretty
+
   let expected: list<SolverProposal> option =
     Some
-      [ { reason = Removed "view0"
+      [ { reason = Removed sqlView0
           statements = [ "DROP VIEW view0" ] }
-        { reason = Added "view1"
+        { reason = Added sqlView1
           statements = [ "CREATE VIEW view1 AS\nSELECT * FROM table0" ] } ]
 
   Assert.Equal(expected, r)
@@ -174,9 +182,13 @@ let removeView () =
   let dbSchema = schemaWithView "view0"
   let r = migration dbSchema p
 
+  let sqlView =
+    Migrate.SqlGeneration.View.sqlCreateView dbSchema.views.Head
+    |> Migrate.Print.joinSqlPretty
+
   let expected: list<SolverProposal> option =
     Some
-      [ { reason = Removed "view0"
+      [ { reason = Removed sqlView
           statements = [ "DROP VIEW view0" ] } ]
 
   Assert.Equal(expected, r)
@@ -190,11 +202,19 @@ let renameView () =
   let dbSchema = schemaWithView "view0"
   let r = migration dbSchema p
 
+  let sqlView0 =
+    Migrate.SqlGeneration.View.sqlCreateView dbSchema.views.Head
+    |> Migrate.Print.joinSqlPretty
+
+  let sqlView1 =
+    Migrate.SqlGeneration.View.sqlCreateView p.source.views.Head
+    |> Migrate.Print.joinSqlPretty
+
   let expected: list<SolverProposal> option =
     Some
-      [ { reason = Removed "view0"
+      [ { reason = Removed sqlView0
           statements = [ "DROP VIEW view0" ] }
-        { reason = Added "view1"
+        { reason = Added sqlView1
           statements = [ "CREATE VIEW view1 AS\nSELECT * FROM table0" ] } ]
 
   Assert.Equal(expected, r)

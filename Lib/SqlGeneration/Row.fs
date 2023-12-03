@@ -17,24 +17,33 @@ module internal Migrate.SqlGeneration.Row
 open SqlParser.Types
 open Util
 
-let sqlExpr = Migrate.SqlGeneration.Expr.sqlExpr (fun _ -> "")
+let sqlExpr = Expr.sqlExpr (fun _ -> "")
 
-let rowToSetEqual (columns: string list) (row: Expr list) =
-  List.zip row columns |> sepComma (fun (r, c) -> $"{c}={sqlExpr r}")
+let rowToSetEqual (colValues: (string * Expr) list) =
+  colValues |> sepComma (fun (c, v) -> $"{c} = {sqlExpr v}")
 
-let sqlUpdateRow (i: InsertInto) (row: Expr list) =
-  assert (row.Length >= 2 && i.columns.Length = row.Length)
+let rowToPred (colValues: (string * Expr) list) =
+  colValues
+  |> List.map (fun (c, v) -> $"{c} = {sqlExpr v}")
+  |> String.concat " AND "
 
-  let idCol, restCols = i.columns.Head, i.columns.Tail
-  let set = rowToSetEqual restCols row.Tail
-  [ $"UPDATE {i.table} SET {set} WHERE {idCol}={sqlExpr row.Head}" ]
+let sqlUpdateRow (ins: InsertInto) (keyIndexes: int list) (row: Expr list) =
+  let nonKeyIndexes =
+    [ 0 .. ins.columns.Length - 1 ]
+    |> List.filter (fun i -> not (keyIndexes |> List.contains i))
 
-let sqlDeleteRow (i: InsertInto) (row: Expr list) =
-  assert (row.Length >= 2 && i.columns.Length = row.Length)
-  let idCol = i.columns.Head
-  [ $"DELETE FROM {i.table} WHERE {idCol}={sqlExpr row.Head}" ]
+  let keyCols = keyIndexes |> List.map (fun i -> ins.columns[i], row[i])
+  let nonKeyCols = nonKeyIndexes |> List.map (fun i -> ins.columns[i], row[i])
+  let set = rowToSetEqual nonKeyCols
+  let rowMatch = rowToPred keyCols
+  [ $"UPDATE {ins.table} SET {set} WHERE {rowMatch}" ]
+
+let sqlDeleteRow (ins: InsertInto) (keyIndexes: int list) (row: Expr list) =
+  let keyCols = keyIndexes |> List.map (fun i -> ins.columns[i], row[i]) |> rowToPred
+  [ $"DELETE FROM {ins.table} WHERE {keyCols}" ]
 
 let sqlInsertRow (i: InsertInto) (row: Expr list) =
   assert (i.columns.Length = row.Length)
   let values = row |> sepComma sqlExpr
-  [ $"INSERT INTO {i.table}{i.columns} VALUES {values}" ]
+  let cols = i.columns |> sepComma id
+  [ $"INSERT INTO {i.table}({cols}) VALUES ({values})" ]

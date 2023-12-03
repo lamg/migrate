@@ -14,6 +14,7 @@
 
 module internal Migrate.Calculation.Solver
 
+open Migrate
 open Migrate.Types
 open SqlParser.Types
 open Migrate.SqlGeneration
@@ -110,13 +111,13 @@ let createDeleteUpdate
   drops @ creates @ renames
 
 let createTable (xs: CreateTable list) (ys: CreateTable list) =
-  createDelete xs ys (fun x -> x.name) Table.sqlDropTable Table.sqlCreateTable
+  createDelete xs ys (_.name) Table.sqlDropTable Table.sqlCreateTable
 
 let createView (xs: CreateView list) (ys: CreateView list) =
-  createDelete xs ys (fun x -> x.name) View.sqlDropView View.sqlCreateView
+  createDelete xs ys (View.sqlCreateView >> Print.joinSqlPretty) View.sqlDropView View.sqlCreateView
 
 let createIndex (xs: CreateIndex list) (ys: CreateIndex list) =
-  createDelete xs ys (fun x -> x.table) Index.sqlDropIndex Index.sqlCreateIndex
+  createDelete xs ys (_.table) Index.sqlDropIndex Index.sqlCreateIndex
 
 let columns (views: CreateView list) (table: CreateTable) (xs: ColumnDef list) (ys: ColumnDef list) =
   let keySel (x: ColumnDef) =
@@ -137,16 +138,26 @@ let constraints (views: CreateView list) (right: CreateTable) (xs: ColumnConstra
 
   createDelete xs ys keySel constraintSolution constraintSolution
 
-let insertInto (keys: Expr list -> Expr list) (left: InsertInto) (right: InsertInto) =
+let insertInto (keyIndexes: int list) (left: InsertInto) (right: InsertInto) =
   let sqlExpr = Expr.sqlExpr (fun _ -> "")
 
-  let keySel xs =
-    keys xs |> List.map sqlExpr |> String.concat ", "
+  let keySel (xs: Expr list) =
+    keyIndexes
+    |> List.map (fun i -> xs[i])
+    |> List.map sqlExpr
+    |> String.concat ", "
 
   let toUpdate (leftRow: Expr list) (rightRow: Expr list) =
     if List.map sqlExpr leftRow <> List.map sqlExpr rightRow then
-      Some(Row.sqlUpdateRow right rightRow)
+      Some(Row.sqlUpdateRow right keyIndexes rightRow)
     else
       None
 
-  createDeleteUpdate left.values right.values keySel keySel (Row.sqlDeleteRow right) (Row.sqlInsertRow right) toUpdate
+  createDeleteUpdate
+    left.values
+    right.values
+    keySel
+    keySel
+    (Row.sqlDeleteRow right keyIndexes)
+    (Row.sqlInsertRow right)
+    toUpdate

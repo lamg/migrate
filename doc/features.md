@@ -14,7 +14,7 @@ version_remarks = "project initialization"
 schema_version = "0.0.1
 db_file = "database_path_env_var"
 files = ["profile.sql"]
-sync = ["watched_profile"]
+table_sync = ["watched_profile"]
 
 ```
 

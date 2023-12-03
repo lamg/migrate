@@ -67,7 +67,7 @@ let migrateStep (p: Project) : ProposalResult list option =
             error = Some e }))
   with
   | FailedQuery e ->
-    Print.printError e
+    Print.printQueryErr e
     None
   | e ->
     Print.printRed $"got error\n{e.Message}"

@@ -16,24 +16,13 @@ module internal Migrate.Calculation.Migration
 
 open Migrate.Types
 open SqlParser.Types
+open TableSync
 
 let tablesMigration (dbSchema: SqlFile) (p: Project) =
   Solver.createTable dbSchema.tables p.source.tables
 
 let viewsMigration (dbSchema: SqlFile) (p: Project) =
   Solver.createView dbSchema.views p.source.views
-
-let zipHomologous (xs: 'a list) (ys: 'a list) (key: 'a -> string) (value: 'a -> 'b) =
-  let keyValues = List.map (fun x -> key x, value x) >> Map.ofList
-  let left = xs |> keyValues
-  let right = ys |> keyValues
-  let setLeft = left.Keys |> Set.ofSeq
-  let setRight = right.Keys |> Set.ofSeq
-  let common = Set.intersect setLeft setRight
-  common |> Set.map (fun k -> k, left[k], right[k]) |> Set.toList
-
-let findTable (schema: SqlFile) table =
-  schema.tables |> List.find (fun t -> t.name = table)
 
 let columnsMigration (dbSchema: SqlFile) (p: Project) =
   let homologousColumns =
@@ -49,47 +38,6 @@ let constraintsMigration (dbSchema: SqlFile) (p: Project) =
 
   homologousConstraints
   |> List.map (fun (table, left, right) -> Solver.constraints dbSchema.views (findTable p.source table) left right)
-  |> List.concat
-
-let findPrimaryKey (t: CreateTable) =
-  let colConstraint =
-    t.columns
-    |> List.mapi (fun i c -> i, c)
-    |> List.tryFind (fun (_, c) ->
-      c.constraints
-      |> List.exists (function
-        | PrimaryKey _ -> true
-        | _ -> false))
-
-  match colConstraint with
-  | Some(i, _) -> fun (xs: Expr list) -> [ xs[i] ]
-  | None ->
-    let kss =
-      t.constraints
-      |> List.choose (function
-        | PrimaryKeyCols xs -> Some xs
-        | _ -> None)
-
-    match kss with
-    | [] -> TableShouldHavePrimaryKey t.name |> raise
-    | [ ks ] ->
-      let keyIndexes =
-        ks |> List.map (fun k -> t.columns |> List.findIndex (fun c -> c.name = k))
-
-      fun (xs: Expr list) -> keyIndexes |> List.map (fun i -> xs.[i])
-    | _ -> TableShouldHaveSinglePrimaryKey t.name |> raise
-
-
-let insertsMigration (dbSchema: SqlFile) (p: Project) =
-  let key (i: InsertInto) = i.table
-  let value = id
-  let homologousInserts = zipHomologous dbSchema.inserts p.source.inserts key value
-
-  homologousInserts
-  |> List.map (fun (_, left, right) ->
-    let primaryKey = findTable p.source left.table |> findPrimaryKey
-
-    Solver.insertInto primaryKey left right)
   |> List.concat
 
 let migration (dbSchema: SqlFile) (p: Project) =

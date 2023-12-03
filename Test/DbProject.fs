@@ -29,7 +29,7 @@ db_file = "db"
 
 files = ["file0.sql", "file1.sql"]
 
-sync = ["query"]
+table_sync = ["query"]
 
 [[report]]
 src = "source_relation"
@@ -42,7 +42,7 @@ schema_version = "0.0.1"
 version_remarks = "project initialization"
 files = ["file0.sql", "file1.sql"]
 
-sync = ["query"]
+table_sync = ["query"]
 
 [[report]]
 src = "source_relation"

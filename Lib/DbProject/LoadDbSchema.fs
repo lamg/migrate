@@ -21,18 +21,10 @@ open Migrate.DbUtil
 open SqlParser.Types
 open Dapper.FSharp.SQLite
 
-let rowReader (c: CreateTable) (rd: IDataReader) =
-  c.columns
-  |> List.mapi (fun i c ->
-    match c with
-    | { ``type`` = SqlText } -> rd.GetString i |> String
-    | { ``type`` = SqlInteger } -> rd.GetInt32 i |> Integer)
-
-let tableValues (conn: SqliteConnection) (ct: CreateTable) =
-  let cols = ct.columns |> List.map (fun c -> c.name)
+let relationValues (conn: SqliteConnection) (relation: string) (cols: string list) (readRow: IDataReader -> Expr list) =
   let joinedCols = cols |> Migrate.SqlGeneration.Util.sepComma id
 
-  let query = $"SELECT {joinedCols} FROM {ct.name}"
+  let query = $"SELECT {joinedCols} FROM {relation}"
   let c = conn.CreateCommand()
   c.CommandText <- query
   let rd = c.ExecuteReader()
@@ -41,14 +33,36 @@ let tableValues (conn: SqliteConnection) (ct: CreateTable) =
   let vss =
     seq {
       while rd.Read() do
-        let vs = rowReader ct rd
+        let vs = readRow rd
         yield vs
     }
     |> Seq.toList
 
-  { table = ct.name
+  { table = relation
     columns = cols
     values = vss }
+
+let rowReader (xs: SqlType list) (rd: IDataReader) =
+  xs
+  |> List.mapi (fun i c ->
+    match c with
+    | SqlText -> rd.GetString i |> String
+    | SqlInteger -> rd.GetInt32 i |> Integer)
+
+let tableValues (conn: SqliteConnection) (ct: CreateTable) =
+  let cols = ct.columns |> List.map _.name
+  let types = ct.columns |> List.map _.``type``
+  let readRow = rowReader types
+
+  try
+    relationValues conn ct.name cols readRow
+  with :? SqliteException as e ->
+    if e.Message.Contains "no such table" then
+      { table = ct.name
+        columns = cols
+        values = [] }
+    else
+      raise e
 
 let searchTable (f: SqlFile) (name: string) =
   f.tables |> List.tryFind (fun t -> t.name = name)

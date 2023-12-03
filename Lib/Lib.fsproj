@@ -34,16 +34,18 @@
         <Compile Include="DbProject/InitProject.fs"/>
         <Compile Include="DbProject\LoadDbSchema.fs"/>
         <Compile Include="Calculation\Solver.fs"/>
+        <Compile Include="Calculation\TableSync.fs"/>
         <Compile Include="Calculation\Migration.fs"/>
         <Compile Include="Execution\MigrationStore.fs"/>
         <Compile Include="Execution\MigrationPrint.fs"/>
         <Compile Include="Execution\Commit.fs"/>
-        <Compile Include="Execution\Report.fs"/>
+        <EmbeddedResource Include="Execution/store_schema.sql"/>
         <Compile Include="Checks\Algorithms.fs"/>
         <Compile Include="Checks\TypeChecker.fs"/>
-        <Compile Include="Checks\RelationsSummary.fs"/>
+        <Compile Include="Reports\Report.fs"/>
+        <Compile Include="Reports\RelationsSummary.fs"/>
+        <Compile Include="Reports\Export.fs"/>
         <Compile Include="Cli.fs"/>
-        <EmbeddedResource Include="Execution/store_schema.sql"/>
     </ItemGroup>
     <ItemGroup>
         <PackageReference Include="Dapper.FSharp" Version="4.7.0"/>
