@@ -18,7 +18,7 @@ open Xunit
 open Migrate
 open Types
 open DbUtil
-open Migrate.Execution.Report
+open Migrate.Reports.Report
 open SqlParser.Types
 open Dapper.FSharp.SQLite
 
@@ -84,7 +84,7 @@ let reportTest () =
 
   syncReportsConn p conn
 
-  let reportValues = Execution.Report.getReportValues p
+  let reportValues = getReportValues p
 
   let reportTable = p.source.tables.Head
   let cols = reportTable.columns

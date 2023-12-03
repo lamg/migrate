@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module internal Migrate.Checks.RelationsSummary
+module internal Migrate.Reports.RelationsSummary
 
 open Migrate
 open Types
@@ -30,8 +30,8 @@ let colsToString: ColumnType list -> string =
   >> String.concat ", "
 
 let formatRelations =
-  TypeChecker.checkTypes
-  >> List.groupBy (fun c -> c.table)
+  Checks.TypeChecker.checkTypes
+  >> List.groupBy _.table
   >> List.map (fun (table, cols) -> $"{table} ({colsToString cols})")
   >> String.concat "\n"
 

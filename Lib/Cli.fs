@@ -15,6 +15,7 @@
 module Migrate.Cli
 
 open System.IO
+open Migrate.Reports
 open Migrate.Types
 
 let openConn = DbUtil.openConn
@@ -42,6 +43,9 @@ let commit p =
   | StaleMigration xs ->
     Print.printRed $"Stale migration {xs}"
     1
+  | ExpectingEnvVar x ->
+    Print.printError $"Expecting environment variable {x}"
+    1
 
 /// <summary>
 /// Performs a manual migration. Fails if the resulting database schema
@@ -66,6 +70,9 @@ let manualMigration p =
     1
   | StaleMigration xs ->
     Print.printRed $"Stale migration {xs}"
+    1
+  | ExpectingEnvVar x ->
+    Print.printError $"Expecting environment variable {x}"
     1
 
 /// <summary>
@@ -101,6 +108,9 @@ let status p =
     1
   | StaleMigration xs ->
     Print.printRed $"Stale migration {xs}"
+    1
+  | ExpectingEnvVar x ->
+    Print.printError $"Expecting environment variable {x}"
     1
 
 /// <summary>
@@ -186,7 +196,7 @@ let logDetailed p (commitHash: string) =
 /// <param name="p">Project</param>
 let showReports p =
   try
-    Execution.Report.showReports p
+    Report.showReports p
     0
   with FailedOpenDb e ->
     $"No database found:\n{e}" |> Print.printRed
@@ -197,7 +207,7 @@ let showReports p =
 /// </summary>
 let syncReports p =
   try
-    Execution.Report.syncReports p
+    Report.syncReports p
     0
   with FailedOpenDb e ->
     $"Failed to open database {e.dbFile}: {e.msg}" |> Print.printRed
@@ -233,7 +243,7 @@ let initProject () =
 
 let printDbRelations (p: Project) =
   try
-    let summary = Checks.RelationsSummary.databaseRelations p
+    let summary = RelationsSummary.databaseRelations p
     Print.printYellow "relations"
     printfn $"{summary}"
     0
@@ -253,7 +263,7 @@ let printDbRelations (p: Project) =
 
 let printProjectRelations (p: Project) =
   try
-    let summary = Checks.RelationsSummary.projectRelations p
+    let summary = RelationsSummary.projectRelations p
     Print.printYellow "relations"
     printfn $"{summary}"
     0
@@ -278,4 +288,13 @@ let printProjectRelations (p: Project) =
     1
   | MalformedProject e ->
     $"Malformed project: {e}" |> Print.printRed
+    1
+
+let exportRelation (p: Project) (relation: string) =
+  match Export.exportRelation p relation with
+  | Some sql ->
+    printfn $"{sql}"
+    0
+  | None ->
+    Print.printError $"relation {relation} not found"
     1

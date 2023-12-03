@@ -29,6 +29,7 @@ type MigArgs =
   | [<CliPrefix(CliPrefix.None)>] Status of ParseResults<StatusArgs>
   | [<CliPrefix(CliPrefix.None)>] DbSchema of ParseResults<DumpSchemaArgs>
   | [<CliPrefix(CliPrefix.None)>] Relations of ParseResults<RelationsArgs>
+  | [<CliPrefix(CliPrefix.None)>] Export of ParseResults<ExportArgs>
 
   interface IArgParserTemplate with
     member s.Usage =
@@ -42,6 +43,7 @@ type MigArgs =
       | Status _ -> "show the differences between the current database schema and the schema in source files"
       | DbSchema _ -> "shows the current schema in the DB"
       | Relations _ -> "shows the relations (tables + views) type signatures in the database or project"
+      | Export _ -> "exports the content of a relation as an insert statement"
 
 and VersionArgs =
   | [<NoCommandLine>] Dummy
@@ -110,6 +112,14 @@ and ReportArgs =
       | SyncReports -> "synchronize reports"
       | ShowReports -> "show reports"
 
+and ExportArgs =
+  | [<AltCommandLine("-r")>] Relation of string
+
+  interface IArgParserTemplate with
+    member s.Usage =
+      match s with
+      | Relation _ -> "relation name"
+
 let showLog (p: Project) (args: ParseResults<LogArgs>) =
   match args.TryGetResult CommitHash, args.TryGetResult Last, args.TryGetResult LastShort with
   | Some hash, _, _ -> Cli.logDetailed p hash
@@ -162,6 +172,13 @@ let relations (p: Project) (args: ParseResults<RelationsArgs>) =
     Print.printRed "unrecognized relations command"
     1
 
+let exportRelation (p: Project) (args: ParseResults<ExportArgs>) =
+  match args.TryGetResult Relation with
+  | Some relName -> Cli.exportRelation p relName
+  | None ->
+    Print.printRed "unrecognized export command"
+    1
+
 [<EntryPoint>]
 let main args =
   dotenv.net.DotEnv.Load()
@@ -204,6 +221,7 @@ let main args =
       | Some(Version _) ->
         Assembly.GetExecutingAssembly().GetName().Version.ToString() |> printfn "%s"
         0
+      | Some(Export args) -> exportRelation p args
       | None ->
         Print.printRed "no command given"
         1

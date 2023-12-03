@@ -28,6 +28,6 @@ let topologicalSort reference xs =
     | Some node ->
       result <- node :: result
       graph <- graph |> Map.remove node
-    | None -> failwith "El gráfico tiene al menos un ciclo"
+    | None -> failwith "The graph has a cycle"
 
   result
