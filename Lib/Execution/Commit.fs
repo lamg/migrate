@@ -194,9 +194,15 @@ let dryMigration (p: Project) =
 
   let tempProject = { p with dbFile = tempFile }
 
-  match shouldMigrate p with
-  | vs when vs.shouldMigrate ->
-    match migrateDb tempProject with
-    | [] -> nothingToMigrate vs
-    | steps -> MigrationPrint.printMigrationIntent steps
-  | vs -> nothingToMigrate vs
+  let vs = shouldMigrate p
+
+  match migrateDb tempProject with
+  | [] -> nothingToMigrate vs
+  | steps ->
+    if not vs.shouldMigrate then
+      Print.printYellow $"Have in mind since the project and database versions ({vs.projectVersion}) are the same,"
+      Print.printYellow "the steps won't be executed. If you want to execute them,"
+      Print.printYellow "please increase the project version in the file db.toml"
+      printfn ""
+
+    MigrationPrint.printMigrationIntent steps
