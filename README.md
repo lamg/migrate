@@ -6,6 +6,19 @@ Migrate is a tool for migrating databases in a declarative way. It can be used f
 
 Run `dotnet tool install --global migtool`
 
+## Quickstart
+
+```sh
+mkdir my_database_project
+cd my_database_project
+mig init
+# generated project files with example definitions
+mig status
+# output shows migration for existing definitions
+mig commit
+# executes migration
+```
+
 ## Usage
 
 See [usage](doc/usage.md)
