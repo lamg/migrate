@@ -17,6 +17,8 @@ mig status
 # output shows migration for existing definitions
 mig commit
 # executes migration
+mig log -s
+# output shows migration metadata and a summary of executed steps
 ```
 
 ## Usage
