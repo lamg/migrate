@@ -133,9 +133,12 @@ let withSelectReferences (v: WithSelect) =
   ws @ selectReferences v.select
 
 let viewReferences (xs: CreateView list) (x: CreateView) =
-  x.select
-  |> withSelectReferences
-  |> List.choose (fun v -> xs |> List.tryFind (fun u -> u.name = v))
+  x.selectUnion
+  |> List.map (fun s ->
+    s
+    |> withSelectReferences
+    |> List.choose (fun v -> xs |> List.tryFind (fun u -> u.name = v)))
+  |> List.concat
 
 let checkTypes (f: SqlFile) =
   let xs = baseTypes f.tables
@@ -144,9 +147,11 @@ let checkTypes (f: SqlFile) =
   |> Algorithms.topologicalSort (viewReferences f.views)
   |> List.fold
     (fun acc v ->
-      let nacc =
-        generalSelectSignature acc v.select
-        |> List.zip v.select.select.columns
+      let select = v.selectUnion.Head
+
+      let acc' =
+        generalSelectSignature acc select
+        |> List.zip select.select.columns
         |> List.map (fun (e, ``type``) ->
           { table = v.name
             column =
@@ -156,5 +161,5 @@ let checkTypes (f: SqlFile) =
               | e -> failwith $"invalid expression {e} in select"
             sqlType = ``type`` })
 
-      acc @ nacc)
+      acc @ acc')
     xs

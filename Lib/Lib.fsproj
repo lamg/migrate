@@ -50,7 +50,7 @@
     <ItemGroup>
         <PackageReference Include="Dapper.FSharp" Version="4.7.0"/>
         <PackageReference Include="MBW.Utilities.ManagedSqlite.Sql" Version="0.11.0"/>
-        <PackageReference Include="MigrateLib.SqlParser" Version="0.0.4"/>
+        <PackageReference Include="MigrateLib.SqlParser" Version="0.0.5"/>
         <PackageReference Include="SQLitePCLRaw.core" Version="2.1.6"/>
         <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0"/>
         <PackageReference Include="Nuget.Versioning" Version="6.7.0"/>

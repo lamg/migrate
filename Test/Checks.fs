@@ -21,21 +21,21 @@ open Migrate.Types
 
 let view0 =
   { name = "view0"
-    select =
-      { withAliases = []
-        select =
-          { columns = [ Column { qualifier = None; ``member`` = "id" } ]
-            distinct = false
-            from =
-              [ Table
-                  { qualifier = None
-                    ``member`` = "table0" } ]
-            where = None
-            groupBy = []
-            orderBy = None
-            having = None
-            limit = None
-            offset = None } } }
+    selectUnion =
+      [ { withAliases = []
+          select =
+            { columns = [ Column { qualifier = None; ``member`` = "id" } ]
+              distinct = false
+              from =
+                [ Table
+                    { qualifier = None
+                      ``member`` = "table0" } ]
+              where = None
+              groupBy = []
+              orderBy = None
+              having = None
+              limit = None
+              offset = None } } ] }
 
 let table0 =
   { name = "table0"

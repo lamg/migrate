@@ -18,6 +18,9 @@ open SqlParser.Types
 open WithSelect
 
 let sqlCreateView (view: CreateView) =
-  [ $"CREATE VIEW {view.name} AS\n{sqlWithSelect view.select}" ]
+  let joinUnion =
+    view.selectUnion |> List.map sqlWithSelect |> String.concat "\nUNION\n"
+
+  [ $"CREATE VIEW {view.name} AS\n{joinUnion}" ]
 
 let sqlDropView (view: CreateView) = [ $"DROP VIEW {view.name}" ]

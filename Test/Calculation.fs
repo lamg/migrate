@@ -58,21 +58,21 @@ let schemaWithView (viewName: string) =
   { emptySchema with
       views =
         [ { name = viewName
-            select =
-              { withAliases = []
-                select =
-                  { columns = []
-                    distinct = false
-                    from =
-                      [ Table
-                          { qualifier = None
-                            ``member`` = "table0" } ]
-                    where = None
-                    groupBy = []
-                    having = None
-                    orderBy = None
-                    limit = None
-                    offset = None } } } ] }
+            selectUnion =
+              [ { withAliases = []
+                  select =
+                    { columns = []
+                      distinct = false
+                      from =
+                        [ Table
+                            { qualifier = None
+                              ``member`` = "table0" } ]
+                      where = None
+                      groupBy = []
+                      having = None
+                      orderBy = None
+                      limit = None
+                      offset = None } } ] } ] }
 
 let schemaWithTwoCols =
   { emptySchema with
@@ -168,9 +168,9 @@ let addView () =
 
   let expected: list<SolverProposal> option =
     Some
-      [ { reason = Removed sqlView0
+      [ { reason = Removed "view0"
           statements = [ "DROP VIEW view0" ] }
-        { reason = Added sqlView1
+        { reason = Added "view1"
           statements = [ "CREATE VIEW view1 AS\nSELECT * FROM table0" ] } ]
 
   Assert.Equal(expected, r)
@@ -188,7 +188,7 @@ let removeView () =
 
   let expected: list<SolverProposal> option =
     Some
-      [ { reason = Removed sqlView
+      [ { reason = Removed "view0"
           statements = [ "DROP VIEW view0" ] } ]
 
   Assert.Equal(expected, r)
@@ -212,9 +212,9 @@ let renameView () =
 
   let expected: list<SolverProposal> option =
     Some
-      [ { reason = Removed sqlView0
+      [ { reason = Removed "view0"
           statements = [ "DROP VIEW view0" ] }
-        { reason = Added sqlView1
+        { reason = Added "view1"
           statements = [ "CREATE VIEW view1 AS\nSELECT * FROM table0" ] } ]
 
   Assert.Equal(expected, r)

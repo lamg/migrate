@@ -54,6 +54,7 @@ let intersect (r: 'a SetResult) =
 let createDelete
   (xs: 'a list)
   (ys: 'a list)
+  (nameSel: 'a -> string)
   (keySel: 'a -> string)
   (sqlDelete: 'a -> string list)
   (sqlCreate: 'a -> string list)
@@ -64,13 +65,13 @@ let createDelete
   let drops: list<SolverProposal> =
     removes
     |> List.map (fun r ->
-      { reason = Removed(keySel r)
+      { reason = Removed(nameSel r)
         statements = sqlDelete r })
 
   let creates: list<SolverProposal> =
     adds
     |> List.map (fun r ->
-      { reason = Added(keySel r)
+      { reason = Added(nameSel r)
         statements = sqlCreate r })
 
   drops @ creates
@@ -111,13 +112,13 @@ let createDeleteUpdate
   drops @ creates @ renames
 
 let createTable (xs: CreateTable list) (ys: CreateTable list) =
-  createDelete xs ys (_.name) Table.sqlDropTable Table.sqlCreateTable
+  createDelete xs ys (_.name) (_.name) Table.sqlDropTable Table.sqlCreateTable
 
 let createView (xs: CreateView list) (ys: CreateView list) =
-  createDelete xs ys (View.sqlCreateView >> Print.joinSqlPretty) View.sqlDropView View.sqlCreateView
+  createDelete xs ys (_.name) (View.sqlCreateView >> Print.joinSqlPretty) View.sqlDropView View.sqlCreateView
 
 let createIndex (xs: CreateIndex list) (ys: CreateIndex list) =
-  createDelete xs ys (_.table) Index.sqlDropIndex Index.sqlCreateIndex
+  createDelete xs ys (_.table) (fun i -> $"{i.table} ON {i.column}") Index.sqlDropIndex Index.sqlCreateIndex
 
 let columns (views: CreateView list) (table: CreateTable) (xs: ColumnDef list) (ys: ColumnDef list) =
   let keySel (x: ColumnDef) =
@@ -136,7 +137,7 @@ let constraints (views: CreateView list) (right: CreateTable) (xs: ColumnConstra
   let keySel = Migrate.SqlGeneration.Table.sqlConstraint
   let constraintSolution _ = Table.sqlRecreateTable views right
 
-  createDelete xs ys keySel constraintSolution constraintSolution
+  createDelete xs ys keySel keySel constraintSolution constraintSolution
 
 let insertInto (keyIndexes: int list) (left: InsertInto) (right: InsertInto) =
   let sqlExpr = Expr.sqlExpr (fun _ -> "")

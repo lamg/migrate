@@ -64,10 +64,11 @@ let dropDependentViews (views: CreateView list) (table: string) =
       | Alias { expr = Table t } -> t.``member`` = table
       | _ -> false)
 
+  let dependentViewsWithAliases (s: WithSelect) =
+    s.withAliases |> List.exists (fun s -> dependentViews s.select)
+
   views
-  |> List.filter (fun v ->
-    dependentViews v.select.select
-    || v.select.withAliases |> List.exists (fun s -> dependentViews s.select))
+  |> List.filter (fun v -> v.selectUnion |> List.exists dependentViewsWithAliases)
   |> List.map (fun v -> $"DROP VIEW IF EXISTS {v.name}")
 
 let sqlRecreateTable (views: CreateView list) (table: CreateTable) =
