@@ -142,11 +142,16 @@ let constraints (views: CreateView list) (right: CreateTable) (xs: ColumnConstra
 let insertInto (keyIndexes: int list) (left: InsertInto) (right: InsertInto) =
   let sqlExpr = Expr.sqlExpr (fun _ -> "")
 
-  let keySel (xs: Expr list) =
-    keyIndexes
-    |> List.map (fun i -> xs[i])
-    |> List.map sqlExpr
-    |> String.concat ", "
+  let selectExpr (indexes: int list) (xs: Expr list) =
+    indexes |> List.map (fun i -> xs[i]) |> List.map sqlExpr |> String.concat ", "
+
+  let nonKeyIndexes =
+    [ 0 .. left.columns.Length - 1 ]
+    |> List.filter (fun i -> not (List.contains i keyIndexes))
+
+  let changeSel = selectExpr nonKeyIndexes
+
+  let keySel = selectExpr keyIndexes
 
   let toUpdate (leftRow: Expr list) (rightRow: Expr list) =
     if List.map sqlExpr leftRow <> List.map sqlExpr rightRow then
@@ -157,7 +162,7 @@ let insertInto (keyIndexes: int list) (left: InsertInto) (right: InsertInto) =
   createDeleteUpdate
     left.values
     right.values
-    keySel
+    changeSel
     keySel
     (Row.sqlDeleteRow right keyIndexes)
     (Row.sqlInsertRow right)
