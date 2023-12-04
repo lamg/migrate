@@ -218,3 +218,17 @@ let funcCoalesce () =
   cases
   |> List.iteri (fun i ->
     parseStatementTest $"funcCoalesce-{i}" (SqlParser.Scalar.columnOrFunc SqlParser.Select.withSelect))
+
+[<Fact>]
+let unionSelect () =
+  let emptyWith = { withAliases = []; select = empty }
+
+  let cases =
+    [ "select * from t0 union select * from t1",
+      [ { emptyWith with
+            select.from = [ table "t0" ] }
+        { emptyWith with
+            select.from = [ table "t1" ] } ] ]
+
+  cases
+  |> List.iteri (fun i -> parseStatementTest $"unionSelect-{i}" SqlParser.Select.unionSelect)

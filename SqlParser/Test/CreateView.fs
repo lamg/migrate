@@ -34,9 +34,9 @@ let createView () =
   let cases =
     [ "VIEW v AS SELECT * FROM t",
       { name = "v"
-        select =
-          { withAliases = []
-            select = { empty with from = [ table "t" ] } } } ]
+        selectUnion =
+          [ { withAliases = []
+              select = { empty with from = [ table "t" ] } } ] } ]
 
   cases
   |> List.iteri (fun i -> parseStatementTest $"createView-{i}" SqlParser.CreateView.view)

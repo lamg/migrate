@@ -42,9 +42,9 @@ let statement () =
               constraints = [] } ]
         views =
           [ { name = "v0"
-              select =
-                { withAliases = []
-                  select = { empty with from = [ table "t0" ] } } } ]
+              selectUnion =
+                [ { withAliases = []
+                    select = { empty with from = [ table "t0" ] } } ] } ]
         inserts = []
         indexes = [] } ]
 

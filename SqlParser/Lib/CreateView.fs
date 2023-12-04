@@ -25,6 +25,6 @@ let view =
     do! keyword K.View
     let! name = ident
     do! keyword K.As
-    let! select = Select.withSelect
-    return { name = name; select = select }
+    let! select = Select.unionSelect
+    return { name = name; selectUnion = select }
   }

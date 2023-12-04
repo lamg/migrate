@@ -190,8 +190,8 @@ let composite (xs: K.Keyword list) =
 let clauseEnd =
   symbolWitness S.Semicolon
   <|> (eof >>. preturn S.Semicolon)
-  <|> (followedBy (symbol S.CPar) >>. preturn S.Semicolon)
-
+  <|> (followedByL (symbol S.CPar) "( symbol" >>. preturn S.Semicolon)
+  <|> (followedByL (keyword K.Union) "UNION keyword" >>. preturn S.Semicolon)
 
 let followedByKeyword =
   followedBy (
@@ -202,6 +202,7 @@ let followedByKeyword =
     <|> keyword K.Having
     <|> keyword K.Limit
     <|> keyword K.Offset
+    <|> keyword K.Union
   )
 
 let headlessOrderBy =

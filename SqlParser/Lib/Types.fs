@@ -90,7 +90,9 @@ and Expr =
   | JoinOn of JoinOn
   | EnvVar of Var
 
-type CreateView = { name: string; select: WithSelect }
+type CreateView =
+  { name: string
+    selectUnion: WithSelect list }
 
 type InsertInto =
   { table: string

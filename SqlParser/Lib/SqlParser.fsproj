@@ -7,7 +7,7 @@
         <RootNamespace>Migrate.SqlParser</RootNamespace>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <PackageOutputPath>./nupkg</PackageOutputPath>
-        <Version>0.0.4</Version>
+        <Version>0.0.5</Version>
         <Authors>Luis Ángel Méndez Gort</Authors>
         <PackageReadmeFile>README.md</PackageReadmeFile>
         <Title>SQL parser for Migrate</Title>

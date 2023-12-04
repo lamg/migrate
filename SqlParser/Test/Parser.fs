@@ -127,48 +127,48 @@ let parseText1 () =
 
     let view0 =
       { name = "view0"
-        select =
-          { withAliases = []
-            select =
-              { empty with
-                  columns = [ Alias { expr = col "id"; alias = "x" } ]
-                  from = [ table "t0" ]
-                  limit = Some 100 } } }
+        selectUnion =
+          [ { withAliases = []
+              select =
+                { empty with
+                    columns = [ Alias { expr = col "id"; alias = "x" } ]
+                    from = [ table "t0" ]
+                    limit = Some 100 } } ] }
 
     let view1 =
       { name = "view1"
-        select =
-          { withAliases = []
-            select =
-              { empty with
-                  columns = [ col "id" ]
-                  from = [ table "t1" ]
-                  where =
-                    Some(
-                      sand
-                        (Not(
-                          In
-                            { left = col "id"
-                              right =
-                                SubQuery
-                                  { withAliases = []
-                                    select =
-                                      { empty with
-                                          columns = [ col "id" ]
-                                          from = [ table "t2" ] } } }
-                        ))
-                        (Not(
-                          In
-                            { left = col "id"
-                              right =
-                                SubQuery
-                                  { withAliases = []
-                                    select =
-                                      { empty with
-                                          columns = [ col "id" ]
-                                          from = [ table "t3" ] } } }
-                        ))
-                    ) } } }
+        selectUnion =
+          [ { withAliases = []
+              select =
+                { empty with
+                    columns = [ col "id" ]
+                    from = [ table "t1" ]
+                    where =
+                      Some(
+                        sand
+                          (Not(
+                            In
+                              { left = col "id"
+                                right =
+                                  SubQuery
+                                    { withAliases = []
+                                      select =
+                                        { empty with
+                                            columns = [ col "id" ]
+                                            from = [ table "t2" ] } } }
+                          ))
+                          (Not(
+                            In
+                              { left = col "id"
+                                right =
+                                  SubQuery
+                                    { withAliases = []
+                                      select =
+                                        { empty with
+                                            columns = [ col "id" ]
+                                            from = [ table "t3" ] } } }
+                          ))
+                      ) } } ] }
 
     Assert.Equal<CreateView list>([ view0; view1 ], f.views)
   | Error e -> Assert.Fail e

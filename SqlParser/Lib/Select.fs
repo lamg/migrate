@@ -232,3 +232,5 @@ let rec withSelect =
     return { withAliases = xs; select = s }
   }
   <|> parse { return! selectQuery withSelect }
+
+let unionSelect = sepBy withSelect (keyword K.Union)
