@@ -8,7 +8,7 @@ If you just want to test the tool without installing [.Net][0],
 then you can use a Docker image:
 
 ```sh
-docker run -it 'mcr.microsoft.com/dotnet/sdk:8.0' bash
+docker run -it 'mcr.microsoft.com/dotnet/nightly/sdk:8.0' bash
 ```
 
 Inside the container run:
