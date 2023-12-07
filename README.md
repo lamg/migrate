@@ -4,7 +4,24 @@ Migrate is a tool for migrating databases in a declarative way. It can be used f
 
 ## Installation
 
-Run `dotnet tool install --global migtool`
+If you just want to test the tool without installing [.Net][0],
+then you can use a Docker image:
+
+```sh
+docker run -it 'mcr.microsoft.com/dotnet/sdk:8.0' bash
+```
+
+Inside the container run:
+
+```sh
+export PATH="$PATH:/root/.dotnet/tools"
+```
+
+After having [.Net][0] in your system you can run
+
+```sh
+dotnet tool install --global migtool
+```
 
 ## Quickstart
 
