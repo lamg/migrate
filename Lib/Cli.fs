@@ -48,6 +48,34 @@ let commit p =
     1
 
 /// <summary>
+/// Executes a migration
+/// </summary>
+let commitAmend p =
+  try
+    Execution.Commit.commitAmend p
+    0
+  with
+  | FailedOpenDb e ->
+    $"Failed to open database {e.dbFile}: {e.msg}" |> Print.printRed
+    1
+  | FailedParse e ->
+    Print.printRed e
+    1
+  | FailedQuery e ->
+    Print.printRed $"executing: {e.sql}\ngot error: {e.error}"
+    1
+  | FailedOpenStore e ->
+    Print.printRed e
+    1
+  | StaleMigration xs ->
+    Print.printRed $"Stale migration {xs}"
+    1
+  | ExpectingEnvVar x ->
+    Print.printError $"Expecting environment variable {x}"
+    1
+
+
+/// <summary>
 /// Performs a manual migration. Fails if the resulting database schema
 /// differs from the one in the source files.
 /// </summary>
@@ -118,6 +146,8 @@ let status p =
 /// </summary>
 let dumpDbSchema (p: Project) =
   DbProject.LoadDbSchema.rawDbSchema p |> Print.colorizeSql
+
+let dumpDbSchemaNoColor (p: Project) = DbProject.LoadDbSchema.rawDbSchema p
 
 /// <summary>
 /// Shows the detailed steps of the last migration

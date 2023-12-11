@@ -62,14 +62,12 @@ and RelationsArgs =
       | Project -> "Print type signatures of relations (tables + views) in project"
 
 and DumpSchemaArgs =
-  | [<AltCommandLine("-f")>] DbFile of string
-  | [<AltCommandLine("-o")>] Output of string
+  | [<AltCommandLine("-n")>] NoColor
 
   interface IArgParserTemplate with
     member s.Usage =
       match s with
-      | DbFile _ -> "get the schema of a specific database file"
-      | Output _ -> "output file"
+      | NoColor -> "get SQL without terminal colors"
 
 and StatusArgs =
   | [<NoCommandLine>] Dummy
@@ -80,9 +78,13 @@ and StatusArgs =
 
 and CommitArgs =
   | [<AltCommandLine("-m")>] Manual
+  | [<AltCommandLine("-a")>] Amend
 
   interface IArgParserTemplate with
-    member _.Usage = "introduce a manual migration using standard input"
+    member s.Usage =
+      match s with
+      | Manual -> "introduce a manual migration using standard input"
+      | Amend -> "amend last commit"
 
 and LogArgs =
   | [<AltCommandLine("-c")>] CommitHash of string
@@ -136,9 +138,10 @@ let syncReports (p: Project) (args: ParseResults<ReportArgs>) =
     1
 
 let commit (p: Project) (args: ParseResults<CommitArgs>) =
-  match args.TryGetResult Manual with
-  | Some _ -> Cli.manualMigration p
-  | None -> Cli.commit p
+  match args.TryGetResult Manual, args.TryGetResult Amend with
+  | Some _, _ -> Cli.manualMigration p
+  | _, Some _ -> Cli.commitAmend p
+  | _ -> Cli.commit p
 
 let pullDb (p: Project) =
   let doPull scriptPath =
@@ -160,8 +163,11 @@ let pullDb (p: Project) =
     Print.printRed "no pull script configured"
     1
 
-let dumpSchema (p: Project) =
-  printfn $"{Cli.dumpDbSchema p}"
+let dumpSchema (p: Project) (args: ParseResults<DumpSchemaArgs>) =
+  match args.TryGetResult NoColor with
+  | Some _ -> printfn $"{Cli.dumpDbSchemaNoColor p}"
+  | None -> printfn $"{Cli.dumpDbSchema p}"
+
   0
 
 let relations (p: Project) (args: ParseResults<RelationsArgs>) =
@@ -210,7 +216,7 @@ let main args =
       let p = Cli.loadProject ()
 
       match command with
-      | Some(DbSchema _) -> dumpSchema p
+      | Some(DbSchema flags) -> dumpSchema p flags
       | Some(Commit flags) -> commit p flags
       | Some(Log flags) -> showLog p flags
       | Some(Pull _) -> pullDb p

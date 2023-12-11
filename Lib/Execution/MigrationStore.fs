@@ -14,6 +14,7 @@
 
 module internal Migrate.MigrationStore
 
+open System.Text.RegularExpressions
 open Migrate.DbProject
 open Migrate.Types
 open System
@@ -103,7 +104,6 @@ let openStore (p: Project) =
     |> raise
 
 let hashSteps (p: Project) (m: MigrationIntent) =
-  let migrationDate = nowStr ()
 
   let sql =
     let dbFileSteps =
@@ -119,7 +119,7 @@ let hashSteps (p: Project) (m: MigrationIntent) =
     $"-- database: {p.dbFile}\n{dbFileSteps}\n"
 
   let sqlWithDate =
-    $"-- version_remarks: {m.versionRemarks}\n-- migration_date: {migrationDate}\n--version: {m.schemaVersion}\n{sql}"
+    $"-- version_remarks: {m.versionRemarks}\n-- migration_date: {m.date}\n--version: {m.schemaVersion}\n{sql}"
 
   let hasher = SHA256.Create()
 
@@ -141,42 +141,42 @@ let selectLastId (conn: SqliteConnection) =
 
   seq {
     while rd.Read() do
-      yield rd.GetInt32 0
+      yield rd.GetInt64 0
   }
   |> Seq.head
 
-let insertNewMigration conn hash versionRemarks dbFile schemaVersion =
+let insertNewMigration conn hash dbFile (intent: MigrationIntent) =
   insert {
     into newMigrationTable
 
     value
       { hash = hash
-        versionRemarks = versionRemarks
-        date = nowStr ()
+        versionRemarks = intent.versionRemarks
+        date = intent.date
         dbFile = dbFile
-        schemaVersion = schemaVersion }
+        schemaVersion = intent.schemaVersion }
   }
   |> insertSync conn
 
   let lastInsertedId = selectLastId conn
   lastInsertedId
 
-let insertSteps conn (migrationId: int) (m: MigrationIntent) =
+let insertSteps conn (migrationId: int64) (startIndex: int64) (steps: ProposalResult list) =
   insert {
     into stepTable
 
     values (
-      m.steps
+      steps
       |> List.mapi (fun i s ->
         { migrationId = migrationId
-          stepIndex = i
+          stepIndex = int64 i + startIndex
           reason = s.reason.ToString()
           sql = s.statements |> joinSqlPretty })
     )
   }
   |> insertSync conn
 
-  m.steps
+  steps
   |> List.iteri (fun i s ->
     s.error
     |> Option.iter (fun e ->
@@ -185,7 +185,7 @@ let insertSteps conn (migrationId: int) (m: MigrationIntent) =
 
         value
           { migrationId = migrationId
-            stepIndex = i
+            stepIndex = int64 i + startIndex
             error = e }
       }
       |> conn.InsertAsync
@@ -202,10 +202,9 @@ let storeMigration (p: Project) (m: MigrationIntent) =
 
   match m.steps with
   | _ :: _ ->
-    let migrationId =
-      insertNewMigration conn hash m.versionRemarks p.dbFile m.schemaVersion
+    let migrationId = insertNewMigration conn hash p.dbFile m
 
-    insertSteps conn migrationId m
+    insertSteps conn migrationId 0 m.steps
   | [] -> failwith "empty migration reached storeMigration, it should be a non-empty one"
 
 /// <summary>
@@ -263,3 +262,49 @@ let getMigrations (p: Project) =
         steps = stepLogs |> Seq.toList }
 
     migrationLog)
+
+let parseReason r =
+  let added = Regex "Added \"(\\w+)\""
+  let removed = Regex "Removed \"(\\w+)\""
+  let changed = Regex "Changed \(\"(\\w+)\",\\s+\"(\\w+)\"\)"
+  let ra = added.Match r
+  let rr = removed.Match r
+  let rc = changed.Match r
+
+  match ra.Success, rr.Success, rc.Success with
+  | true, _, _ -> Added ra.Groups.[1].Value
+  | _, true, _ -> Removed rr.Groups.[1].Value
+  | _, _, true -> Changed(rc.Groups.[1].Value, rc.Groups.[2].Value)
+  | _ -> failwith $"failed to parse reason while amending last migration: {r}"
+
+let appendLastMigration (p: Project) (m: MigrationLog) (xs: ProposalResult list) =
+  use conn = openStore p
+  let startIndex = int64 m.steps.Length
+
+  let ys =
+    m.steps
+    |> List.map (fun s ->
+      { reason = parseReason s.reason
+        error = s.error
+        statements = [ s.sql ] })
+
+  let intent =
+    { versionRemarks = m.migration.versionRemarks
+      steps = ys @ xs
+      schemaVersion = m.migration.schemaVersion
+      date = nowStr () }
+
+  let hash = hashSteps p intent
+  insertSteps conn m.migration.id startIndex xs
+  let migrationId = m.migration.id
+
+  update {
+    for n in migrationTable do
+      setColumn n.hash hash
+      setColumn n.date intent.date
+      where (n.id = migrationId)
+  }
+  |> conn.UpdateAsync
+  |> Async.AwaitTask
+  |> Async.RunSynchronously
+  |> ignore

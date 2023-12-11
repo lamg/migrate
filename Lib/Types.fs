@@ -86,7 +86,8 @@ type ProposalResult =
 type MigrationIntent =
   { versionRemarks: string
     steps: ProposalResult list
-    schemaVersion: string }
+    schemaVersion: string
+    date: string }
 
 type Migration =
   { hash: string

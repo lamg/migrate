@@ -96,3 +96,12 @@ let getMigrationsTest () =
     removeFile p0.dbFile
     e.StackTrace.ToString() |> printfn "%s"
     Assert.Fail e.Message
+
+[<Fact>]
+let parseReasonTest () =
+  let cases = [ Added "x"; Removed "y"; Changed("x", "y") ]
+
+  cases
+  |> List.iter (fun c ->
+    let r = c.ToString() |> MigrationStore.parseReason
+    Assert.Equal(c, r))

@@ -155,6 +155,7 @@ let execManualMigration (p: Project) (sql: string) =
         let m =
           { versionRemarks = p.versionRemarks
             schemaVersion = p.schemaVersion
+            date = Print.nowStr ()
             steps =
               [ { reason = Added "Manual migration"
                   statements = [ sql ]
@@ -184,8 +185,18 @@ let migrateAndCommit (p: Project) =
         p
         { steps = steps
           versionRemarks = p.versionRemarks
-          schemaVersion = p.schemaVersion }
+          schemaVersion = p.schemaVersion
+          date = Print.nowStr () }
   | vs -> nothingToMigrate vs
+
+let commitAmend (p: Project) =
+  let m = MigrationStore.getMigrations p |> List.tryHead
+
+  match m with
+  | Some v ->
+    let steps = migrateDb p
+    MigrationStore.appendLastMigration p v steps
+  | None -> Print.errPrint "No migrations to amend"
 
 let dryMigration (p: Project) =
   let schema = Migrate.DbProject.LoadDbSchema.dbSchema p
