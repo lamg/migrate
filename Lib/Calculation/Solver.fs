@@ -115,7 +115,7 @@ let createTable (xs: CreateTable list) (ys: CreateTable list) =
   createDelete xs ys (_.name) (_.name) Table.sqlDropTable Table.sqlCreateTable
 
 let createView (xs: CreateView list) (ys: CreateView list) =
-  createDelete xs ys (_.name) (View.sqlCreateView >> Print.joinSqlPretty) View.sqlDropView View.sqlCreateView
+  createDelete xs ys (_.name) (View.sqlCreateView >> DbUtil.joinSqlPretty) View.sqlDropView View.sqlCreateView
 
 let createIndex (xs: CreateIndex list) (ys: CreateIndex list) =
   createDelete xs ys (_.table) (fun i -> $"{i.table} ON {i.column}") Index.sqlDropIndex Index.sqlCreateIndex

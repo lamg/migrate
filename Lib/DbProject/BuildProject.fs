@@ -38,7 +38,7 @@ let mergeTomlSql (p: DbTomlFile) (src: SqlFile) =
     src.inserts
     |> List.map (fun ins ->
       let vss =
-        ins.values |> List.map (fun vs -> vs |> List.map Migrate.Print.literalWithEnv)
+        ins.values |> List.map (fun vs -> vs |> List.map Migrate.DbUtil.literalWithEnv)
 
       { ins with values = vss })
 

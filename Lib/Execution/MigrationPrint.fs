@@ -55,5 +55,5 @@ let printMigrationIntent (steps: ProposalResult list) =
     printGreen $"step {i}"
     printYellowIntro $"reason" $"{step.reason}"
 
-    let sql = step.statements |> joinSqlPretty
+    let sql = step.statements |> DbUtil.joinSqlPretty
     formatStep i sql step.error)

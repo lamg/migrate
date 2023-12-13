@@ -14,9 +14,14 @@
 
 module internal Migrate.DbUtil
 
-open Microsoft.Data.Sqlite
-open Types
 open System.IO
+open System.Text.RegularExpressions
+open System.Reflection
+open Microsoft.Data.Sqlite
+
+open Types
+open SqlParser.Types
+open Print
 
 let openConn (dbFile: string) =
   let createFile (dbFile: string) =
@@ -66,3 +71,48 @@ let runSqlTx (conn: SqliteConnection) (commands: string list) =
   with :? SqliteException as e ->
     tx.Rollback()
     Error e.Message
+
+let joinSql (xs: string list) =
+  xs |> String.concat ";\n" |> (fun s -> $"{s};")
+
+let joinSqlPretty xs =
+  xs |> List.map (SqlPrettify.SqlPrettify.Pretty >> _.TrimEnd()) |> joinSql
+
+let colorizeSql sql =
+  let keywordPattern =
+    @"\b(SELECT|FROM|WHERE|GROUP BY|ORDER BY|CREATE|VIEW|TABLE|UNIQUE|PRIMARY KEY|INDEX|AS|WITH|NOT|NULL|AND|OR|LIMIT|OFFSET|ON|LIKE|IN|EXISTS|COALESCE|FOREIGN KEY|REFERENCES)\b"
+
+  let matchEvaluator (m: Match) =
+    let ansiGreen = "\x1b[32m"
+    let ansiReset = "\x1b[0m"
+    $"%s{ansiGreen}%s{m.Value}%s{ansiReset}"
+
+  Regex.Replace(sql, keywordPattern, matchEvaluator, RegexOptions.IgnoreCase)
+
+let literalWithEnv =
+  function
+  | EnvVar { ``member`` = v } ->
+    match getEnv v with
+    | Some r -> String r
+    | None -> ExpectingEnvVar v |> raise
+  | x -> x
+
+let printQueryErr (e: QueryError) =
+  printYellow "running:"
+  printfn $"{e.sql}"
+  printYellow "got error"
+  printRed $"{e.error}"
+
+let printResources (asm: Assembly) =
+  asm.GetManifestResourceNames() |> Array.iter (printfn "RESOURCE: %s")
+
+let loadFromRes (asm: Assembly) (namespaceForResx: string) (file: string) =
+  let namespaceDotFile = $"{namespaceForResx}.{file}"
+
+  try
+    use stream = asm.GetManifestResourceStream namespaceDotFile
+    use file = new StreamReader(stream)
+    (namespaceDotFile, file.ReadToEnd())
+  with ex ->
+    FailedLoadResFile $"failed loading resource file {namespaceDotFile}: {ex.Message}"
+    |> raise

@@ -35,10 +35,7 @@ let replicateInDb (schema: SqlFile) (dbFile: string) =
   let indexes = schema.indexes |> List.map Index.sqlCreateIndex
 
   let sql =
-    [ tables; views; inserts; indexes ]
-    |> List.concat
-    |> List.concat
-    |> Print.joinSql
+    [ tables; views; inserts; indexes ] |> List.concat |> List.concat |> joinSql
 
   use conn = openConn dbFile
   runSql conn sql
@@ -67,7 +64,7 @@ let migrateStep (p: Project) : ProposalResult list option =
             error = Some e }))
   with
   | FailedQuery e ->
-    Print.printQueryErr e
+    printQueryErr e
     None
   | e ->
     Print.printRed $"got error\n{e.Message}"
@@ -194,8 +191,11 @@ let commitAmend (p: Project) =
 
   match m with
   | Some v ->
-    let steps = migrateDb p
-    MigrationStore.appendLastMigration p v steps
+    let vs = shouldMigrate p
+
+    match migrateDb p with
+    | [] -> nothingToMigrate vs
+    | steps -> MigrationStore.appendLastMigration p v steps
   | None -> Print.errPrint "No migrations to amend"
 
 let dryMigration (p: Project) =
@@ -213,7 +213,8 @@ let dryMigration (p: Project) =
     if not vs.shouldMigrate then
       Print.printYellow $"Have in mind since the project and database versions ({vs.projectVersion}) are the same,"
       Print.printYellow "the steps won't be executed. If you want to execute them,"
-      Print.printYellow "please increase the project version in the file db.toml"
+      Print.printYellow "please increase the project version in the file db.toml."
+      Print.printYellow "Otherwise you can use the command `mig commit -a` to amend the last migration"
       printfn ""
 
     MigrationPrint.printMigrationIntent steps

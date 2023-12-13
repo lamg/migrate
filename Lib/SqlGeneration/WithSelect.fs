@@ -1,4 +1,4 @@
-module Migrate.SqlGeneration.WithSelect
+module internal Migrate.SqlGeneration.WithSelect
 
 open Migrate.SqlParser.Types
 open Util

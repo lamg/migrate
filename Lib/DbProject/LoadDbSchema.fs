@@ -99,8 +99,7 @@ let dbSchemaList (p: Project) =
     | { sql = sql } when hasNoSubstr sql [ "sqlite_sequence"; migrateTablePrefix ] -> Some sql
     | _ -> None)
 
-let rawDbSchema (p: Project) =
-  dbSchemaList p |> Migrate.Print.joinSqlPretty
+let rawDbSchema (p: Project) = dbSchemaList p |> joinSqlPretty
 
 let dbSchema (p: Project) =
   let empty =
@@ -117,7 +116,7 @@ let dbSchema (p: Project) =
       | [] -> empty
       | xs ->
         xs
-        |> Migrate.Print.joinSql
+        |> joinSql
         |> Parser.parseSql p.dbFile
         |> function
           | Ok f -> f
@@ -142,7 +141,7 @@ let migrationSchema (p: Project) =
     | [] -> None
     | xs ->
       xs
-      |> Migrate.Print.joinSql
+      |> joinSql
       |> Parser.parseSql p.dbFile
       |> function
         | Ok f -> Some f

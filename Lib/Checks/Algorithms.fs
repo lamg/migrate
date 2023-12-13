@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module Migrate.Checks.Algorithms
+module internal Migrate.Checks.Algorithms
 
 let topologicalSort reference xs =
   let mutable graph = xs |> List.map (fun x -> (x, reference x)) |> Map.ofList

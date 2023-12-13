@@ -1,4 +1,4 @@
-module Migrate.SqlGeneration.Expr
+module internal Migrate.SqlGeneration.Expr
 
 open Migrate.SqlGeneration
 open Migrate.SqlParser.Types

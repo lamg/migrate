@@ -20,7 +20,6 @@ open Migrate.Types
 open Migrate.DbProject.ParseDbToml
 open Migrate.DbProject.BuildProject
 
-
 let loadProjectFiles (basePath: string) (p: DbTomlFile) =
   let reader (file: string) =
     use f = new StreamReader(Path.Combine(basePath, file))
@@ -29,16 +28,18 @@ let loadProjectFiles (basePath: string) (p: DbTomlFile) =
   buildProject reader p
 
 let loadProjectFromRes (asm: Assembly) =
-  let loadFile = Migrate.Print.loadFromRes asm
+  let loadFile = Migrate.DbUtil.loadFromRes asm
   let baseName = asm.GetName().Name
   let _, dbToml = loadFile baseName projectFileName
   let src = parseDbTomlFile dbToml
 
   buildProject (loadFile baseName) src
 
+let loadProjectAt (path: string) =
+  let dbToml = Path.Combine(path, projectFileName)
+  let src = parseDbTomlFile dbToml
+  src |> loadProjectFiles path
+
 let loadProject () =
   let currDir = System.Environment.CurrentDirectory
-  let projFilePath = Path.Combine(currDir, projectFileName)
-
-  let src = parseDbTomlFile projFilePath
-  src |> loadProjectFiles currDir
+  loadProjectAt currDir

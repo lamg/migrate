@@ -36,7 +36,7 @@ let exportTable (p: Project) (table: CreateTable) =
 
   LoadDbSchema.tableValues conn table
   |> SqlGeneration.InsertInto.sqlInsertInto
-  |> Print.joinSqlPretty
+  |> joinSqlPretty
 
 let exportView (p: Project) (view: string) =
   let cols = viewColumns p view
@@ -46,7 +46,7 @@ let exportView (p: Project) (view: string) =
 
   LoadDbSchema.relationValues conn view colNames rd
   |> SqlGeneration.InsertInto.sqlInsertInto
-  |> Print.joinSqlPretty
+  |> joinSqlPretty
 
 let exportRelation (p: Project) (relation: string) =
   findRelation p relation

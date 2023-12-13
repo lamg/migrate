@@ -39,4 +39,4 @@ let databaseRelations (p: Project) =
   DbProject.LoadDbSchema.dbSchema p |> formatRelations
 
 let projectRelations (p: Project) =
-  p.source |> formatRelations |> Print.colorizeSql
+  p.source |> formatRelations |> DbUtil.colorizeSql

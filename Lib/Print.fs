@@ -15,16 +15,12 @@
 module Migrate.Print
 
 open System
-open System.Reflection
-open System.IO
-open System.Text.RegularExpressions
-open Migrate.Types
-open SqlParser.Types
 
 let nowStr _ =
   DateTimeOffset.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fffK")
 
-let nowUnix = DateTimeOffset(DateTime.UtcNow).ToUnixTimeMilliseconds
+let nowUnix () =
+  DateTimeOffset(DateTime.UtcNow).ToUnixTimeMilliseconds()
 
 let printColor (print: string -> unit) color s =
   let original = Console.ForegroundColor
@@ -35,13 +31,19 @@ let printColor (print: string -> unit) color s =
 let stdPrint x = printfn $"{x}"
 let errPrint x = eprintfn $"{x}"
 
-let printError = printColor errPrint ConsoleColor.Red
-let printGreen = printColor stdPrint ConsoleColor.Green
-let printRed = printColor stdPrint ConsoleColor.Red
-let printYellow = printColor stdPrint ConsoleColor.Yellow
-let printBlue = printColor stdPrint ConsoleColor.Blue
+let printError s = printColor errPrint ConsoleColor.Red s
 
-let printDebug = printRed
+let printGreen s =
+  printColor stdPrint ConsoleColor.Green s
+
+let printRed s = printColor stdPrint ConsoleColor.Red s
+
+let printYellow s =
+  printColor stdPrint ConsoleColor.Yellow s
+
+let printBlue s = printColor stdPrint ConsoleColor.Blue s
+
+let printDebug s = printRed s
 
 let printYellowIntro intro text =
   printColor (printf "%s: ") ConsoleColor.Yellow intro
@@ -50,47 +52,5 @@ let printYellowIntro intro text =
 let getEnv v =
   v |> Environment.GetEnvironmentVariable |> Option.ofObj
 
-let printResources (asm: Assembly) =
-  asm.GetManifestResourceNames() |> Array.iter (printfn "RESOURCE: %s")
-
-let loadFromRes (asm: Assembly) (namespaceForResx: string) (file: string) =
-  let namespaceDotFile = $"{namespaceForResx}.{file}"
-
-  try
-    use stream = asm.GetManifestResourceStream namespaceDotFile
-    use file = new StreamReader(stream)
-    (namespaceDotFile, file.ReadToEnd())
-  with ex ->
-    FailedLoadResFile $"failed loading resource file {namespaceDotFile}: {ex.Message}"
-    |> raise
-
-let literalWithEnv =
-  function
-  | EnvVar { ``member`` = v } ->
-    match getEnv v with
-    | Some r -> String r
-    | None -> ExpectingEnvVar v |> raise
-  | x -> x
-
-let printQueryErr (e: QueryError) =
-  printYellow "running:"
-  printfn $"{e.sql}"
-  printYellow "got error"
-  printRed $"{e.error}"
-
-let joinSql (xs: string list) =
-  xs |> String.concat ";\n" |> (fun s -> $"{s};")
-
-let joinSqlPretty xs =
-  xs |> List.map (SqlPrettify.SqlPrettify.Pretty >> _.TrimEnd()) |> joinSql
-
-let colorizeSql sql =
-  let keywordPattern =
-    @"\b(SELECT|FROM|WHERE|GROUP BY|ORDER BY|CREATE|VIEW|TABLE|UNIQUE|PRIMARY KEY|INDEX|AS|WITH|NOT|NULL|AND|OR|LIMIT|OFFSET|ON|LIKE|IN|EXISTS|COALESCE|FOREIGN KEY|REFERENCES)\b"
-
-  let matchEvaluator (m: Match) =
-    let ansiGreen = "\x1b[32m"
-    let ansiReset = "\x1b[0m"
-    sprintf "%s%s%s" ansiGreen m.Value ansiReset
-
-  Regex.Replace(sql, keywordPattern, matchEvaluator, RegexOptions.IgnoreCase)
+let setEnv v value =
+  Environment.SetEnvironmentVariable(v, value)

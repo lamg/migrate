@@ -145,7 +145,7 @@ let status p =
 /// Shows the current database schema
 /// </summary>
 let dumpDbSchema (p: Project) =
-  DbProject.LoadDbSchema.rawDbSchema p |> Print.colorizeSql
+  DbProject.LoadDbSchema.rawDbSchema p |> DbUtil.colorizeSql
 
 let dumpDbSchemaNoColor (p: Project) = DbProject.LoadDbSchema.rawDbSchema p
 
@@ -247,14 +247,20 @@ let syncReports p =
 /// Loads a project from the file system
 /// Raises MalformedProject in case of failure
 /// </summary>
-let loadProject = Migrate.DbProject.LoadProjectFiles.loadProject
-let loadProjectFromRes = Migrate.DbProject.LoadProjectFiles.loadProjectFromRes
+let loadProject () =
+  Migrate.DbProject.LoadProjectFiles.loadProject ()
+
+let loadProjectFromRes asm =
+  Migrate.DbProject.LoadProjectFiles.loadProjectFromRes asm
+
+let loadProjectAt dir =
+  Migrate.DbProject.LoadProjectFiles.loadProjectAt dir
 
 /// <summary>
 /// Loads a file from the resources embedded in the assembly
 /// Raises FailedLoadingResFile in case of failure
 /// </summary>
-let loadFromRes = Print.loadFromRes
+let loadFromRes = DbUtil.loadFromRes
 
 /// <summary>
 /// Initializes a project in the current directory
