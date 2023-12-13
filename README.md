@@ -1,5 +1,8 @@
 # Migrate
 
+[![NuGet][nuget-shield]][nuget]
+![Tests][tests]
+
 Migrate is a tool for migrating databases in a declarative way. It can be used from the command line or as a library.
 
 ## Installation
@@ -56,4 +59,10 @@ See [contributing_guideline](doc/contributing_guideline.md)
 
 [0]: https://dotnet.microsoft.com/en-us/download/dotnet/8.0
 
-[1]: https://www.apache.org/licenses/LICENSE-2.0 
+[1]: https://www.apache.org/licenses/LICENSE-2.0
+
+[nuget]: https://www.nuget.org/packages/migtool
+
+[nuget-shield]: https://img.shields.io/nuget/dt/migtool.svg?style=flat
+
+[tests]: https://github.com/lamg/migrate/workflows/tests/badge.svg

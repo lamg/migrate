@@ -1,4 +1,4 @@
-name: Run Solutions
+name: tests
 
 on:
   push:
