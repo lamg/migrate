@@ -15,7 +15,7 @@
 module Checks
 
 open Xunit
-open SqlParser.Types
+open Migrate.SqlParser.Types
 open Migrate.Checks.TypeChecker
 open Migrate.Types
 

@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module SqlGenerationTest
+module Migrate.SqlParser.CreateView
 
-open Xunit
-open Migrate.SqlParser.Types
+open FParsec.Primitives
+open Basic
+open Types
 
-[<Fact>]
-let SqlInsertIntoTest () =
-  let i =
-    { table = "table0"
-      columns = [ "col0"; "col1" ]
-      values = [] }
+module K = Keyword
 
-  let xs = Migrate.SqlGeneration.InsertInto.sqlInsertInto i
-  Assert.Equal(0, xs.Length)
+let view =
+  parse {
+    do! keyword K.View
+    let! name = ident
+    do! keyword K.As
+    let! select = Select.unionSelect
+    return { name = name; selectUnion = select }
+  }

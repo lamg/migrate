@@ -1,6 +1,6 @@
 module Migrate.SqlGeneration.WithSelect
 
-open SqlParser.Types
+open Migrate.SqlParser.Types
 open Util
 open Migrate.SqlGeneration.Expr
 

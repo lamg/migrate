@@ -15,7 +15,7 @@
 module DbProject
 
 open Migrate.Types
-open SqlParser.Types
+open Migrate.SqlParser.Types
 open Migrate.DbProject.ParseDbToml
 open Migrate.DbProject.BuildProject
 open Xunit

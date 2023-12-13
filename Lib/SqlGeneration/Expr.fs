@@ -1,7 +1,7 @@
 module Migrate.SqlGeneration.Expr
 
 open Migrate.SqlGeneration
-open SqlParser.Types
+open Migrate.SqlParser.Types
 open Util
 
 let sqlExpr (sqlSubQuery: WithSelect -> string) (e: Expr) =

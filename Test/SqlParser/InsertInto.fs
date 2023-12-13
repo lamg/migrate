@@ -12,17 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module SqlGenerationTest
+module InsertInto
 
 open Xunit
 open Migrate.SqlParser.Types
+open Util
+
 
 [<Fact>]
-let SqlInsertIntoTest () =
-  let i =
-    { table = "table0"
-      columns = [ "col0"; "col1" ]
-      values = [] }
+let insertInto () =
+  let cases =
+    [ "INSERT INTO table0(id, age) VALUES (1, 2);",
+      { table = "table0"
+        columns = [ "id"; "age" ]
+        values = [ [ Integer 1; Integer 2 ] ] }
+      "INSERT INTO table0(id, age) VALUES(id, age);",
+      { table = "table0"
+        columns = [ "id"; "age" ]
+        values = [ [ envVar "id"; envVar "age" ] ] } ]
 
-  let xs = Migrate.SqlGeneration.InsertInto.sqlInsertInto i
-  Assert.Equal(0, xs.Length)
+  cases
+  |> List.iteri (fun i -> parseStatementTest $"insertInto-{i}" Migrate.SqlParser.InsertInto.insertInto)

@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module SqlGenerationTest
+module CreateIndex
 
 open Xunit
 open Migrate.SqlParser.Types
+open Util
 
 [<Fact>]
-let SqlInsertIntoTest () =
-  let i =
-    { table = "table0"
-      columns = [ "col0"; "col1" ]
-      values = [] }
+let createIndex () =
+  let cases =
+    [ "INDEX IF NOT EXISTS index0 ON table0(id);",
+      { name = "index0"
+        table = "table0"
+        column = "id" } ]
 
-  let xs = Migrate.SqlGeneration.InsertInto.sqlInsertInto i
-  Assert.Equal(0, xs.Length)
+  cases
+  |> List.iteri (fun i -> parseStatementTest $"createIndex-{i}" Migrate.SqlParser.CreateIndex.createIndex)

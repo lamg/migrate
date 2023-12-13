@@ -14,7 +14,7 @@
 
 module internal Migrate.SqlGeneration.Row
 
-open SqlParser.Types
+open Migrate.SqlParser.Types
 open Util
 
 let sqlExpr = Expr.sqlExpr (fun _ -> "")

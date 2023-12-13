@@ -18,7 +18,8 @@ open Migrate.Types
 open Microsoft.Data.Sqlite
 open System.Data
 open Migrate.DbUtil
-open SqlParser.Types
+open Migrate.SqlParser
+open Migrate.SqlParser.Types
 open Dapper.FSharp.SQLite
 
 let relationValues (conn: SqliteConnection) (relation: string) (cols: string list) (readRow: IDataReader -> Expr list) =
@@ -117,7 +118,7 @@ let dbSchema (p: Project) =
       | xs ->
         xs
         |> Migrate.Print.joinSql
-        |> SqlParser.Parser.parseSql p.dbFile
+        |> Parser.parseSql p.dbFile
         |> function
           | Ok f -> f
           | Error e -> FailedParse e |> raise
@@ -142,7 +143,7 @@ let migrationSchema (p: Project) =
     | xs ->
       xs
       |> Migrate.Print.joinSql
-      |> SqlParser.Parser.parseSql p.dbFile
+      |> Parser.parseSql p.dbFile
       |> function
         | Ok f -> Some f
         | Error e -> FailedParse $"Loading migration tables:\n{e}" |> raise

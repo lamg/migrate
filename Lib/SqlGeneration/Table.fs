@@ -14,7 +14,7 @@
 
 module internal Migrate.SqlGeneration.Table
 
-open SqlParser.Types
+open Migrate.SqlParser.Types
 open Migrate.SqlGeneration.Util
 open Migrate.SqlGeneration.Expr
 

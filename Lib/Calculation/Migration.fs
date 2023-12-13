@@ -15,7 +15,7 @@
 module internal Migrate.Calculation.Migration
 
 open Migrate.Types
-open SqlParser.Types
+open Migrate.SqlParser.Types
 open TableSync
 
 let tablesMigration (dbSchema: SqlFile) (p: Project) =

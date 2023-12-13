@@ -14,7 +14,7 @@
 
 module internal Migrate.SqlGeneration.View
 
-open SqlParser.Types
+open Migrate.SqlParser.Types
 open WithSelect
 
 let sqlCreateView (view: CreateView) =

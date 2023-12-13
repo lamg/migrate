@@ -14,7 +14,7 @@
 
 module Migrate.SqlGeneration.InsertInto
 
-open SqlParser.Types
+open Migrate.SqlParser.Types
 
 let sqlLiteral (e: Expr) =
   match e with

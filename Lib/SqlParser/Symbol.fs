@@ -12,17 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module SqlGenerationTest
+module Migrate.SqlParser.Symbol
 
-open Xunit
-open Migrate.SqlParser.Types
+type Symbol =
+  | Eq
+  | Semicolon
+  | Comma
+  | Dot
+  | OPar
+  | CPar
+  | DoubleQuote
+  | Asterisk
+  | Gt
+  | Lte
+  | Concat
+  | Composite of Keyword.Keyword list
 
-[<Fact>]
-let SqlInsertIntoTest () =
-  let i =
-    { table = "table0"
-      columns = [ "col0"; "col1" ]
-      values = [] }
-
-  let xs = Migrate.SqlGeneration.InsertInto.sqlInsertInto i
-  Assert.Equal(0, xs.Length)
+let string =
+  Map
+    [ Eq, "="
+      Semicolon, ";"
+      Comma, ","
+      Dot, "."
+      OPar, "("
+      CPar, ")"
+      DoubleQuote, "\""
+      Asterisk, "*"
+      Gt, ">"
+      Lte, "<="
+      Concat, "||" ]

@@ -9,7 +9,16 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <Compile Include="Util.fs"/>
+        <Compile Include="Util.fs" />
+        <Compile Include="SqlParser\Basic.fs"/>
+        <Compile Include="SqlParser\CreateIndex.fs"/>
+        <Compile Include="SqlParser\CreateTable.fs"/>
+        <Compile Include="SqlParser\CreateView.fs"/>
+        <Compile Include="SqlParser\InsertInto.fs"/>
+        <Compile Include="SqlParser\Parser.fs"/>
+        <Compile Include="SqlParser\Scalar.fs"/>
+        <Compile Include="SqlParser\Select.fs"/>
+        <Compile Include="SqlParser\Statements.fs"/>
         <Compile Include="DbProject.fs"/>
         <Compile Include="Calculation.fs"/>
         <Compile Include="Report.fs"/>
@@ -23,7 +32,6 @@
     <ItemGroup>
         <PackageReference Include="fsunit" Version="5.4.0"/>
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.6.0"/>
-        <PackageReference Include="MigrateLib.SqlParser" Version="0.0.5"/>
         <PackageReference Include="xunit" Version="2.4.2"/>
         <PackageReference Include="xunit.runner.visualstudio" Version="2.4.5">
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

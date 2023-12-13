@@ -12,17 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module SqlGenerationTest
+module Migrate.SqlParser.InsertInto
 
-open Xunit
-open Migrate.SqlParser.Types
+open FParsec.Primitives
+open Basic
+open Types
 
-[<Fact>]
-let SqlInsertIntoTest () =
-  let i =
-    { table = "table0"
-      columns = [ "col0"; "col1" ]
-      values = [] }
+module K = Keyword
+module S = Symbol
 
-  let xs = Migrate.SqlGeneration.InsertInto.sqlInsertInto i
-  Assert.Equal(0, xs.Length)
+let insertInto =
+
+  parse {
+    do! keyword K.Insert
+    do! keyword K.Into
+    let! tableName = ident
+    let! columns = sepBy1 ident (symbol S.Comma) |> parens
+    do! keyword K.Values
+
+    let row = sepBy1 Scalar.literal (symbol S.Comma) |> parens
+    let! values = sepBy1 row (symbol S.Comma)
+    do! symbol S.Semicolon
+
+    return
+      { table = tableName
+        columns = columns
+        values = values }
+  }

@@ -12,17 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module SqlGenerationTest
+module Migrate.SqlParser.CreateIndex
 
-open Xunit
-open Migrate.SqlParser.Types
+open FParsec.Primitives
+open Basic
+open Types
 
-[<Fact>]
-let SqlInsertIntoTest () =
-  let i =
-    { table = "table0"
-      columns = [ "col0"; "col1" ]
-      values = [] }
+module K = Keyword
+module S = Symbol
 
-  let xs = Migrate.SqlGeneration.InsertInto.sqlInsertInto i
-  Assert.Equal(0, xs.Length)
+let createIndex: Parser<CreateIndex, unit> =
+  parse {
+    do! keyword K.Index
+    let! _ = opt (keyword K.If >>. keyword K.Not >>. keyword K.Exists)
+    let! indexName = ident
+    do! keyword K.On
+    let! tableName = ident
+    let! column = ident |> parens
+    do! symbol S.Semicolon
+
+    return
+      { name = indexName
+        table = tableName
+        column = column }
+  }

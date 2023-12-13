@@ -14,7 +14,7 @@
 
 module internal Migrate.SqlGeneration.Util
 
-open SqlParser.Types
+open Migrate.SqlParser.Types
 
 let sepComma (f: 'a -> string) (xs: 'a list) = xs |> List.map f |> String.concat ", "
 

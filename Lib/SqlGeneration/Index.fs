@@ -14,7 +14,7 @@
 
 module internal Migrate.SqlGeneration.Index
 
-open SqlParser.Types
+open Migrate.SqlParser.Types
 
 let sqlCreateIndex (index: CreateIndex) =
   [ $"CREATE INDEX {index.name} ON {index.table}({index.column})" ]

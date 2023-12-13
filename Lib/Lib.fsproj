@@ -16,6 +16,18 @@
         <PackageOutputPath>./nupkg</PackageOutputPath>
     </PropertyGroup>
     <ItemGroup>
+        <Compile Include="SqlParser\Types.fs"/>
+        <Compile Include="SqlParser\Keyword.fs"/>
+        <Compile Include="SqlParser\Symbol.fs"/>
+        <Compile Include="SqlParser\Basic.fs"/>
+        <Compile Include="SqlParser\Scalar.fs"/>
+        <Compile Include="SqlParser\Select.fs"/>
+        <Compile Include="SqlParser\CreateIndex.fs"/>
+        <Compile Include="SqlParser\CreateTable.fs"/>
+        <Compile Include="SqlParser\CreateView.fs"/>
+        <Compile Include="SqlParser\InsertInto.fs"/>
+        <Compile Include="SqlParser\Statements.fs"/>
+        <Compile Include="SqlParser\Parser.fs"/>
         <Compile Include="Types.fs"/>
         <Compile Include="Print.fs"/>
         <Compile Include="DbUtil.fs"/>
@@ -49,8 +61,8 @@
     </ItemGroup>
     <ItemGroup>
         <PackageReference Include="Dapper.FSharp" Version="4.7.0"/>
+        <PackageReference Include="FParsec" Version="2.0.0-beta2"/>
         <PackageReference Include="MBW.Utilities.ManagedSqlite.Sql" Version="0.11.0"/>
-        <PackageReference Include="MigrateLib.SqlParser" Version="0.0.5"/>
         <PackageReference Include="SQLitePCLRaw.core" Version="2.1.6"/>
         <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0"/>
         <PackageReference Include="Nuget.Versioning" Version="6.7.0"/>
@@ -64,5 +76,6 @@
     </ItemGroup>
     <ItemGroup>
         <None Include="..\README.md" Pack="true" PackagePath="\"/>
+
     </ItemGroup>
 </Project>

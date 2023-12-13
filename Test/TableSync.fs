@@ -15,7 +15,7 @@
 module TableSync
 
 open Migrate.Types
-open SqlParser.Types
+open Migrate.SqlParser.Types
 open Xunit
 open Migrate.Calculation.TableSync
 

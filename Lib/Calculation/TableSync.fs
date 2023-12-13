@@ -15,7 +15,7 @@
 module internal Migrate.Calculation.TableSync
 
 open Migrate.Types
-open SqlParser.Types
+open Migrate.SqlParser.Types
 
 let findTable (schema: SqlFile) table =
   schema.tables |> List.find (fun t -> t.name = table)

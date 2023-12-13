@@ -12,17 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module SqlGenerationTest
+module CreateView
 
 open Xunit
 open Migrate.SqlParser.Types
+open Util
+
+let empty =
+  { columns = []
+    distinct = false
+    from = []
+    where = None
+    groupBy = []
+    having = None
+    orderBy = None
+    limit = None
+    offset = None }
 
 [<Fact>]
-let SqlInsertIntoTest () =
-  let i =
-    { table = "table0"
-      columns = [ "col0"; "col1" ]
-      values = [] }
+let createView () =
+  let cases =
+    [ "VIEW v AS SELECT * FROM t",
+      { name = "v"
+        selectUnion =
+          [ { withAliases = []
+              select = { empty with from = [ table "t" ] } } ] } ]
 
-  let xs = Migrate.SqlGeneration.InsertInto.sqlInsertInto i
-  Assert.Equal(0, xs.Length)
+  cases
+  |> List.iteri (fun i -> parseStatementTest $"createView-{i}" Migrate.SqlParser.CreateView.view)

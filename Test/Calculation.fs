@@ -16,7 +16,7 @@ module Migration
 
 open Migrate.Types
 open Migrate.Calculation.Migration
-open SqlParser.Types
+open Migrate.SqlParser.Types
 open Xunit
 
 let emptySchema =

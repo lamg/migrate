@@ -15,8 +15,7 @@
 module Migrate.DbProject.BuildProject
 
 open Migrate.Types
-open SqlParser
-open SqlParser.Types
+open Migrate.SqlParser.Types
 
 let collectSql (xs: SqlFile list) =
   let r =
@@ -53,7 +52,7 @@ let mergeTomlSql (p: DbTomlFile) (src: SqlFile) =
 
 let buildProject (reader: string -> string * string) (p: DbTomlFile) =
   let parse (file, sql) =
-    match Parser.parseSql file sql with
+    match Migrate.SqlParser.Parser.parseSql file sql with
     | Ok p -> p
     | Error e -> MalformedProject e |> raise
 
