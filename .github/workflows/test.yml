@@ -1,0 +1,19 @@
+name: Run Solutions
+
+on:
+  push:
+    paths:
+      - 'Lib/**'
+      - 'Test/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:8.0
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Run tests
+      run: dotnet test
