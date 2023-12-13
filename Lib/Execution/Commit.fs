@@ -21,9 +21,6 @@ open SqlParser.Types
 open Migrate.SqlGeneration
 open NuGet.Versioning
 
-[<Literal>]
-let stepsLimit = 20
-
 let replicateInDb (schema: SqlFile) (dbFile: string) =
 
   let tables = schema.tables |> List.map Table.sqlCreateTable
@@ -70,24 +67,29 @@ let migrateStep (p: Project) : ProposalResult list option =
     Print.printRed $"got error\n{e.Message}"
     None
 
+let printProgress (n: int) =
+  let prog = [| "/"; "-"; "\\"; "|" |]
+  let i = n % prog.Length
+  printf $"\r{prog[i]}"
+
 let migrateDb (p: Project) =
   let mutable stop = false
   let mutable steps = ResizeArray<ProposalResult>()
   let mutable last = []
+  let mutable i = 0
 
-  while not stop && steps.Count <> stepsLimit do
+  while not stop do
+    printProgress i
+    i <- i + 1
+
     match migrateStep p with
     | Some xs when steps.Count > 0 && xs = last -> StaleMigration xs |> raise
     | Some xs ->
       last <- xs
       xs |> List.iter steps.Add
-    | None -> stop <- true
-
-  if steps.Count = stepsLimit then
-    Print.printYellow (
-      $"Reached maximum steps {stepsLimit}."
-      + "You would need to rerun again to continue migration"
-    )
+    | None ->
+      printfn "\r"
+      stop <- true
 
   steps |> List.ofSeq
 

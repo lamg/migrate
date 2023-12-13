@@ -264,9 +264,10 @@ let getMigrations (p: Project) =
     migrationLog)
 
 let parseReason r =
-  let added = Regex "Added \"(\\w+)\""
-  let removed = Regex "Removed \"(\\w+)\""
-  let changed = Regex "Changed \(\"(\\w+)\",\\s+\"(\\w+)\"\)"
+  let elem = @""
+  let added = Regex @"Added ""(.*)"""
+  let removed = Regex @"Removed ""(.*)"""
+  let changed = Regex @"Changed \(""(.*)"",\s+""(.*)""\)"
   let ra = added.Match r
   let rr = removed.Match r
   let rc = changed.Match r
