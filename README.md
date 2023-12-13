@@ -63,6 +63,6 @@ See [contributing_guideline](doc/contributing_guideline.md)
 
 [nuget]: https://www.nuget.org/packages/migtool
 
-[nuget-shield]: https://img.shields.io/nuget/dt/migtool.svg?style=flat
+[nuget-shield]: https://buildstats.info/Nuget/migtool
 
 [tests]: https://github.com/lamg/migrate/workflows/tests/badge.svg
