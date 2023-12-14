@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module Migrate.DbProject.BuildProject
+module internal Migrate.DbProject.BuildProject
 
 open Migrate.Types
 open Migrate.SqlParser.Types

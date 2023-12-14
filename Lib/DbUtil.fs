@@ -56,22 +56,6 @@ let runSql (conn: SqliteConnection) (sql: string) =
   with :? SqliteException as e ->
     FailedQuery { sql = sql; error = e.Message } |> raise
 
-let runSqlTx (conn: SqliteConnection) (commands: string list) =
-  let tx = conn.BeginTransaction()
-
-  try
-    commands
-    |> List.iter (fun c ->
-      let x = conn.CreateCommand()
-      x.CommandText <- c
-      x.ExecuteNonQuery() |> ignore)
-
-    tx.Commit()
-    Ok()
-  with :? SqliteException as e ->
-    tx.Rollback()
-    Error e.Message
-
 let joinSql (xs: string list) =
   xs |> String.concat ";\n" |> (fun s -> $"{s};")
 

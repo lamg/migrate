@@ -59,7 +59,8 @@ let stepCalcTest () =
   Execution.Commit.replicateInDb schema0 p.dbFile
 
   let run () =
-    let r = Execution.Commit.migrateStep p
+    use conn = DbUtil.openConn p.dbFile
+    let r = Execution.Commit.migrateStep p conn
     removeFile "test.sqlite3"
     r
 
@@ -77,25 +78,20 @@ let runMigrationTest () =
 
 [<Fact>]
 let getMigrationsTest () =
-  let dbFile = emptyProject.dbFile
-  let tempDb = Execution.Commit.createTempDb emptyProject.source dbFile
+  let tempDb = Execution.Commit.createTempDb emptyProject.source emptyProject.dbFile
   let p0 = { emptyProject with dbFile = tempDb }
 
-  try
-    let p =
-      { p0 with
-          source = schema0
-          schemaVersion = "0.0.1" }
+  let p =
+    { p0 with
+        source = schema0
+        schemaVersion = "0.0.1" }
 
-    Execution.Commit.migrateAndCommit p
-    let xs = MigrationStore.getMigrations p
-    removeFile p0.dbFile
-    Assert.Equal(1, xs.Length)
-    Assert.Equal("empty project", xs.Head.migration.versionRemarks)
-  with e ->
-    removeFile p0.dbFile
-    e.StackTrace.ToString() |> printfn "%s"
-    Assert.Fail e.Message
+  Execution.Commit.migrateAndCommit p
+  use conn = DbUtil.openConn p.dbFile
+  let xs = MigrationStore.getMigrations conn
+  removeFile p0.dbFile
+  Assert.Equal(1, xs.Length)
+  Assert.Equal("empty project", xs.Head.migration.versionRemarks)
 
 [<Fact>]
 let parseReasonTest () =

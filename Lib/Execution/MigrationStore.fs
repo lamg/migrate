@@ -71,13 +71,15 @@ let stepTable = table'<Step> $"{LoadDbSchema.migrateTablePrefix}step"
 let errorTable = table'<Error> $"{LoadDbSchema.migrateTablePrefix}error"
 
 /// <summary>
-/// Opens the database storing the migrations (the store).
+/// Initializes tables storing migrations in the database
 /// Raises FailedOpenStore and FailedOpenDb
 /// In case the tables dedicated for storing migration metadata don't have
 /// the same schema as the one expected by the migration tool, it raises FailedOpenStore
 /// </summary>
-/// <param name="p"></param>
-let openStore (p: Project) =
+/// <param name="conn"></param>
+let initStore (conn: SqliteConnection) =
+  let dbFile = conn.DataSource
+
   let _, referenceStoreSchema =
     System.Reflection.Assembly.GetExecutingAssembly()
     |> fun asm ->
@@ -87,23 +89,20 @@ let openStore (p: Project) =
         FailedOpenStore e |> raise
 
   let refSchema =
-    match SqlParser.Parser.parseSql p.dbFile referenceStoreSchema with
+    match SqlParser.Parser.parseSql dbFile referenceStoreSchema with
     | Ok f -> f
     | Error e -> FailedOpenStore e |> raise
 
-  let storeSchema = LoadDbSchema.migrationSchema p
+  let storeSchema = LoadDbSchema.migrationSchema conn
 
   match storeSchema with
-  | None ->
-    let conn = openConn p.dbFile
-    runSql conn referenceStoreSchema
-    conn
-  | Some s when s = refSchema -> openConn p.dbFile
+  | None -> runSql conn referenceStoreSchema
+  | Some s when s = refSchema -> ()
   | Some s ->
-    FailedOpenStore $"store schema mismatch:\n{p.dbFile} has\n{s}\nwhile mig expects:\n{refSchema} "
+    FailedOpenStore $"store schema mismatch:\n{dbFile} has\n{s}\nwhile mig expects:\n{refSchema} "
     |> raise
 
-let hashSteps (p: Project) (m: MigrationIntent) =
+let hashSteps (dbFile: string) (m: MigrationIntent) =
 
   let sql =
     let dbFileSteps =
@@ -116,7 +115,7 @@ let hashSteps (p: Project) (m: MigrationIntent) =
         $"{head}\n{body}")
       |> String.concat "\n"
 
-    $"-- database: {p.dbFile}\n{dbFileSteps}\n"
+    $"-- database: {dbFile}\n{dbFileSteps}\n"
 
   let sqlWithDate =
     $"-- version_remarks: {m.versionRemarks}\n-- migration_date: {m.date}\n--version: {m.schemaVersion}\n{sql}"
@@ -196,13 +195,13 @@ let insertSteps conn (migrationId: int64) (startIndex: int64) (steps: ProposalRe
 /// <summary>
 /// When writeStore is true the migration is written to the store, otherwise is just printed to stdout
 /// </summary>
-let storeMigration (p: Project) (m: MigrationIntent) =
-  let hash = hashSteps p m
-  use conn = openStore p
+let storeMigration (conn: SqliteConnection) (m: MigrationIntent) =
+  let dbFile = conn.DataSource
+  let hash = hashSteps dbFile m
 
   match m.steps with
   | _ :: _ ->
-    let migrationId = insertNewMigration conn hash p.dbFile m
+    let migrationId = insertNewMigration conn hash dbFile m
 
     insertSteps conn migrationId 0 m.steps
   | [] -> failwith "empty migration reached storeMigration, it should be a non-empty one"
@@ -211,10 +210,8 @@ let storeMigration (p: Project) (m: MigrationIntent) =
 /// Returns the migrations in the store.
 /// Raises FailedOpenDb and FailedOpenStore
 /// </summary>
-/// <param name="p"></param>
-let getMigrations (p: Project) =
-  use conn = openStore p
-
+/// <param name="conn"></param>
+let getMigrations (conn: SqliteConnection) =
   let migrations =
     select {
       for m in migrationTable do
@@ -264,7 +261,6 @@ let getMigrations (p: Project) =
     migrationLog)
 
 let parseReason r =
-  let elem = @""
   let added = Regex @"Added ""(.*)"""
   let removed = Regex @"Removed ""(.*)"""
   let changed = Regex @"Changed \(""(.*)"",\s+""(.*)""\)"
@@ -273,13 +269,12 @@ let parseReason r =
   let rc = changed.Match r
 
   match ra.Success, rr.Success, rc.Success with
-  | true, _, _ -> Added ra.Groups.[1].Value
-  | _, true, _ -> Removed rr.Groups.[1].Value
-  | _, _, true -> Changed(rc.Groups.[1].Value, rc.Groups.[2].Value)
+  | true, _, _ -> Added ra.Groups[1].Value
+  | _, true, _ -> Removed rr.Groups[1].Value
+  | _, _, true -> Changed(rc.Groups[1].Value, rc.Groups[2].Value)
   | _ -> failwith $"failed to parse reason while amending last migration: {r}"
 
-let appendLastMigration (p: Project) (m: MigrationLog) (xs: ProposalResult list) =
-  use conn = openStore p
+let appendLastMigration (conn: SqliteConnection) (m: MigrationLog) (xs: ProposalResult list) =
   let startIndex = int64 m.steps.Length
 
   let ys =
@@ -295,7 +290,8 @@ let appendLastMigration (p: Project) (m: MigrationLog) (xs: ProposalResult list)
       schemaVersion = m.migration.schemaVersion
       date = nowStr () }
 
-  let hash = hashSteps p intent
+  let dbFile = conn.DataSource
+  let hash = hashSteps dbFile intent
   insertSteps conn m.migration.id startIndex xs
   let migrationId = m.migration.id
 

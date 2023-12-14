@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module Migrate.DbProject.ParseDbToml
+module internal Migrate.DbProject.ParseDbToml
 
 open System
 open Migrate.Types

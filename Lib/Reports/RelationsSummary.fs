@@ -36,7 +36,8 @@ let formatRelations =
   >> String.concat "\n"
 
 let databaseRelations (p: Project) =
-  DbProject.LoadDbSchema.dbSchema p |> formatRelations
+  use conn = DbUtil.openConn p.dbFile
+  DbProject.LoadDbSchema.dbSchema p conn |> formatRelations
 
 let projectRelations (p: Project) =
   p.source |> formatRelations |> DbUtil.colorizeSql

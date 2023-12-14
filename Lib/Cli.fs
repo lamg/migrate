@@ -145,16 +145,21 @@ let status p =
 /// Shows the current database schema
 /// </summary>
 let dumpDbSchema (p: Project) =
-  DbProject.LoadDbSchema.rawDbSchema p |> DbUtil.colorizeSql
+  use conn = openConn p.dbFile
+  DbProject.LoadDbSchema.rawDbSchema conn |> DbUtil.colorizeSql
 
-let dumpDbSchemaNoColor (p: Project) = DbProject.LoadDbSchema.rawDbSchema p
+let dumpDbSchemaNoColor (p: Project) =
+  use conn = openConn p.dbFile
+  DbProject.LoadDbSchema.rawDbSchema conn
 
 /// <summary>
 /// Shows the detailed steps of the last migration
 /// </summary>
-let lastLogDetailed p =
+let lastLogDetailed (p: Project) =
   try
-    MigrationStore.getMigrations p
+    use conn = DbUtil.openConn p.dbFile
+
+    MigrationStore.getMigrations conn
     |> List.tryLast
     |> Option.iter MigrationPrint.printLog
 
@@ -170,9 +175,11 @@ let lastLogDetailed p =
 /// <summary>
 /// Shows the summarized steps of the last migration
 /// </summary>
-let lastLogShort p =
+let lastLogShort (p: Project) =
   try
-    MigrationStore.getMigrations p
+    use conn = DbUtil.openConn p.dbFile
+
+    MigrationStore.getMigrations conn
     |> List.tryLast
     |> Option.iter MigrationPrint.printShortLog
 
@@ -205,9 +212,11 @@ let log p =
 /// </summary>
 /// <param name="p">Project</param>
 /// <param name="commitHash">Commit hash</param>
-let logDetailed p (commitHash: string) =
+let logDetailed (p: Project) (commitHash: string) =
   try
-    MigrationStore.getMigrations p
+    use conn = DbUtil.openConn p.dbFile
+
+    MigrationStore.getMigrations conn
     |> List.tryFind (fun m -> m.migration.hash.Contains commitHash)
     |> Option.iter MigrationPrint.printLog
 

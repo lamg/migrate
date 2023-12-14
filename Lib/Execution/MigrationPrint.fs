@@ -5,7 +5,9 @@ open MigrationStore
 open Print
 
 let showMigrations (p: Project) =
-  getMigrations p
+  use conn = DbUtil.openConn p.dbFile
+
+  getMigrations conn
   |> List.iter (fun x ->
     let m = x.migration
     printYellowIntro "version remarks" m.versionRemarks

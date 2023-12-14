@@ -14,6 +14,7 @@
 
 module internal Migrate.Execution.Commit
 
+open Microsoft.Data.Sqlite
 open Migrate
 open Migrate.Types
 open DbUtil
@@ -35,44 +36,45 @@ let replicateInDb (schema: SqlFile) (dbFile: string) =
     [ tables; views; inserts; indexes ] |> List.concat |> List.concat |> joinSql
 
   use conn = openConn dbFile
-  runSql conn sql
+  conn.Open()
+  use tx = conn.BeginTransaction()
+
+  try
+    MigrationStore.initStore conn
+    runSql conn sql
+    tx.Commit()
+  with e ->
+    tx.Rollback()
+    Print.printRed e.Message
 
 let parseVersion (version: string) = SemanticVersion.TryParse version
 
-let migrateStep (p: Project) : ProposalResult list option =
-  try
-    let schema = Migrate.DbProject.LoadDbSchema.dbSchema p
+let migrateStep (p: Project) (conn: SqliteConnection) : ProposalResult list option =
+  let schema = Migrate.DbProject.LoadDbSchema.dbSchema p conn
 
-    Migrate.Calculation.Migration.migration schema p
-    |> Option.map (fun statements ->
+  Migrate.Calculation.Migration.migration schema p
+  |> Option.map (fun statements ->
 
-      use conn = openConn p.dbFile
+    statements
+    |> List.map (fun s ->
+      try
+        s.statements |> List.iter (runSql conn)
 
-      statements
-      |> List.map (fun s ->
-        match runSqlTx conn s.statements with
-        | Ok() ->
-          { reason = s.reason
-            statements = s.statements
-            error = None }
-        | Error e ->
-          { reason = s.reason
-            statements = s.statements
-            error = Some e }))
-  with
-  | FailedQuery e ->
-    printQueryErr e
-    None
-  | e ->
-    Print.printRed $"got error\n{e.Message}"
-    None
+        { reason = s.reason
+          statements = s.statements
+          error = None }
+      with FailedQuery e ->
+        { reason = s.reason
+          statements = s.statements
+          error = Some $"{e.sql} -> {e.error}" }))
+
 
 let printProgress (n: int) =
   let prog = [| "/"; "-"; "\\"; "|" |]
   let i = n % prog.Length
   printf $"\r{prog[i]}"
 
-let migrateDb (p: Project) =
+let migrateDb (p: Project) (conn: SqliteConnection) =
   let mutable stop = false
   let mutable steps = ResizeArray<ProposalResult>()
   let mutable last = []
@@ -82,7 +84,7 @@ let migrateDb (p: Project) =
     printProgress i
     i <- i + 1
 
-    match migrateStep p with
+    match migrateStep p conn with
     | Some xs when steps.Count > 0 && xs = last -> StaleMigration xs |> raise
     | Some xs ->
       last <- xs
@@ -98,9 +100,9 @@ type VersionStatus =
     projectVersion: SemanticVersion
     dbSchemaVersion: SemanticVersion }
 
-let shouldMigrate (p: Project) =
+let shouldMigrate (p: Project) (conn: SqliteConnection) =
   let _, schemaVersion =
-    MigrationStore.getMigrations p
+    MigrationStore.getMigrations conn
     |> List.tryHead
     |> Option.map _.migration.schemaVersion
     |> Option.defaultValue "0.0.0"
@@ -124,99 +126,142 @@ let nothingToMigrate
   printfn $"Latest project version: {pv}"
   printfn $"Latest database version: {sv}"
 
-let createTempDb (schema: SqlFile) (dbFile: string) =
-  let filename = System.IO.Path.GetFileName dbFile
+let createTempDb (schema: SqlFile) (filename: string) =
+  let filename = System.IO.Path.GetFileName filename
   let migDir = System.IO.Directory.CreateTempSubdirectory "migrate"
   let testDb = System.IO.Path.Combine(migDir.FullName, filename)
   replicateInDb schema testDb
   testDb
 
-let execManualMigration (p: Project) (sql: string) =
-  let schema = Migrate.DbProject.LoadDbSchema.dbSchema p
+let execManualMigration (p: Project) (conn: SqliteConnection) (sql: string) =
+  let schema = Migrate.DbProject.LoadDbSchema.dbSchema p conn
 
   let tempFile = createTempDb schema p.dbFile
+  use tempConn = openConn tempFile
 
-  match runSqlTx (openConn tempFile) [ sql ] with
-  | Ok() ->
-    let actual = DbProject.LoadDbSchema.dbSchema { p with dbFile = tempFile }
-    let expected = p.source
+  runSql tempConn sql
+  let actual = DbProject.LoadDbSchema.dbSchema { p with dbFile = tempFile } tempConn
+  let expected = p.source
 
-    if actual <> expected then
-      Print.printRed
-        "After running the migration the project and database schemas are not the same. Manual migration failed"
+  if actual <> expected then
+    Print.printRed
+      "After running the migration the project and database schemas are not the same. Manual migration failed"
 
-      printfn $"Expected:\n{expected}"
-      printfn $"Actual:\n{actual}"
+    printfn $"Expected:\n{expected}"
+    printfn $"Actual:\n{actual}"
+  else
+    runSql conn sql
 
-    else
-      match runSqlTx (openConn p.dbFile) [ sql ] with
-      | Ok() ->
-        let m =
-          { versionRemarks = p.versionRemarks
-            schemaVersion = p.schemaVersion
-            date = Print.nowStr ()
-            steps =
-              [ { reason = Added "Manual migration"
-                  statements = [ sql ]
-                  error = None } ] }
+    let m =
+      { versionRemarks = p.versionRemarks
+        schemaVersion = p.schemaVersion
+        date = Print.nowStr ()
+        steps =
+          [ { reason = Added "Manual migration"
+              statements = [ sql ]
+              error = None } ] }
 
-        MigrationStore.storeMigration p m
-      | Error e -> Print.printRed e
-  | Error e -> Print.printRed e
+    MigrationStore.storeMigration conn m
 
 let manualMigration (p: Project) =
-  match shouldMigrate p with
-  | vs when vs.shouldMigrate ->
-    Print.printYellow "please write the SQL code for the migration and press Ctrl+D"
-    let sql = stdin.ReadToEnd()
-    Print.printYellow "executing migration…"
-    execManualMigration p sql
-    Print.printGreen "migration executed successfully"
-  | vs -> nothingToMigrate vs
+  use conn = openConn p.dbFile
+  conn.Open()
+  use tx = conn.BeginTransaction()
+
+  try
+    match shouldMigrate p conn with
+    | vs when vs.shouldMigrate ->
+      Print.printYellow "please write the SQL code for the migration and press Ctrl+D"
+      let sql = stdin.ReadToEnd()
+      Print.printYellow "executing migration…"
+      execManualMigration p conn sql
+      Print.printGreen "migration executed"
+    | vs -> nothingToMigrate vs
+
+    tx.Commit()
+  with e ->
+    tx.Rollback()
+    Print.printRed e.Message
 
 let migrateAndCommit (p: Project) =
-  match shouldMigrate p with
-  | vs when vs.shouldMigrate ->
-    match migrateDb p with
-    | [] -> nothingToMigrate vs
-    | steps ->
-      MigrationStore.storeMigration
-        p
-        { steps = steps
-          versionRemarks = p.versionRemarks
-          schemaVersion = p.schemaVersion
-          date = Print.nowStr () }
-  | vs -> nothingToMigrate vs
+  use conn = openConn p.dbFile
+  conn.Open()
+  use tx = conn.BeginTransaction()
+
+  try
+    MigrationStore.initStore conn
+
+    match shouldMigrate p conn with
+    | vs when vs.shouldMigrate ->
+      let xs = migrateDb p conn
+
+      match xs with
+      | [] -> nothingToMigrate vs
+      | steps ->
+        MigrationStore.storeMigration
+          conn
+          { steps = steps
+            versionRemarks = p.versionRemarks
+            schemaVersion = p.schemaVersion
+            date = Print.nowStr () }
+
+    | vs -> nothingToMigrate vs
+
+    tx.Commit()
+  with e ->
+    tx.Rollback()
+    Print.printRed e.Message
 
 let commitAmend (p: Project) =
-  let m = MigrationStore.getMigrations p |> List.tryHead
+  use conn = openConn p.dbFile
+  let m = MigrationStore.getMigrations conn |> List.tryHead
 
   match m with
   | Some v ->
-    let vs = shouldMigrate p
+    let vs = shouldMigrate p conn
+    conn.Open()
+    use tx = conn.BeginTransaction()
 
-    match migrateDb p with
-    | [] -> nothingToMigrate vs
-    | steps -> MigrationStore.appendLastMigration p v steps
+    try
+      match migrateDb p conn with
+      | [] -> nothingToMigrate vs
+      | steps -> MigrationStore.appendLastMigration conn v steps
+
+      tx.Commit()
+    with e ->
+      tx.Rollback()
+      Print.printRed e.Message
   | None -> Print.errPrint "No migrations to amend"
 
 let dryMigration (p: Project) =
-  let schema = Migrate.DbProject.LoadDbSchema.dbSchema p
+  use conn = openConn p.dbFile
+  let schema = Migrate.DbProject.LoadDbSchema.dbSchema p conn
 
   let tempFile = createTempDb schema p.dbFile
+  use tempConn = openConn tempFile
 
-  let tempProject = { p with dbFile = tempFile }
+  use tx = conn.BeginTransaction()
+  use tempTx = tempConn.BeginTransaction()
 
-  let vs = shouldMigrate p
+  try
+    MigrationStore.initStore conn
+    MigrationStore.initStore tempConn
 
-  match migrateDb tempProject with
-  | [] -> nothingToMigrate vs
-  | steps ->
-    if not vs.shouldMigrate then
-      Print.printYellow $"Have in mind since the project and database versions ({vs.projectVersion}) are the same,"
-      Print.printYellow "the steps won't be executed. If you want to execute them,"
-      Print.printYellow "please increase the project version in the file db.toml."
-      Print.printYellow "Otherwise you can use the command `mig commit -a` to amend the last migration"
-      printfn ""
+    let vs = shouldMigrate p conn
+    let xs = migrateDb p tempConn
+    tx.Commit()
 
-    MigrationPrint.printMigrationIntent steps
+    match xs with
+    | [] -> nothingToMigrate vs
+    | steps ->
+      if not vs.shouldMigrate then
+        Print.printYellow $"Have in mind since the project and database versions ({vs.projectVersion}) are the same,"
+        Print.printYellow "the steps won't be executed. If you want to execute them,"
+        Print.printYellow "please increase the project version in the file db.toml."
+        Print.printYellow "Otherwise you can use the command `mig commit -a` to amend the last migration"
+        printfn ""
+
+      MigrationPrint.printMigrationIntent steps
+  with e ->
+    tx.Rollback()
+    Print.printRed e.Message

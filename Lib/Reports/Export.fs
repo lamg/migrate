@@ -1,4 +1,4 @@
-module Migrate.Reports.Export
+module internal Migrate.Reports.Export
 
 open System.Data
 open Migrate

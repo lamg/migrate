@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module Migrate.DbProject.LoadDbSchema
+module internal Migrate.DbProject.LoadDbSchema
 
 open Migrate.Types
 open Microsoft.Data.Sqlite
@@ -77,8 +77,7 @@ let sqliteMaster = table'<SqliteMaster> "sqlite_master"
 [<Literal>]
 let migrateTablePrefix = "github_com_lamg_migrate_"
 
-let sqliteMasterStatements (p: Project) =
-  use conn = openConn p.dbFile
+let sqliteMasterStatements (conn: SqliteConnection) =
 
   select {
     for r in sqliteMaster do
@@ -89,29 +88,25 @@ let sqliteMasterStatements (p: Project) =
   |> Async.RunSynchronously
   |> Seq.toList
 
+let dbSchemaList (conn: SqliteConnection) =
+  let noneIsSubStr (xs: string list) (x: string) = xs |> List.exists x.Contains |> not
 
-let dbSchemaList (p: Project) =
-  let hasNoSubstr (x: string) (xs: string list) =
-    xs |> List.exists (fun s -> x.Contains s) |> not
-
-  sqliteMasterStatements p
+  sqliteMasterStatements conn
   |> List.choose (function
-    | { sql = sql } when hasNoSubstr sql [ "sqlite_sequence"; migrateTablePrefix ] -> Some sql
+    | { sql = sql } when noneIsSubStr [ "sqlite_sequence"; migrateTablePrefix ] sql -> Some sql
     | _ -> None)
 
-let rawDbSchema (p: Project) = dbSchemaList p |> joinSqlPretty
+let rawDbSchema (conn: SqliteConnection) = dbSchemaList conn |> joinSqlPretty
 
-let dbSchema (p: Project) =
+let dbSchema (p: Project) (conn: SqliteConnection) =
   let empty =
     { tables = []
       views = []
       inserts = []
       indexes = [] }
 
-  use conn = openConn p.dbFile
-
   let schema =
-    dbSchemaList p
+    dbSchemaList conn
     |> function
       | [] -> empty
       | xs ->
@@ -132,8 +127,8 @@ let dbSchema (p: Project) =
 
   schemaWithIns
 
-let migrationSchema (p: Project) =
-  sqliteMasterStatements p
+let migrationSchema (conn: SqliteConnection) =
+  sqliteMasterStatements conn
   |> List.choose (function
     | { sql = sql } when sql.Contains migrateTablePrefix -> Some sql
     | _ -> None)
@@ -142,7 +137,7 @@ let migrationSchema (p: Project) =
     | xs ->
       xs
       |> joinSql
-      |> Parser.parseSql p.dbFile
+      |> Parser.parseSql conn.DataSource
       |> function
         | Ok f -> Some f
         | Error e -> FailedParse $"Loading migration tables:\n{e}" |> raise

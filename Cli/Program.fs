@@ -123,6 +123,7 @@ and ExportArgs =
       | Relation _ -> "relation name"
 
 let showLog (p: Project) (args: ParseResults<LogArgs>) =
+
   match args.TryGetResult CommitHash, args.TryGetResult Last, args.TryGetResult LastShort with
   | Some hash, _, _ -> Cli.logDetailed p hash
   | _, Some Last, _ -> Cli.lastLogDetailed p
