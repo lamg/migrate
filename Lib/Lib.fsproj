@@ -3,7 +3,7 @@
         <TargetFramework>net8.0</TargetFramework>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <PackageId>MigrateLib</PackageId>
-        <Version>0.0.8</Version>
+        <Version>0.0.9</Version>
         <Authors>Luis Ángel Méndez Gort</Authors>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Migrate</AssemblyName>
