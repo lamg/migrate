@@ -10,7 +10,7 @@ nuget Spectre.Console
 nuget SqlPrettify
 nuget Tomlyn
 nuget Microsoft.NET.Test.Sdk
-nuget SqlParserCs
+github TylerBrinks/SqlParser-cs:main
 nuget xunit
 nuget xunit.runner.visualstudio
 nuget Nuget.Versioning
