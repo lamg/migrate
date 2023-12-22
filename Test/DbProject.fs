@@ -15,7 +15,6 @@
 module DbProject
 
 open Migrate.Types
-open Migrate.SqlParser.Types
 open Migrate.DbProject.ParseDbToml
 open Migrate.DbProject.BuildProject
 open Xunit
@@ -100,11 +99,11 @@ let wrapWithProject () =
         [ { src = "source_relation"
             dest = "destination_relation" } ] }
 
-  let src v : SqlFile =
+  let src: SqlFile =
     { inserts =
         [ { table = "table0"
             columns = [ "id"; "name" ]
-            values = [ [ Integer 0; v ] ] } ]
+            values = [ [ Integer 0; String "value0" ] ] } ]
       tables = []
       views = []
       indexes = [] }
@@ -114,7 +113,7 @@ let wrapWithProject () =
       schemaVersion = "0.0.1"
       dbFile = "/data/db.sqlite3"
       syncs = [ "table0" ]
-      source = src (String "value0")
+      source = src
       pullScript = None
       reports =
         [ { src = "source_relation"
@@ -122,13 +121,6 @@ let wrapWithProject () =
 
   setenv "env0" "value0"
 
-  let f =
-    mergeTomlSql
-      p
-      (src (
-        EnvVar
-          { qualifier = None
-            ``member`` = "env0" }
-      ))
+  let f = mergeTomlSql p src
 
   Assert.Equal(expected, f)

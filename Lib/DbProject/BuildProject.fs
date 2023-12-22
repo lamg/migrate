@@ -15,7 +15,7 @@
 module internal Migrate.DbProject.BuildProject
 
 open Migrate.Types
-open Migrate.SqlParser.Types
+open Migrate.SqlParser
 
 let collectSql (xs: SqlFile list) =
   let r =
@@ -34,17 +34,9 @@ let collectSql (xs: SqlFile list) =
     r
 
 let mergeTomlSql (p: DbTomlFile) (src: SqlFile) =
-  let inserts =
-    src.inserts
-    |> List.map (fun ins ->
-      let vss =
-        ins.values |> List.map (fun vs -> vs |> List.map Migrate.DbUtil.literalWithEnv)
-
-      { ins with values = vss })
-
   { versionRemarks = p.versionRemarks
     dbFile = p.dbFile
-    source = { src with inserts = inserts }
+    source = src
     syncs = p.syncs
     reports = p.reports
     pullScript = p.pullScript
@@ -52,7 +44,7 @@ let mergeTomlSql (p: DbTomlFile) (src: SqlFile) =
 
 let buildProject (reader: string -> string * string) (p: DbTomlFile) =
   let parse (file, sql) =
-    match Migrate.SqlParser.Parser.parseSql file sql with
+    match parseSql file sql with
     | Ok p -> p
     | Error e -> MalformedProject e |> raise
 

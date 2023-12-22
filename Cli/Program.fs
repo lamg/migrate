@@ -30,6 +30,7 @@ type MigArgs =
   | [<CliPrefix(CliPrefix.None)>] DbSchema of ParseResults<DumpSchemaArgs>
   | [<CliPrefix(CliPrefix.None)>] Relations of ParseResults<RelationsArgs>
   | [<CliPrefix(CliPrefix.None)>] Export of ParseResults<ExportArgs>
+  | [<AltCommandLine("-p")>] ProjectPath of path: string
 
   interface IArgParserTemplate with
     member s.Usage =
@@ -44,6 +45,7 @@ type MigArgs =
       | DbSchema _ -> "shows the current schema in the DB"
       | Relations _ -> "shows the relations (tables + views) type signatures in the database or project"
       | Export _ -> "exports the content of a relation as an insert statement"
+      | ProjectPath _ -> "project path"
 
 and VersionArgs =
   | [<NoCommandLine>] Dummy
@@ -187,7 +189,7 @@ let exportRelation (p: Project) (args: ParseResults<ExportArgs>) =
     1
 
 [<EntryPoint>]
-let main args =
+let main (args: string array) =
   dotenv.net.DotEnv.Load()
 
   let errorHandler =
@@ -214,7 +216,8 @@ let main args =
       printfn $"{version}"
       0
     | _ ->
-      let p = Cli.loadProject ()
+      let path = results.TryGetResult ProjectPath
+      let p = Cli.loadProject path
 
       match command with
       | Some(DbSchema flags) -> dumpSchema p flags
@@ -229,7 +232,7 @@ let main args =
         Assembly.GetExecutingAssembly().GetName().Version.ToString() |> printfn "%s"
         0
       | Some(Export args) -> exportRelation p args
-      | None ->
+      | _ ->
         Print.printRed "no command given"
         1
   with MalformedProject e ->

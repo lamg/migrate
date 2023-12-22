@@ -20,7 +20,6 @@ open System.Reflection
 open Microsoft.Data.Sqlite
 
 open Types
-open SqlParser.Types
 open Print
 
 let openConn (dbFile: string) =
@@ -72,14 +71,6 @@ let colorizeSql sql =
     $"%s{ansiGreen}%s{m.Value}%s{ansiReset}"
 
   Regex.Replace(sql, keywordPattern, matchEvaluator, RegexOptions.IgnoreCase)
-
-let literalWithEnv =
-  function
-  | EnvVar { ``member`` = v } ->
-    match getEnv v with
-    | Some r -> String r
-    | None -> ExpectingEnvVar v |> raise
-  | x -> x
 
 let printQueryErr (e: QueryError) =
   printYellow "running:"

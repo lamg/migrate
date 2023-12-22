@@ -15,7 +15,6 @@
 module internal Migrate.Calculation.TableSync
 
 open Migrate.Types
-open Migrate.SqlParser.Types
 
 let findTable (schema: SqlFile) table =
   schema.tables |> List.find (fun t -> t.name = table)
@@ -46,7 +45,7 @@ let findKeyCols (t: CreateTable) =
     let kss =
       t.constraints
       |> List.choose (function
-        | PrimaryKeyCols xs -> Some xs
+        | PrimaryKey xs -> Some xs
         | _ -> None)
 
     match kss with

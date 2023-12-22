@@ -15,7 +15,7 @@
 module SqlGenerationTest
 
 open Xunit
-open Migrate.SqlParser.Types
+open Migrate.Types
 
 [<Fact>]
 let SqlInsertIntoTest () =

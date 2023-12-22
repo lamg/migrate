@@ -14,9 +14,10 @@
 
 module internal Migrate.SqlGeneration.Index
 
-open Migrate.SqlParser.Types
+open Migrate.Types
 
 let sqlCreateIndex (index: CreateIndex) =
-  [ $"CREATE INDEX {index.name} ON {index.table}({index.column})" ]
+  let cols = index.columns |> Util.sepComma id
+  [ $"CREATE INDEX {index.name} ON {index.table}({cols})" ]
 
 let sqlDropIndex (index: CreateIndex) = [ $"DROP INDEX {index.name}" ]

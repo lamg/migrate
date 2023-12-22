@@ -5,19 +5,16 @@ open Migrate
 open Migrate.DbProject
 open Migrate.Types
 open DbUtil
-open SqlParser.Types
 
-let viewColumns (p: Project) (view: string) =
-  Checks.TypeChecker.checkTypes p.source |> List.filter (fun x -> x.table = view)
+let viewColumns (p: Project) (view: string) : ColumnType list = failwith "not implemented"
+// Checks.TypeChecker.checkTypes p.source |> List.filter (fun x -> x.table = view)
 
 let rowReader (xs: ColumnType list) (rd: IDataReader) =
   xs
   |> List.mapi (fun i x ->
     match x.sqlType with
-    | Int -> rd.GetInt32 i |> Integer
-    | Text -> rd.GetString i |> String
-    | Real -> rd.GetDouble i |> _.ToString() |> String
-    | Bool -> rd.GetInt32 i |> Integer)
+    | SqlInteger -> rd.GetInt32 i |> Integer
+    | SqlText -> rd.GetString i |> String)
 
 let findRelation (p: Project) (relation: string) =
   let table = p.source.tables |> List.tryFind (fun t -> t.name = relation)

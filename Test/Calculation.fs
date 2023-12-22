@@ -16,7 +16,6 @@ module Migration
 
 open Migrate.Types
 open Migrate.Calculation.Migration
-open Migrate.SqlParser.Types
 open Xunit
 
 let emptySchema =
@@ -40,7 +39,7 @@ let schemaWithOneTable (tableName: string) =
         [ { name = tableName
             columns =
               [ { name = "id"
-                  ``type`` = SqlInteger
+                  columnType = SqlInteger
                   constraints = [ NotNull ] } ]
             constraints = [] } ] }
 
@@ -50,7 +49,7 @@ let schemaWithUnique (tableName: string) =
         [ { name = tableName
             columns =
               [ { name = "id"
-                  ``type`` = SqlInteger
+                  columnType = SqlInteger
                   constraints = [ NotNull ] } ]
             constraints = [ Unique [ "id" ] ] } ] }
 
@@ -58,21 +57,7 @@ let schemaWithView (viewName: string) =
   { emptySchema with
       views =
         [ { name = viewName
-            selectUnion =
-              [ { withAliases = []
-                  select =
-                    { columns = []
-                      distinct = false
-                      from =
-                        [ Table
-                            { qualifier = None
-                              ``member`` = "table0" } ]
-                      where = None
-                      groupBy = []
-                      having = None
-                      orderBy = None
-                      limit = None
-                      offset = None } } ] } ] }
+            selectUnion = "SELECT * FROM table0" } ] }
 
 let schemaWithTwoCols =
   { emptySchema with
@@ -80,10 +65,10 @@ let schemaWithTwoCols =
         [ { name = "table0"
             columns =
               [ { name = "id"
-                  ``type`` = SqlInteger
+                  columnType = SqlInteger
                   constraints = [ NotNull ] }
                 { name = "column1"
-                  ``type`` = SqlText
+                  columnType = SqlText
                   constraints = [ NotNull; Default(String "bla") ] } ]
             constraints = [] } ] }
 
@@ -93,10 +78,10 @@ let schemaWithTwoColsNewName =
         [ { name = "table0"
             columns =
               [ { name = "id"
-                  ``type`` = SqlInteger
+                  columnType = SqlInteger
                   constraints = [ NotNull ] }
                 { name = "column2"
-                  ``type`` = SqlText
+                  columnType = SqlText
                   constraints = [ NotNull; Default(String "bla") ] } ]
             constraints = [] } ] }
 
@@ -276,7 +261,7 @@ let uniqueToPrimaryKey () =
     { table0 with
         columns =
           [ { column0 with
-                constraints = [ PrimaryKey None ] } ] }
+                constraints = [ PrimaryKey [] ] } ] }
 
   let schema1 = { schema0 with tables = [ table1 ] }
   let p = { emptyProject with source = schema1 }

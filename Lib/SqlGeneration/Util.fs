@@ -14,13 +14,7 @@
 
 module internal Migrate.SqlGeneration.Util
 
-open Migrate.SqlParser.Types
 
 let sepComma (f: 'a -> string) (xs: 'a list) = xs |> List.map f |> String.concat ", "
 
 let sepCommaNl (f: 'a -> string) (xs: 'a list) = xs |> List.map f |> String.concat ",\n"
-
-let sqlVar (v: Var) =
-  match v.qualifier with
-  | Some q -> $"{q}.{v.``member``}"
-  | None -> v.``member``

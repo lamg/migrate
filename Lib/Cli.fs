@@ -256,8 +256,8 @@ let syncReports p =
 /// Loads a project from the file system
 /// Raises MalformedProject in case of failure
 /// </summary>
-let loadProject () =
-  Migrate.DbProject.LoadProjectFiles.loadProject ()
+let loadProject (dir: string option) =
+  Migrate.DbProject.LoadProjectFiles.loadProject dir
 
 let loadProjectFromRes asm =
   Migrate.DbProject.LoadProjectFiles.loadProjectFromRes asm
@@ -313,14 +313,8 @@ let printProjectRelations (p: Project) =
     printfn $"{summary}"
     0
   with
-  | UndefinedIdentifier e ->
-    Print.printRed $"undefined identifier {e}"
-    1
   | UnsupportedTypeInference e ->
     Print.printRed $"unsupported type inference {e}"
-    1
-  | DuplicatedDefinition e ->
-    Print.printRed $"duplicated definition {e}"
     1
   | FailedOpenDb e ->
     $"Failed to open database {e.dbFile}: {e.msg}" |> Print.printRed

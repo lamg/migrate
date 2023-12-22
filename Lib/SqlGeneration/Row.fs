@@ -14,10 +14,13 @@
 
 module internal Migrate.SqlGeneration.Row
 
-open Migrate.SqlParser.Types
+open Migrate.Types
 open Util
 
-let sqlExpr = Expr.sqlExpr (fun _ -> "")
+let sqlExpr =
+  function
+  | Integer v -> string v
+  | String v -> $"'{v}'"
 
 let rowToSetEqual (colValues: (string * Expr) list) =
   colValues |> sepComma (fun (c, v) -> $"{c} = {sqlExpr v}")

@@ -14,13 +14,12 @@
 
 module internal Migrate.SqlGeneration.InsertInto
 
-open Migrate.SqlParser.Types
+open Migrate.Types
 
 let sqlLiteral (e: Expr) =
   match e with
   | Integer c -> $"{c}"
   | String s -> $"'{s}'"
-  | v -> failwith $"not implemented insert into with value {v}"
 
 let sqlRowToString (vs: Expr list) =
   vs |> List.map sqlLiteral |> String.concat ", " |> (fun v -> $"({v})")

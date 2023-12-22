@@ -18,9 +18,9 @@ open Microsoft.Data.Sqlite
 open Migrate
 open Migrate.Types
 open DbUtil
-open SqlParser.Types
 open Migrate.SqlGeneration
 open NuGet.Versioning
+open Spectre.Console
 
 let replicateInDb (schema: SqlFile) (dbFile: string) =
 
@@ -68,20 +68,14 @@ let migrateStep (p: Project) (conn: SqliteConnection) : ProposalResult list opti
           statements = s.statements
           error = Some $"{e.sql} -> {e.error}" }))
 
-
-let printProgress (n: int) =
-  let prog = [| "/"; "-"; "\\"; "|" |]
-  let i = n % prog.Length
-  printf $"\r{prog[i]}"
-
 let migrateDb (p: Project) (conn: SqliteConnection) =
   let mutable stop = false
   let mutable steps = ResizeArray<ProposalResult>()
   let mutable last = []
   let mutable i = 0
 
+
   while not stop do
-    printProgress i
     i <- i + 1
 
     match migrateStep p conn with
@@ -89,9 +83,7 @@ let migrateDb (p: Project) (conn: SqliteConnection) =
     | Some xs ->
       last <- xs
       xs |> List.iter steps.Add
-    | None ->
-      printfn "\r"
-      stop <- true
+    | None -> stop <- true
 
   steps |> List.ofSeq
 
@@ -193,7 +185,22 @@ let migrateAndCommit (p: Project) =
 
     match shouldMigrate p conn with
     | vs when vs.shouldMigrate ->
-      let xs = migrateDb p conn
+      let s = AnsiConsole.Status()
+      s.Spinner <- Spinner.Known.Aesthetic
+      s.SpinnerStyle <- Style(foreground = Color.Yellow)
+      s.AutoRefresh <- true
+
+      let xs =
+        s.StartAsync(
+          $"Migrating {p.dbFile}…",
+          (fun ctx ->
+            task {
+              let xs = migrateDb p conn
+              return xs
+            })
+        )
+        |> Async.AwaitTask
+        |> Async.RunSynchronously
 
       match xs with
       | [] -> nothingToMigrate vs

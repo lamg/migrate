@@ -14,13 +14,10 @@
 
 module internal Migrate.SqlGeneration.View
 
-open Migrate.SqlParser.Types
-open WithSelect
+open Migrate.Types
 
 let sqlCreateView (view: CreateView) =
-  let joinUnion =
-    view.selectUnion |> List.map sqlWithSelect |> String.concat "\nUNION\n"
 
-  [ $"CREATE VIEW {view.name} AS\n{joinUnion}" ]
+  [ $"CREATE VIEW {view.name} AS\n{view.selectUnion}" ]
 
 let sqlDropView (view: CreateView) = [ $"DROP VIEW {view.name}" ]

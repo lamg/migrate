@@ -40,6 +40,6 @@ let loadProjectAt (path: string) =
   let src = parseDbTomlFile dbToml
   src |> loadProjectFiles path
 
-let loadProject () =
-  let currDir = System.Environment.CurrentDirectory
-  loadProjectAt currDir
+let loadProject (dir: string option) =
+  let d = Option.defaultValue (Directory.GetCurrentDirectory()) dir
+  loadProjectAt d

@@ -17,7 +17,6 @@ module RunMigration
 open Xunit
 open Migrate
 open Types
-open SqlParser.Types
 
 let emptySchema =
   { inserts = []
@@ -40,7 +39,7 @@ let schema0 =
         [ { name = "table0"
             columns =
               [ { name = "col0"
-                  ``type`` = SqlInteger
+                  columnType = SqlInteger
                   constraints = [ NotNull ] } ]
             constraints = [] } ] }
 

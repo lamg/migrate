@@ -89,7 +89,7 @@ let initStore (conn: SqliteConnection) =
         FailedOpenStore e |> raise
 
   let refSchema =
-    match SqlParser.Parser.parseSql dbFile referenceStoreSchema with
+    match SqlParser.parseSql dbFile referenceStoreSchema with
     | Ok f -> f
     | Error e -> FailedOpenStore e |> raise
 

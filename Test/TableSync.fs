@@ -14,9 +14,9 @@
 
 module TableSync
 
-open Migrate.Types
-open Migrate.SqlParser.Types
 open Xunit
+
+open Migrate.Types
 open Migrate.Calculation.TableSync
 
 let emptySchema =
@@ -27,12 +27,12 @@ let emptySchema =
 
 let colInt name =
   { name = name
-    ``type`` = SqlInteger
-    constraints = [ PrimaryKey None ] }
+    columnType = SqlInteger
+    constraints = [ PrimaryKey [] ] }
 
 let colStr name =
   { name = name
-    ``type`` = SqlInteger
+    columnType = SqlInteger
     constraints = [ NotNull ] }
 
 let emptyInsert: InsertInto =

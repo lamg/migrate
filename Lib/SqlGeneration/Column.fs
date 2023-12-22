@@ -15,7 +15,7 @@
 module internal Migrate.SqlGeneration.Column
 
 open Migrate.Types
-open Migrate.SqlParser.Types
+open Migrate.SqlParser
 open Migrate.SqlGeneration.Table
 
 let sqlAddColumn (table: string) (c: ColumnDef) =

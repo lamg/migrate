@@ -14,7 +14,57 @@
 
 module Migrate.Types
 
-open SqlParser.Types
+type SqlType =
+  | SqlInteger
+  | SqlText
+
+type Autoincrement = Autoincrement
+
+type Expr =
+  | String of string
+  | Integer of int
+
+type InsertInto =
+  { table: string
+    columns: string list
+    values: Expr list list }
+
+type ForeignKey =
+  { columns: string list
+    refTable: string
+    refColumns: string list }
+
+type ColumnConstraint =
+  | PrimaryKey of string list
+  | Autoincrement
+  | NotNull
+  | Unique of string list
+  | Default of Expr
+  | ForeignKey of ForeignKey
+
+type ColumnDef =
+  { name: string
+    columnType: SqlType
+    constraints: ColumnConstraint list }
+
+type CreateView = { name: string; selectUnion: string }
+
+type CreateTable =
+  { name: string
+    columns: ColumnDef list
+    constraints: ColumnConstraint list }
+
+type CreateIndex =
+  { name: string
+    table: string
+    columns: string list }
+
+type SqlFile =
+  { inserts: InsertInto list
+    views: CreateView list
+    tables: CreateTable list
+    indexes: CreateIndex list }
+
 
 type TableSync = { table: string; idCol: int }
 
@@ -100,12 +150,6 @@ exception MalformedProject of string
 exception ExpectingEnvVar of string
 exception NoDefaultValueForColumn of string
 
-type SqlType =
-  | Int
-  | Real
-  | Text
-  | Bool
-
 type ColumnType =
   { table: string
     column: string
@@ -115,11 +159,7 @@ type ExprType = { expr: Expr; sqlType: SqlType }
 
 exception NotMatchingTypes of (ExprType * ExprType)
 exception ExpectingType of (SqlType * ExprType)
-exception UndefinedIdentifier of Var
-exception DuplicatedDefinition of Var
-exception CannotInferTypeWithoutTable of Var
 exception UnsupportedTypeInference of Expr
-exception MalformedColumn of (Alias * Select)
 exception TableShouldHavePrimaryKey of string
 exception TableShouldHaveSinglePrimaryKey of string
 

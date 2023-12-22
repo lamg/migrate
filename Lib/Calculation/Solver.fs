@@ -16,7 +16,6 @@ module internal Migrate.Calculation.Solver
 
 open Migrate
 open Migrate.Types
-open SqlParser.Types
 open Migrate.SqlGeneration
 
 type SetResult<'a> =
@@ -118,11 +117,11 @@ let createView (xs: CreateView list) (ys: CreateView list) =
   createDelete xs ys (_.name) (View.sqlCreateView >> DbUtil.joinSqlPretty) View.sqlDropView View.sqlCreateView
 
 let createIndex (xs: CreateIndex list) (ys: CreateIndex list) =
-  createDelete xs ys (_.table) (fun i -> $"{i.table} ON {i.column}") Index.sqlDropIndex Index.sqlCreateIndex
+  createDelete xs ys (_.table) (fun i -> $"{i.table} ON {i.columns}") Index.sqlDropIndex Index.sqlCreateIndex
 
 let columns (views: CreateView list) (table: CreateTable) (xs: ColumnDef list) (ys: ColumnDef list) =
   let keySel (x: ColumnDef) =
-    $"{x.name} {Table.sqlColType x.``type``}"
+    $"{x.name} {Table.sqlColType x.columnType}"
 
   createDeleteUpdate
     xs
@@ -134,16 +133,18 @@ let columns (views: CreateView list) (table: CreateTable) (xs: ColumnDef list) (
     (Column.sqlUpdateColumn views table)
 
 let constraints (views: CreateView list) (right: CreateTable) (xs: ColumnConstraint list) (ys: ColumnConstraint list) =
-  let keySel = Migrate.SqlGeneration.Table.sqlConstraint
+  let keySel = Table.sqlConstraint
   let constraintSolution _ = Table.sqlRecreateTable views right
 
   createDelete xs ys keySel keySel constraintSolution constraintSolution
 
 let insertInto (keyIndexes: int list) (left: InsertInto) (right: InsertInto) =
-  let sqlExpr = Expr.sqlExpr (fun _ -> "")
 
   let selectExpr (indexes: int list) (xs: Expr list) =
-    indexes |> List.map (fun i -> xs[i]) |> List.map sqlExpr |> String.concat ", "
+    indexes
+    |> List.map (fun i -> xs[i])
+    |> List.map Row.sqlExpr
+    |> String.concat ", "
 
   let nonKeyIndexes =
     [ 0 .. left.columns.Length - 1 ]
@@ -154,7 +155,7 @@ let insertInto (keyIndexes: int list) (left: InsertInto) (right: InsertInto) =
   let keySel = selectExpr keyIndexes
 
   let toUpdate (leftRow: Expr list) (rightRow: Expr list) =
-    if List.map sqlExpr leftRow <> List.map sqlExpr rightRow then
+    if List.map Row.sqlExpr leftRow <> List.map Row.sqlExpr rightRow then
       Some(Row.sqlUpdateRow right keyIndexes rightRow)
     else
       None

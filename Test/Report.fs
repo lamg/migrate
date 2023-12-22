@@ -19,7 +19,6 @@ open Migrate
 open Types
 open DbUtil
 open Migrate.Reports.Report
-open SqlParser.Types
 open Dapper.FSharp.SQLite
 
 let exampleProject =
@@ -34,19 +33,19 @@ let exampleProject =
           [ { name = "rel0_report"
               columns =
                 [ { name = "col0"
-                    ``type`` = SqlInteger
+                    columnType = SqlInteger
                     constraints = [ NotNull ] }
                   { name = "col1"
-                    ``type`` = SqlText
+                    columnType = SqlText
                     constraints = [ NotNull ] } ]
               constraints = [ Unique [ "col0" ] ] }
             { name = "rel0"
               columns =
                 [ { name = "col0"
-                    ``type`` = SqlInteger
+                    columnType = SqlInteger
                     constraints = [ NotNull ] }
                   { name = "col1"
-                    ``type`` = SqlText
+                    columnType = SqlText
                     constraints = [ NotNull ] } ]
               constraints = [ Unique [ "col0" ] ] } ]
         views = []

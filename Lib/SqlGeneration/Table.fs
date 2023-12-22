@@ -14,17 +14,17 @@
 
 module internal Migrate.SqlGeneration.Table
 
-open Migrate.SqlParser.Types
+open Migrate.Types
 open Migrate.SqlGeneration.Util
-open Migrate.SqlGeneration.Expr
 
 let sqlConstraint =
   function
   | NotNull -> "NOT NULL"
-  | PrimaryKey None -> "PRIMARY KEY"
-  | PrimaryKey(Some Autoincrement) -> $"PRIMARY KEY AUTOINCREMENT"
-  | PrimaryKeyCols xs -> $"PRIMARY KEY({sepComma id xs})"
-  | Default v -> $"""DEFAULT {sqlExpr (fun _ -> "") v}"""
+  | PrimaryKey [] -> "PRIMARY KEY"
+  | PrimaryKey xs -> $"PRIMARY KEY({sepComma id xs})"
+  | Autoincrement -> "AUTOINCREMENT"
+  | Default(String v) -> $"DEFAULT '{v}'"
+  | Default(Integer v) -> $"DEFAULT {v}"
   | Unique [] -> "UNIQUE"
   | Unique xs -> $"UNIQUE({sepComma id xs})"
   | ForeignKey f ->
@@ -39,7 +39,7 @@ let sqlColType =
 
 let sqlColumnDef (c: ColumnDef) =
   let constraints = c.constraints |> List.map sqlConstraint |> String.concat " "
-  $"{c.name} {c.``type`` |> sqlColType} {constraints}"
+  $"{c.name} {c.columnType |> sqlColType} {constraints}"
 
 let sqlTableConstraints (table: CreateTable) =
   match table.constraints with
@@ -56,20 +56,7 @@ let sqlCreateTable (table: CreateTable) =
 let sqlRenameTable (c: CreateTable) (n: CreateTable) =
   [ $"ALTER TABLE {c.name} RENAME TO {n.name}" ]
 
-let dropDependentViews (views: CreateView list) (table: string) =
-  let dependentViews (s: Select) =
-    s.from
-    |> List.exists (function
-      | Table t -> t.``member`` = table
-      | Alias { expr = Table t } -> t.``member`` = table
-      | _ -> false)
-
-  let dependentViewsWithAliases (s: WithSelect) =
-    s.withAliases |> List.exists (fun s -> dependentViews s.select)
-
-  views
-  |> List.filter (fun v -> v.selectUnion |> List.exists dependentViewsWithAliases)
-  |> List.map (fun v -> $"DROP VIEW IF EXISTS {v.name}")
+let dropDependentViews (views: CreateView list) (table: string) = []
 
 let sqlRecreateTable (views: CreateView list) (table: CreateTable) =
   let auxTable =

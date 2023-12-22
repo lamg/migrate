@@ -17,23 +17,23 @@ module internal Migrate.Reports.RelationsSummary
 open Migrate
 open Types
 
-let colsToString: ColumnType list -> string =
-  List.map (fun c ->
-    let colType =
-      match c.sqlType with
-      | Int -> "INTEGER"
-      | Text -> "TEXT"
-      | Bool -> "BOOLEAN"
-      | Real -> "REAL"
+// let colsToString: ColumnType list -> string =
+//   List.map (fun c ->
+//     let colType =
+//       match c.sqlType with
+//       | Int -> "INTEGER"
+//       | Text -> "TEXT"
+//       | Bool -> "BOOLEAN"
+//       | Real -> "REAL"
+//
+//     $"{c.column} {colType}")
+//   >> String.concat ", "
 
-    $"{c.column} {colType}")
-  >> String.concat ", "
-
-let formatRelations =
-  Checks.TypeChecker.checkTypes
-  >> List.groupBy _.table
-  >> List.map (fun (table, cols) -> $"{table} ({colsToString cols})")
-  >> String.concat "\n"
+let formatRelations = failwith "not implemented"
+// Checks.TypeChecker.checkTypes
+// >> List.groupBy _.table
+// >> List.map (fun (table, cols) -> $"{table} ({colsToString cols})")
+// >> String.concat "\n"
 
 let databaseRelations (p: Project) =
   use conn = DbUtil.openConn p.dbFile
