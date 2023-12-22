@@ -1,68 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
-    <PropertyGroup>
-        <TargetFramework>net8.0</TargetFramework>
-        <GenerateDocumentationFile>true</GenerateDocumentationFile>
-        <PackageId>MigrateLib</PackageId>
-        <Version>0.0.10</Version>
-        <Authors>Luis Ángel Méndez Gort</Authors>
-        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-        <AssemblyName>Migrate</AssemblyName>
-        <RootNamespace>Migrate</RootNamespace>
-        <Title>Declarative migrations for SQLite</Title>
-        <PackageReadmeFile>README.md</PackageReadmeFile>
-        <Description>Declarative migrations for SQLite</Description>
-        <PackageProjectUrl>https://github.com/lamg/migrate</PackageProjectUrl>
-        <RepositoryUrl>https://github.com/lamg/migrate</RepositoryUrl>
-        <PackageOutputPath>./nupkg</PackageOutputPath>
-    </PropertyGroup>
-    <ItemGroup>
-        <Compile Include="Types.fs"/>
-        <Compile Include="Print.fs"/>
-        <Compile Include="DbUtil.fs"/>
-        <Compile Include="SqlParser.fs"/>
-        <Compile Include="SqlGeneration/Util.fs"/>
-        <Compile Include="SqlGeneration/InsertInto.fs"/>
-        <Compile Include="SqlGeneration/Index.fs"/>
-        <Compile Include="SqlGeneration/Table.fs"/>
-        <Compile Include="SqlGeneration/View.fs"/>
-        <Compile Include="SqlGeneration/Row.fs"/>
-        <Compile Include="SqlGeneration/Column.fs"/>
-        <Compile Include="DbProject/ParseDbToml.fs"/>
-        <Compile Include="DbProject/BuildProject.fs"/>
-        <Compile Include="DbProject/LoadProjectFiles.fs"/>
-        <Compile Include="DbProject/InitProject.fs"/>
-        <Compile Include="DbProject\LoadDbSchema.fs"/>
-        <Compile Include="Calculation\Solver.fs"/>
-        <Compile Include="Calculation\TableSync.fs"/>
-        <Compile Include="Calculation\Migration.fs"/>
-        <Compile Include="Execution\MigrationStore.fs"/>
-        <Compile Include="Execution\MigrationPrint.fs"/>
-        <Compile Include="Execution\Commit.fs"/>
-        <EmbeddedResource Include="Execution/store_schema.sql"/>
-        <Compile Include="Checks\Algorithms.fs"/>
-        <Compile Include="Reports\Report.fs"/>
-        <Compile Include="Reports\RelationsSummary.fs"/>
-        <Compile Include="Reports\Export.fs"/>
-        <Compile Include="Cli.fs"/>
-    </ItemGroup>
-    <ItemGroup>
-        <PackageReference Include="Dapper.FSharp" Version="4.7.0"/>
-        <PackageReference Include="MBW.Utilities.ManagedSqlite.Sql" Version="0.11.0"/>
-        <PackageReference Include="Spectre.Console" Version="0.48.0"/>
-        <PackageReference Include="SQLitePCLRaw.bundle_sqlite3" Version="2.1.7"/>
-        <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0"/>
-        <PackageReference Include="Nuget.Versioning" Version="6.8.0"/>
-        <PackageReference Include="SqlParserCS" Version="0.1.6"/>
-        <PackageReference Include="SqlPrettify" Version="1.0.3"/>
-        <PackageReference Include="Tomlyn" Version="0.17.0"/>
-    </ItemGroup>
-    <ItemGroup>
-        <Compile Include="properties/AssemblyInfo.fs"/>
-        <None Remove="properties/AssemblyInfo.fs"/>
-        <Content Include="properties/AssemblyInfo.fs" CopyToOutputDirectory="PreserveNewest"/>
-    </ItemGroup>
-    <ItemGroup>
-        <None Include="..\README.md" Pack="true" PackagePath="\"/>
-
-    </ItemGroup>
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageId>MigrateLib</PackageId>
+    <Version>0.0.10</Version>
+    <Authors>Luis Ángel Méndez Gort</Authors>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <AssemblyName>Migrate</AssemblyName>
+    <RootNamespace>Migrate</RootNamespace>
+    <Title>Declarative migrations for SQLite</Title>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Description>Declarative migrations for SQLite</Description>
+    <PackageProjectUrl>https://github.com/lamg/migrate</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/lamg/migrate</RepositoryUrl>
+    <PackageOutputPath>./nupkg</PackageOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Types.fs" />
+    <Compile Include="Print.fs" />
+    <Compile Include="DbUtil.fs" />
+    <Compile Include="SqlParser.fs" />
+    <Compile Include="SqlGeneration/Util.fs" />
+    <Compile Include="SqlGeneration/InsertInto.fs" />
+    <Compile Include="SqlGeneration/Index.fs" />
+    <Compile Include="SqlGeneration/Table.fs" />
+    <Compile Include="SqlGeneration/View.fs" />
+    <Compile Include="SqlGeneration/Row.fs" />
+    <Compile Include="SqlGeneration/Column.fs" />
+    <Compile Include="DbProject/ParseDbToml.fs" />
+    <Compile Include="DbProject/BuildProject.fs" />
+    <Compile Include="DbProject/LoadProjectFiles.fs" />
+    <Compile Include="DbProject/InitProject.fs" />
+    <Compile Include="DbProject\LoadDbSchema.fs" />
+    <Compile Include="Calculation\Solver.fs" />
+    <Compile Include="Calculation\TableSync.fs" />
+    <Compile Include="Calculation\Migration.fs" />
+    <Compile Include="Execution\MigrationStore.fs" />
+    <Compile Include="Execution\MigrationPrint.fs" />
+    <Compile Include="Execution\Commit.fs" />
+    <EmbeddedResource Include="Execution/store_schema.sql" />
+    <Compile Include="Checks\Algorithms.fs" />
+    <Compile Include="Reports\Report.fs" />
+    <Compile Include="Reports\RelationsSummary.fs" />
+    <Compile Include="Reports\Export.fs" />
+    <Compile Include="Cli.fs" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <Compile Include="properties/AssemblyInfo.fs" />
+    <None Remove="properties/AssemblyInfo.fs" />
+    <Content Include="properties/AssemblyInfo.fs" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <Import Project="..\.paket\Paket.Restore.targets" />
 </Project>

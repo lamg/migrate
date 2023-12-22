@@ -217,6 +217,11 @@ let main (args: string array) =
       0
     | _ ->
       let path = results.TryGetResult ProjectPath
+
+      if path.IsSome then
+        let opts = dotenv.net.DotEnvOptions(envFilePaths = [| $"{path.Value}/.env" |])
+        dotenv.net.DotEnv.Load opts
+
       let p = Cli.loadProject path
 
       match command with

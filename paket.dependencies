@@ -1,0 +1,16 @@
+source https://api.nuget.org/v3/index.json
+
+nuget Argu
+nuget Microsoft.Data.Sqlite
+nuget dotenv.net
+nuget SQLitePCLRaw.bundle_sqlite3
+nuget Dapper.FSharp
+nuget MBW.Utilities.ManagedSqlite.Sql
+nuget Spectre.Console
+nuget SqlPrettify
+nuget Tomlyn
+nuget Microsoft.NET.Test.Sdk
+nuget SqlParserCs
+nuget xunit
+nuget xunit.runner.visualstudio
+nuget Nuget.Versioning
