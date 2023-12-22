@@ -10,7 +10,7 @@ open SqlParser.Tokens
 let classifyStatement (acc: SqlFile) (s: Statement) =
   match box s with
   | :? Statement.Insert as s ->
-    let cols = s.Columns |> Seq.map (fun c -> c.Value) |> Seq.toList
+    let cols = s.Columns |> Seq.map _.Value |> Seq.toList
 
     let vss =
       s.Source.Query.Body :?> SetExpression.ValuesExpression
