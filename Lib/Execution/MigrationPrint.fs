@@ -14,7 +14,8 @@ let showMigrations (p: Project) =
     printYellowIntro "schema version" m.schemaVersion
     printYellowIntro "hash" m.hash
     printYellowIntro "date" m.date
-    printYellowIntro "database" m.dbFile)
+    printYellowIntro "database" m.dbFile
+    printfn "")
 
 let formatStep (index: int) (sql: string) (error: string option) =
   match error with
