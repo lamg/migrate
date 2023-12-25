@@ -160,7 +160,7 @@ let lastLogDetailed (p: Project) =
     use conn = DbUtil.openConn p.dbFile
 
     MigrationStore.getMigrations conn
-    |> List.tryLast
+    |> List.tryHead
     |> Option.iter MigrationPrint.printLog
 
     0

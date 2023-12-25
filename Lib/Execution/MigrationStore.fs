@@ -14,7 +14,6 @@
 
 module internal Migrate.MigrationStore
 
-open System.Text.RegularExpressions
 open Migrate.DbProject
 open Migrate.Types
 open System
@@ -23,6 +22,9 @@ open DbUtil
 open Microsoft.Data.Sqlite
 open Print
 open Dapper.FSharp.SQLite
+
+module C = FParsec.CharParsers
+module P = FParsec.Primitives
 
 type Migration =
   { id: int64
@@ -260,19 +262,49 @@ let getMigrations (conn: SqliteConnection) =
 
     migrationLog)
 
-let parseReason r =
-  let added = Regex @"Added ""(.*)"""
-  let removed = Regex @"Removed ""(.*)"""
-  let changed = Regex @"Changed \(""(.*)"",\s+""(.*)""\)"
-  let ra = added.Match r
-  let rr = removed.Match r
-  let rc = changed.Match r
+let parseReason (r: string) =
+  let singleQuote = C.skipString "'"
+  let (>>.) = P.(>>.)
+  let (.>>) = P.(.>>)
+  let (<|>) = P.(<|>)
+  let (>>=) = P.(>>=)
+  let spaces = C.spaces
 
-  match ra.Success, rr.Success, rc.Success with
-  | true, _, _ -> Added ra.Groups[1].Value
-  | _, true, _ -> Removed rr.Groups[1].Value
-  | _, _, true -> Changed(rc.Groups[1].Value, rc.Groups[2].Value)
-  | _ -> failwith $"failed to parse reason while amending last migration: {r}"
+  let str =
+    P.between singleQuote singleQuote (C.manyChars (C.noneOf "'")) .>> spaces
+    >>= (fun v -> P.preturn $"'{v}'")
+
+  let numIdent = C.many1Chars (C.noneOf "\"") .>> spaces
+
+  let token s =
+    C.skipString s >>. spaces >>. P.preturn s
+
+  let doubleQuote = C.skipString "\""
+  let value = P.between doubleQuote doubleQuote (str <|> numIdent)
+  let values = P.sepBy1 value (token ",")
+  let tuple = P.between (token "(") (token ")") values
+
+  let changed =
+    function
+    | [ x; y ] -> Changed(x, y) |> P.preturn
+    | _ -> P.fail "expecting two values"
+
+  let reason =
+    P.parse {
+      do! spaces
+
+      let! r =
+        (token "Added" >>. value >>= (Added >> P.preturn))
+        <|> (token "Removed" >>. value >>= (Removed >> P.preturn))
+        <|> (token "Changed" >>. tuple >>= changed)
+
+      return r
+    }
+
+  C.runParserOnString reason () r r
+  |> function
+    | C.Success(v, _, _) -> v
+    | C.Failure(e, _, _) -> failwith e
 
 let appendLastMigration (conn: SqliteConnection) (m: MigrationLog) (xs: ProposalResult list) =
   let startIndex = int64 m.steps.Length

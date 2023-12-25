@@ -144,7 +144,7 @@ let insertInto (keyIndexes: int list) (left: InsertInto) (right: InsertInto) =
     indexes
     |> List.map (fun i -> xs[i])
     |> List.map Row.sqlExpr
-    |> String.concat ", "
+    |> String.concat "|"
 
   let nonKeyIndexes =
     [ 0 .. left.columns.Length - 1 ]

@@ -94,7 +94,8 @@ let getMigrationsTest () =
 
 [<Fact>]
 let parseReasonTest () =
-  let cases = [ Added "x"; Removed "y"; Changed("x", "y") ]
+  let cases =
+    [ Added "'x'"; Removed "'y'"; Changed("1", "2"); Changed("'x\"'", "'y'") ]
 
   cases
   |> List.iter (fun c ->
