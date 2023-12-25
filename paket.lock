@@ -160,7 +160,7 @@ NUGET
       SQLitePCLRaw.core (>= 2.1.7) - restriction: >= netstandard2.0
     SQLitePCLRaw.provider.sqlite3 (2.1.7) - restriction: >= netstandard2.0
       SQLitePCLRaw.core (>= 2.1.7) - restriction: >= netstandard2.0
-    SqlParserCS (0.1.6)
+    SqlParserCS (0.1.7)
       Microsoft.Extensions.ObjectPool (>= 8.0) - restriction: >= net8.0
     SqlPrettify (1.0.3)
     Superpower (3.0) - restriction: >= netstandard1.0
@@ -588,23 +588,23 @@ NUGET
       System.Threading (>= 4.3) - restriction: && (< monoandroid) (< monotouch) (< net45) (>= netstandard1.3) (< win8) (< wpa81) (< xamarinios) (< xamarinmac) (< xamarintvos) (< xamarinwatchos)
       System.Xml.ReaderWriter (>= 4.3) - restriction: || (&& (< monoandroid) (< monotouch) (< net45) (>= netstandard1.3) (< win8) (< wpa81) (< xamarinios) (< xamarinmac) (< xamarintvos) (< xamarinwatchos)) (&& (< monoandroid) (< net45) (>= netstandard1.0) (< netstandard1.3) (< win8) (< wp8) (< wpa81))
     Tomlyn (0.17)
-    xunit (2.6.3)
-      xunit.analyzers (>= 1.7)
-      xunit.assert (>= 2.6.3)
-      xunit.core (2.6.3)
+    xunit (2.6.4)
+      xunit.analyzers (>= 1.8)
+      xunit.assert (>= 2.6.4)
+      xunit.core (2.6.4)
     xunit.abstractions (2.0.3) - restriction: >= netstandard1.1
       NETStandard.Library (>= 1.6) - restriction: && (< net35) (>= netstandard1.0) (< netstandard2.0)
-    xunit.analyzers (1.7)
-    xunit.assert (2.6.3)
+    xunit.analyzers (1.8)
+    xunit.assert (2.6.4)
       NETStandard.Library (>= 1.6.1) - restriction: && (< net452) (< net6.0) (>= netstandard1.1)
-    xunit.core (2.6.3)
-      xunit.extensibility.core (2.6.3)
-      xunit.extensibility.execution (2.6.3)
-    xunit.extensibility.core (2.6.3)
+    xunit.core (2.6.4)
+      xunit.extensibility.core (2.6.4)
+      xunit.extensibility.execution (2.6.4)
+    xunit.extensibility.core (2.6.4)
       NETStandard.Library (>= 1.6.1) - restriction: && (< net452) (>= netstandard1.1)
       xunit.abstractions (>= 2.0.3) - restriction: >= netstandard1.1
-    xunit.extensibility.execution (2.6.3)
+    xunit.extensibility.execution (2.6.4)
       NETStandard.Library (>= 1.6.1) - restriction: && (< net452) (>= netstandard1.1)
-      xunit.extensibility.core (2.6.3) - restriction: >= netstandard1.1
-    xunit.runner.visualstudio (2.5.5)
+      xunit.extensibility.core (2.6.4) - restriction: >= netstandard1.1
+    xunit.runner.visualstudio (2.5.6)
       Microsoft.TestPlatform.ObjectModel (>= 17.8) - restriction: >= net462

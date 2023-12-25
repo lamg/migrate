@@ -55,11 +55,5 @@
     <ItemGroup>
         <None Include="..\README.md" Pack="true" PackagePath="\"/>
     </ItemGroup>
-    <ItemGroup>
-        <ProjectReference Include="..\paket-files\TylerBrinks\SqlParser-cs\SqlParser-cs-2dd53cd0cf4d7df362b9f81343f8bc9800006e02\src\SqlParser\SqlParser.csproj"/>
-    </ItemGroup>
-    <ItemGroup>
-        <PackageReference Remove="SqlParserCS"/>
-    </ItemGroup>
     <Import Project="..\.paket\Paket.Restore.targets"/>
 </Project>

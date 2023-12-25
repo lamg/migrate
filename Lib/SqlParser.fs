@@ -52,7 +52,11 @@ let classifyStatement (acc: SqlFile) (s: Statement) =
             | :? ColumnOption.Unique as u when u.IsPrimary -> PrimaryKey [] |> Some
             | :? ColumnOption.Unique -> Unique [] |> Some
             | :? ColumnOption.NotNull -> NotNull |> Some
-            | :? ColumnOption.Default as d -> d.Expression.AsLiteral().Value.ToString() |> String |> Default |> Some
+            | :? ColumnOption.Default as d ->
+              d.Expression.AsLiteral().Value.AsSingleQuoted().Value
+              |> String
+              |> Default
+              |> Some
             | :? ColumnOption.DialectSpecific as d when d.Tokens.Contains(Word("AUTOINCREMENT")) ->
               Autoincrement |> Some
             | _ -> None)
@@ -72,7 +76,12 @@ let classifyStatement (acc: SqlFile) (s: Statement) =
       |> Seq.choose (fun c ->
 
         match box c with
-        | :? TableConstraint.Unique as d -> Unique [] |> Some
+        | :? TableConstraint.Unique as d when d.IsPrimaryKey ->
+          let cols = d.Columns |> Seq.map _.Value |> Seq.toList
+          PrimaryKey cols |> Some
+        | :? TableConstraint.Unique as d ->
+          let cols = d.Columns |> Seq.map _.Value |> Seq.toList
+          Unique cols |> Some
         | :? TableConstraint.ForeignKey as fk ->
 
           let fk =
