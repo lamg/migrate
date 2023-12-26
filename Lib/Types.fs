@@ -166,6 +166,7 @@ exception TableShouldHaveSinglePrimaryKey of string
 
 exception FailedLoadResFile of string
 exception FailedOpenStore of string
+exception CorruptedStore of string
 type QueryError = { sql: string; error: string }
 exception FailedQuery of QueryError
 exception FailedParse of string

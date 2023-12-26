@@ -87,17 +87,7 @@ let getMigrationsTest () =
 
   Execution.Commit.migrateAndCommit p
   use conn = DbUtil.openConn p.dbFile
-  let xs = MigrationStore.getMigrations conn
+  let xs = Migrate.Execution.Store.Get.getMigrations conn
   removeFile p0.dbFile
   Assert.Equal(1, xs.Length)
   Assert.Equal("empty project", xs.Head.migration.versionRemarks)
-
-[<Fact>]
-let parseReasonTest () =
-  let cases =
-    [ Added "'x'"; Removed "'y'"; Changed("1", "2"); Changed("'x\"'", "'y'") ]
-
-  cases
-  |> List.iter (fun c ->
-    let r = c.ToString() |> MigrationStore.parseReason
-    Assert.Equal(c, r))

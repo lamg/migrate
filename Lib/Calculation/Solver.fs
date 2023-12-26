@@ -143,7 +143,9 @@ let insertInto (keyIndexes: int list) (left: InsertInto) (right: InsertInto) =
   let selectExpr (indexes: int list) (xs: Expr list) =
     indexes
     |> List.map (fun i -> xs[i])
-    |> List.map Row.sqlExpr
+    |> List.map (function
+      | Integer i -> $"{i}"
+      | String s -> s)
     |> String.concat "|"
 
   let nonKeyIndexes =

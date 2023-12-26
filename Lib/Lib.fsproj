@@ -37,10 +37,14 @@
         <Compile Include="Calculation\Solver.fs"/>
         <Compile Include="Calculation\TableSync.fs"/>
         <Compile Include="Calculation\Migration.fs"/>
-        <Compile Include="Execution\MigrationStore.fs"/>
-        <Compile Include="Execution\MigrationPrint.fs"/>
+        <EmbeddedResource Include="Execution\Store\schema.sql"/>
+        <Compile Include="Execution\Store\Types.fs"/>
+        <Compile Include="Execution\Store\Init.fs"/>
+        <Compile Include="Execution\Store\Insert.fs"/>
+        <Compile Include="Execution\Store\Get.fs"/>
+        <Compile Include="Execution\Store\Amend.fs"/>
+        <Compile Include="Execution\Store\Print.fs"/>
         <Compile Include="Execution\Commit.fs"/>
-        <EmbeddedResource Include="Execution/store_schema.sql"/>
         <Compile Include="Checks\Algorithms.fs"/>
         <Compile Include="Reports\Report.fs"/>
         <Compile Include="Reports\RelationsSummary.fs"/>

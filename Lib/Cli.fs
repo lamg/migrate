@@ -17,6 +17,7 @@ module Migrate.Cli
 open System.IO
 open Migrate.Reports
 open Migrate.Types
+open Migrate.Execution
 
 let openConn = DbUtil.openConn
 
@@ -25,7 +26,7 @@ let openConn = DbUtil.openConn
 /// </summary>
 let commit p =
   try
-    Execution.Commit.migrateAndCommit p
+    Commit.migrateAndCommit p
     0
   with
   | FailedOpenDb e ->
@@ -52,7 +53,7 @@ let commit p =
 /// </summary>
 let commitAmend p =
   try
-    Execution.Commit.commitAmend p
+    Commit.commitAmend p
     0
   with
   | FailedOpenDb e ->
@@ -81,7 +82,7 @@ let commitAmend p =
 /// </summary>
 let manualMigration p =
   try
-    Execution.Commit.manualMigration p
+    Commit.manualMigration p
     0
   with
   | FailedOpenDb e ->
@@ -109,7 +110,7 @@ let manualMigration p =
 /// </summary>
 let status p =
   try
-    Execution.Commit.dryMigration p
+    Commit.dryMigration p
     0
   with
   | FailedOpenDb e ->
@@ -159,9 +160,9 @@ let lastLogDetailed (p: Project) =
   try
     use conn = DbUtil.openConn p.dbFile
 
-    MigrationStore.getMigrations conn
+    Execution.Store.Get.getMigrations conn
     |> List.tryHead
-    |> Option.iter MigrationPrint.printLog
+    |> Option.iter Store.Print.printLog
 
     0
   with
@@ -179,9 +180,9 @@ let lastLogShort (p: Project) =
   try
     use conn = DbUtil.openConn p.dbFile
 
-    MigrationStore.getMigrations conn
+    Store.Get.getMigrations conn
     |> List.tryLast
-    |> Option.iter MigrationPrint.printShortLog
+    |> Option.iter Store.Print.printShortLog
 
     0
   with
@@ -197,7 +198,7 @@ let lastLogShort (p: Project) =
 /// </summary>
 let log p =
   try
-    MigrationPrint.showMigrations p
+    Store.Print.showMigrations p
     0
   with
   | FailedOpenStore e ->
@@ -216,9 +217,9 @@ let logDetailed (p: Project) (commitHash: string) =
   try
     use conn = DbUtil.openConn p.dbFile
 
-    MigrationStore.getMigrations conn
+    Store.Get.getMigrations conn
     |> List.tryFind (fun m -> m.migration.hash.Contains commitHash)
-    |> Option.iter MigrationPrint.printLog
+    |> Option.iter Store.Print.printLog
 
     0
   with

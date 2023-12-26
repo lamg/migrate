@@ -1,13 +1,14 @@
-module internal Migrate.MigrationPrint
+module internal Migrate.Execution.Store.Print
 
-open Types
-open MigrationStore
-open Print
+open Migrate.Types
+open Migrate.Print
+open Migrate.Execution.Store
+open Migrate.Execution.Store.Types
 
 let showMigrations (p: Project) =
-  use conn = DbUtil.openConn p.dbFile
+  use conn = Migrate.DbUtil.openConn p.dbFile
 
-  getMigrations conn
+  Get.getMigrations conn
   |> List.iter (fun x ->
     let m = x.migration
     printYellowIntro "version remarks" m.versionRemarks
@@ -58,5 +59,5 @@ let printMigrationIntent (steps: ProposalResult list) =
     printGreen $"step {i}"
     printYellowIntro $"reason" $"{step.reason}"
 
-    let sql = step.statements |> DbUtil.joinSqlPretty
+    let sql = step.statements |> Migrate.DbUtil.joinSqlPretty
     formatStep i sql step.error)

@@ -12,7 +12,6 @@ CREATE TABLE github_com_lamg_migrate_step
 (
     migrationId integer NOT NULL,
     stepIndex   integer NOT NULL,
-    reason      text    NOT NULL,
     sql         text    NOT NULL,
     PRIMARY KEY (migrationId, stepIndex)
 );
@@ -24,3 +23,16 @@ CREATE TABLE github_com_lamg_migrate_error
     error       text    NOT NULL,
     PRIMARY KEY (migrationId, stepIndex)
 );
+
+CREATE TABLE github_com_lamg_migrate_step_reason
+(
+    id          integer PRIMARY KEY AUTOINCREMENT,
+    migrationId integer NOT NULL,
+    stepIndex   integer NOT NULL,
+    status      text    NOT NULL,
+    entity      text    NOT NULL
+);
+
+-- migration:
+-- parse all reasons and insert them in github_com_lamg_migrate_step_reason
+-- alter table github_com_lamg_migrate_step drop column reason;

@@ -87,7 +87,7 @@ let basicUpdate () =
   let xs = insertsMigration dbSchema emptyProject
 
   let expected =
-    [ { reason = Changed("'zero'", "'one'")
+    [ { reason = Changed("zero", "one")
         statements = [ "UPDATE table0 SET name = 'one' WHERE id = 1" ] } ]
 
   Assert.Equal<SolverProposal list>(expected, xs)

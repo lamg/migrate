@@ -21,6 +21,7 @@ open DbUtil
 open Migrate.SqlGeneration
 open NuGet.Versioning
 open Spectre.Console
+open Migrate.Execution
 
 let replicateInDb (schema: SqlFile) (dbFile: string) =
 
@@ -40,7 +41,7 @@ let replicateInDb (schema: SqlFile) (dbFile: string) =
   use tx = conn.BeginTransaction()
 
   try
-    MigrationStore.initStore conn
+    Store.Init.initStore conn
     runSql conn sql
     tx.Commit()
   with e ->
@@ -94,7 +95,7 @@ type VersionStatus =
 
 let shouldMigrate (p: Project) (conn: SqliteConnection) =
   let _, schemaVersion =
-    MigrationStore.getMigrations conn
+    Store.Get.getMigrations conn
     |> List.tryHead
     |> Option.map _.migration.schemaVersion
     |> Option.defaultValue "0.0.0"
@@ -153,7 +154,7 @@ let execManualMigration (p: Project) (conn: SqliteConnection) (sql: string) =
               statements = [ sql ]
               error = None } ] }
 
-    MigrationStore.storeMigration conn m
+    Store.Insert.storeMigration conn m
 
 let manualMigration (p: Project) =
   use conn = openConn p.dbFile
@@ -181,7 +182,7 @@ let migrateAndCommit (p: Project) =
   use tx = conn.BeginTransaction()
 
   try
-    MigrationStore.initStore conn
+    Store.Init.initStore conn
 
     match shouldMigrate p conn with
     | vs when vs.shouldMigrate ->
@@ -205,7 +206,7 @@ let migrateAndCommit (p: Project) =
       match xs with
       | [] -> nothingToMigrate vs
       | steps ->
-        MigrationStore.storeMigration
+        Store.Insert.storeMigration
           conn
           { steps = steps
             versionRemarks = p.versionRemarks
@@ -221,7 +222,7 @@ let migrateAndCommit (p: Project) =
 
 let commitAmend (p: Project) =
   use conn = openConn p.dbFile
-  let m = MigrationStore.getMigrations conn |> List.tryHead
+  let m = Store.Get.getMigrations conn |> List.tryHead
 
   match m with
   | Some v ->
@@ -232,7 +233,7 @@ let commitAmend (p: Project) =
     try
       match migrateDb p conn with
       | [] -> nothingToMigrate vs
-      | steps -> MigrationStore.appendLastMigration conn v steps
+      | steps -> Store.Amend.amendLastMigration conn v steps
 
       tx.Commit()
     with e ->
@@ -251,8 +252,8 @@ let dryMigration (p: Project) =
   use tempTx = tempConn.BeginTransaction()
 
   try
-    MigrationStore.initStore conn
-    MigrationStore.initStore tempConn
+    Store.Init.initStore conn
+    Store.Init.initStore tempConn
 
     let vs = shouldMigrate p conn
     let xs = migrateDb p tempConn
@@ -268,7 +269,7 @@ let dryMigration (p: Project) =
         Print.printYellow "Otherwise you can use the command `mig commit -a` to amend the last migration"
         printfn ""
 
-      MigrationPrint.printMigrationIntent steps
+      Store.Print.printMigrationIntent steps
   with e ->
     tx.Rollback()
     Print.printRed e.Message
