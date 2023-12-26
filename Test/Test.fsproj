@@ -14,12 +14,17 @@
         <Compile Include="Report.fs"/>
         <Compile Include="Execution.fs"/>
         <Compile Include="SqlGeneration.fs"/>
+        <Compile Include="Store.fs"/>
         <Compile Include="TableSync.fs"/>
         <Compile Include="Program.fs"/>
     </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\Lib\Lib.fsproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Hedgehog.Xunit" Version="0.6.0"/>
     </ItemGroup>
     <Import Project="..\.paket\Paket.Restore.targets"/>
 </Project>
