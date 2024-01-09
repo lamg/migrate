@@ -222,7 +222,7 @@ let main (args: string array) =
         let opts = dotenv.net.DotEnvOptions(envFilePaths = [| $"{path.Value}/.env" |])
         dotenv.net.DotEnv.Load opts
 
-      let p = Cli.loadProject path
+      let p = Cli.loadProjectFromDir path
 
       match command with
       | Some(DbSchema flags) -> dumpSchema p flags

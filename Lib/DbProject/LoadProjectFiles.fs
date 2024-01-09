@@ -20,26 +20,27 @@ open Migrate.Types
 open Migrate.DbProject.ParseDbToml
 open Migrate.DbProject.BuildProject
 
-let loadProjectFiles (basePath: string) (p: DbTomlFile) =
-  let reader (file: string) =
-    use f = new StreamReader(Path.Combine(basePath, file))
-    (file, f.ReadToEnd())
+let loadResourceFile (asm: Assembly) (resourcePrefix: string) (file: string) =
+  let filePath = $"{resourcePrefix}.{file}"
 
-  buildProject reader p
+  try
+    use stream = asm.GetManifestResourceStream filePath
+    use file = new StreamReader(stream)
+    file.ReadToEnd()
+  with ex ->
+    FailedLoadResFile $"failed loading resource file {filePath}: {ex.Message}"
+    |> raise
 
-let loadProjectFromRes (asm: Assembly) =
-  let loadFile = Migrate.DbUtil.loadFromRes asm
-  let baseName = asm.GetName().Name
-  let _, dbToml = loadFile baseName projectFileName
-  let src = parseDbTomlFile dbToml
+let loadProjectWith (loadFile: string -> string) =
+  let dbToml = loadFile projectFileName
+  let src = parseDbToml dbToml
+  buildProject loadFile src
 
-  buildProject (loadFile baseName) src
-
-let loadProjectAt (path: string) =
-  let dbToml = Path.Combine(path, projectFileName)
-  let src = parseDbTomlFile dbToml
-  src |> loadProjectFiles path
-
-let loadProject (dir: string option) =
+let loadProjectFromDir (dir: string option) =
   let d = Option.defaultValue (Directory.GetCurrentDirectory()) dir
-  loadProjectAt d
+
+  let loadFile f =
+    use f = new StreamReader(Path.Combine(d, f))
+    f.ReadToEnd()
+
+  loadProjectWith loadFile

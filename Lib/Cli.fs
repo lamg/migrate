@@ -254,23 +254,23 @@ let syncReports p =
     1
 
 /// <summary>
-/// Loads a project from the file system
+/// Convenience function for loading project files from assembly resources
 /// Raises MalformedProject in case of failure
 /// </summary>
-let loadProject (dir: string option) =
-  Migrate.DbProject.LoadProjectFiles.loadProject dir
-
-let loadProjectFromRes asm =
-  Migrate.DbProject.LoadProjectFiles.loadProjectFromRes asm
-
-let loadProjectAt dir =
-  Migrate.DbProject.LoadProjectFiles.loadProjectAt dir
+let loadResourceFile (asm: System.Reflection.Assembly) (prefix: string) (file: string) =
+  Migrate.DbProject.LoadProjectFiles.loadResourceFile asm prefix file
 
 /// <summary>
-/// Loads a file from the resources embedded in the assembly
-/// Raises FailedLoadingResFile in case of failure
+/// Loads a project using a custom file reader
 /// </summary>
-let loadFromRes = DbUtil.loadFromRes
+let loadProjectWith (loadFile: string -> string) =
+  Migrate.DbProject.LoadProjectFiles.loadProjectWith loadFile
+
+/// <summary>
+/// Loads a project from a directory if specified or the current one instead
+/// </summary>
+let loadProjectFromDir (dir: string option) =
+  Migrate.DbProject.LoadProjectFiles.loadProjectFromDir dir
 
 /// <summary>
 /// Initializes a project in the current directory

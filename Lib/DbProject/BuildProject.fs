@@ -42,12 +42,12 @@ let mergeTomlSql (p: DbTomlFile) (src: SqlFile) =
     pullScript = p.pullScript
     schemaVersion = p.schemaVersion }
 
-let buildProject (reader: string -> string * string) (p: DbTomlFile) =
+let buildProject (reader: string -> string) (p: DbTomlFile) =
   let parse (file, sql) =
     match parseSql file sql with
     | Ok p -> p
     | Error e -> MalformedProject e |> raise
 
-  let fileContent = p.files |> List.map reader
+  let fileContent = p.files |> List.map (fun f -> f, reader f)
   let sql = fileContent |> List.map parse
   sql |> collectSql |> mergeTomlSql p
