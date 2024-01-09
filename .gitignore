@@ -10,6 +10,8 @@
 .idea
 .vscode
 global.json
+*.sublime-project
+*.sublime-workspace
 
 # User-specific files
 *.rsuser
