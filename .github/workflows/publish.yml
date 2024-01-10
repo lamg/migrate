@@ -19,7 +19,7 @@ jobs:
           dotnet paket restore
           dotnet publish -c Release
           dotnet pack
-          dotnet nuget push nupkg/*.nupgk -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json
+          dotnet nuget push nupkg/*.nupkg -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json
         working-directory: ./Cli
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
@@ -30,7 +30,7 @@ jobs:
           dotnet paket restore
           dotnet publish -c Release
           dotnet pack
-          dotnet nuget push nupkg/*.nupgk -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json
+          dotnet nuget push nupkg/*.nupkg -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json
         working-directory: ./Lib
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
