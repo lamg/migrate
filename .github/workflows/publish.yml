@@ -1,0 +1,32 @@
+name: Publish NuGet Package                                                  
+  on:                                                                          
+    push:                                                                      
+      tags:                                                                    
+        - '*'                                                                  
+
+jobs:                                                                        
+    build:
+      runs-on: ubuntu-latest
+      container:
+        image: mcr.microsoft.com/dotnet/sdk:8.0
+
+      steps:
+      - uses: actions/checkout@v4                                                          
+      
+      - name: publish migtool
+        run: |
+          dotnet publish -c Release
+          dotnet pack
+          dotnet nuget push nupkg/*.nupgk -s
+        working-directory: ./Cli
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+
+      - name: publish migtool
+        run: |
+          dotnet publish -c Release
+          dotnet pack
+          dotnet nuget push nupkg/*.nupgk -s
+        working-directory: ./Lib
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}

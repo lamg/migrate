@@ -26,7 +26,7 @@ let openConn = DbUtil.openConn
 /// </summary>
 let commit p =
   try
-    Commit.migrateAndCommit p
+    Commit.migrateAndCommit p false
     0
   with
   | FailedOpenDb e ->
@@ -252,25 +252,6 @@ let syncReports p =
   with FailedOpenDb e ->
     $"Failed to open database {e.dbFile}: {e.msg}" |> Print.printRed
     1
-
-/// <summary>
-/// Convenience function for loading project files from assembly resources
-/// Raises MalformedProject in case of failure
-/// </summary>
-let loadResourceFile (asm: System.Reflection.Assembly) (prefix: string) (file: string) =
-  Migrate.DbProject.LoadProjectFiles.loadResourceFile asm prefix file
-
-/// <summary>
-/// Loads a project using a custom file reader
-/// </summary>
-let loadProjectWith (loadFile: string -> string) =
-  Migrate.DbProject.LoadProjectFiles.loadProjectWith loadFile
-
-/// <summary>
-/// Loads a project from a directory if specified or the current one instead
-/// </summary>
-let loadProjectFromDir (dir: string option) =
-  Migrate.DbProject.LoadProjectFiles.loadProjectFromDir dir
 
 /// <summary>
 /// Initializes a project in the current directory

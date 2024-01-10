@@ -85,7 +85,7 @@ let getMigrationsTest () =
         source = schema0
         schemaVersion = "0.0.1" }
 
-  Execution.Commit.migrateAndCommit p
+  Execution.Commit.migrateAndCommit p true
   use conn = DbUtil.openConn p.dbFile
   let xs = Migrate.Execution.Store.Get.getMigrations conn
   removeFile p0.dbFile

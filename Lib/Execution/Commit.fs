@@ -111,13 +111,13 @@ let shouldMigrate (p: Project) (conn: SqliteConnection) =
     projectVersion = projectVersion
     dbSchemaVersion = schemaVersion }
 
-let nothingToMigrate
-  ({ projectVersion = pv
-     dbSchemaVersion = sv }: VersionStatus)
-  =
-  Print.printYellow "Nothing to migrate"
-  printfn $"Latest project version: {pv}"
-  printfn $"Latest database version: {sv}"
+let nothingToMigrate (v: VersionStatus) (quiet: bool) =
+  if quiet then
+    ()
+  else
+    Print.printYellow "Nothing to migrate"
+    printfn $"Latest project version: {v.projectVersion}"
+    printfn $"Latest database version: {v.dbSchemaVersion}"
 
 let createTempDb (schema: SqlFile) (filename: string) =
   let filename = System.IO.Path.GetFileName filename
@@ -169,14 +169,14 @@ let manualMigration (p: Project) =
       Print.printYellow "executing migration…"
       execManualMigration p conn sql
       Print.printGreen "migration executed"
-    | vs -> nothingToMigrate vs
+    | vs -> nothingToMigrate vs false
 
     tx.Commit()
   with e ->
     tx.Rollback()
     Print.printRed e.Message
 
-let migrateAndCommit (p: Project) =
+let migrateAndCommit (p: Project) (quiet: bool) =
   use conn = openConn p.dbFile
   conn.Open()
   use tx = conn.BeginTransaction()
@@ -204,7 +204,7 @@ let migrateAndCommit (p: Project) =
         |> Async.RunSynchronously
 
       match xs with
-      | [] -> nothingToMigrate vs
+      | [] -> nothingToMigrate vs quiet
       | steps ->
         Store.Insert.storeMigration
           conn
@@ -213,7 +213,7 @@ let migrateAndCommit (p: Project) =
             schemaVersion = p.schemaVersion
             date = Print.nowStr () }
 
-    | vs -> nothingToMigrate vs
+    | vs -> nothingToMigrate vs quiet
 
     tx.Commit()
   with e ->
@@ -232,7 +232,7 @@ let commitAmend (p: Project) =
 
     try
       match migrateDb p conn with
-      | [] -> nothingToMigrate vs
+      | [] -> nothingToMigrate vs false
       | steps -> Store.Amend.amendLastMigration conn v steps
 
       tx.Commit()
@@ -260,7 +260,7 @@ let dryMigration (p: Project) =
     tx.Commit()
 
     match xs with
-    | [] -> nothingToMigrate vs
+    | [] -> nothingToMigrate vs false
     | steps ->
       if not vs.shouldMigrate then
         Print.printYellow $"Have in mind since the project and database versions ({vs.projectVersion}) are the same,"
