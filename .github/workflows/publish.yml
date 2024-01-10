@@ -15,9 +15,9 @@ jobs:
 
       - name: check environment
         run: |
-        echo $PWD
-        ls
-        exit 1
+          echo $PWD
+          ls
+          exit 1
       
       - name: publish migtool
         run: |
