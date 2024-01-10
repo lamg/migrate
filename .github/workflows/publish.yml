@@ -11,7 +11,13 @@ jobs:
         image: mcr.microsoft.com/dotnet/sdk:8.0
 
       steps:
-      - uses: actions/checkout@v4                                                          
+      - uses: actions/checkout@v4
+
+      - name: check environment
+        run: |
+        echo $PWD
+        ls
+        exit 1
       
       - name: publish migtool
         run: |
@@ -20,7 +26,7 @@ jobs:
           dotnet publish -c Release
           dotnet pack
           dotnet nuget push nupkg/*.nupgk -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json
-        working-directory: ./Cli
+        working-directory: ./migrate/migrate/Cli
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
 
@@ -31,6 +37,6 @@ jobs:
           dotnet publish -c Release
           dotnet pack
           dotnet nuget push nupkg/*.nupgk -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json
-        working-directory: ./Lib
+        working-directory: ./migrate/migrate/Lib
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
