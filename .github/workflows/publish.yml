@@ -13,12 +13,6 @@ jobs:
       steps:
       - uses: actions/checkout@v4
 
-      - name: check environment
-        run: |
-          echo $PWD
-          ls
-          exit 1
-      
       - name: publish migtool
         run: |
           dotnet tool restore
@@ -26,7 +20,7 @@ jobs:
           dotnet publish -c Release
           dotnet pack
           dotnet nuget push nupkg/*.nupgk -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json
-        working-directory: ./migrate/migrate/Cli
+        working-directory: ./Cli
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
 
@@ -37,6 +31,6 @@ jobs:
           dotnet publish -c Release
           dotnet pack
           dotnet nuget push nupkg/*.nupgk -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json
-        working-directory: ./migrate/migrate/Lib
+        working-directory: ./Lib
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
