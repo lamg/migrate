@@ -1,8 +1,8 @@
-name: Publish NuGet Package                                                  
-  on:                                                                          
-    push:                                                                      
-      tags:                                                                    
-        - '*'                                                                  
+name: Publish NuGet Package
+on:
+  push:
+    tags:
+      - '*'
 
 jobs:                                                                        
     build:
