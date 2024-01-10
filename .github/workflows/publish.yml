@@ -19,18 +19,18 @@ jobs:
           dotnet paket restore
           dotnet publish -c Release
           dotnet pack
-          dotnet nuget push nupkg/*.nupgk -s
+          dotnet nuget push nupkg/*.nupgk -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json
         working-directory: ./Cli
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
 
-      - name: publish migtool
+      - name: publish MigrateLib
         run: |
           dotnet tool restore
           dotnet paket restore
           dotnet publish -c Release
           dotnet pack
-          dotnet nuget push nupkg/*.nupgk -s
+          dotnet nuget push nupkg/*.nupgk -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json
         working-directory: ./Lib
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
