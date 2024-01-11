@@ -1,6 +1,7 @@
 source https://api.nuget.org/v3/index.json
 
 nuget Argu
+nuget Hedgehog.Xunit
 nuget Microsoft.Data.Sqlite
 nuget dotenv.net
 nuget SQLitePCLRaw.bundle_sqlite3
