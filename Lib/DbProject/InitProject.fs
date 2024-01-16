@@ -31,27 +31,17 @@ version_remarks = "project initialization"
 schema_version = "0.0.1"
 db_file = "new_db"
 files = ["schema.sql"]
-pull_script = "pull_script"
 """
 
   let envFile =
     "
-new_db=new_db.sqlite3
-pull_script=pull.sh"
+new_db=new_db.sqlite3"
 
   let schemaContent = "CREATE TABLE user(id integer NOT NULL, name text NOT NULL);"
-
-  let pullScript =
-    "
-#!/usr/bin/env bash
-echo 'not implemented'
-exit 1
-"
 
   let currDir = System.Environment.CurrentDirectory
   let projFilePath = Path.Combine(currDir, ParseDbToml.projectFileName)
 
   writeFile projFilePath projectContent
   writeFile "schema.sql" schemaContent
-  writeFile "pull.sh" pullScript
   writeFile ".env" envFile
