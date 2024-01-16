@@ -4,6 +4,7 @@
         <Version>0.0.14</Version>
         <OutputType>Exe</OutputType>
         <TargetFramework>net8.0</TargetFramework>
+        <RollForward>major</RollForward>
         <PackAsTool>true</PackAsTool>
         <ToolCommandName>mig</ToolCommandName>
         <PackageOutputPath>./nupkg</PackageOutputPath>
