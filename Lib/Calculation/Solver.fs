@@ -138,7 +138,7 @@ let constraints (views: CreateView list) (right: CreateTable) (xs: ColumnConstra
 
   createDelete xs ys keySel keySel constraintSolution constraintSolution
 
-let insertInto (keyIndexes: int list) (left: InsertInto) (right: InsertInto) =
+let tableSyncs (keyIndexes: int list) (left: InsertInto) (right: InsertInto) =
 
   let selectExpr (indexes: int list) (xs: Expr list) =
     indexes
@@ -170,3 +170,10 @@ let insertInto (keyIndexes: int list) (left: InsertInto) (right: InsertInto) =
     (Row.sqlDeleteRow right keyIndexes)
     (Row.sqlInsertRow right)
     toUpdate
+
+let tableInits (left: InsertInto) (right: InsertInto) =
+  match left.values with
+  | [] ->
+    [ { reason = Diff.Added(right.values |> SqlGeneration.InsertInto.sqlValues)
+        statements = SqlGeneration.InsertInto.sqlInsertInto right } ]
+  | _ -> []

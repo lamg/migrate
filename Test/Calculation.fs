@@ -20,6 +20,7 @@ open Xunit
 
 let emptySchema =
   { tableSyncs = []
+    tableInits = []
     tables = []
     views = []
     indexes = [] }
@@ -30,6 +31,7 @@ let emptyProject =
     dbFile = "db.sqlite3"
     source = emptySchema
     syncs = []
+    inits = []
     reports = []
     pullScript = None }
 

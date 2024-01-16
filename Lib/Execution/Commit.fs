@@ -29,12 +29,17 @@ let replicateInDb (schema: SqlFile) (dbFile: string) =
 
   let views = schema.views |> List.map View.sqlCreateView
 
-  let inserts = schema.tableSyncs |> List.map InsertInto.sqlInsertInto
+  let tableSyncs = schema.tableSyncs |> List.map InsertInto.sqlInsertInto
+
+  let tableInits = schema.tableInits |> List.map InsertInto.sqlInsertInto
 
   let indexes = schema.indexes |> List.map Index.sqlCreateIndex
 
   let sql =
-    [ tables; views; inserts; indexes ] |> List.concat |> List.concat |> joinSql
+    [ tables; views; tableSyncs; tableInits; indexes ]
+    |> List.concat
+    |> List.concat
+    |> joinSql
 
   use conn = openConn dbFile
   conn.Open()

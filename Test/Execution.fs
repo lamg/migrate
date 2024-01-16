@@ -20,6 +20,7 @@ open Types
 
 let emptySchema =
   { tableSyncs = []
+    tableInits = []
     tables = []
     views = []
     indexes = [] }
@@ -30,6 +31,7 @@ let emptyProject: Project =
     versionRemarks = "empty project"
     source = emptySchema
     syncs = []
+    inits = []
     reports = []
     pullScript = None }
 

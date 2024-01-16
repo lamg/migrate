@@ -12,3 +12,5 @@ It defines the following fields:
 the current version schema.
 - `table_sync`: a list of tables whose values are synchronized
 with an insert statement in one of the project files.
+- `table_init`: a list of tables whose values will be set from an insert
+statement, in case the table is empty.

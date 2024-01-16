@@ -27,6 +27,7 @@ let exampleProject =
     versionRemarks = "test"
     reports = [ { src = "rel0"; dest = "rel0_report" } ]
     syncs = []
+    inits = []
     pullScript = None
     source =
       { tables =
@@ -50,6 +51,7 @@ let exampleProject =
               constraints = [ Unique [ "col0" ] ] } ]
         views = []
         tableSyncs = []
+        tableInits = []
         indexes = [] } }
 
 type Rel0 = { col0: int; col1: string }

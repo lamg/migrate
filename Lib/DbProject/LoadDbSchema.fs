@@ -21,22 +21,33 @@ open Migrate.DbUtil
 open Migrate.SqlParser
 open Dapper.FSharp.SQLite
 
-let relationValues (conn: SqliteConnection) (relation: string) (cols: string list) (readRow: IDataReader -> Expr list) =
-  let joinedCols = cols |> Migrate.SqlGeneration.Util.sepComma id
-
-  let query = $"SELECT {joinedCols} FROM {relation}"
+let valuesFromStatement (conn: SqliteConnection) (selectStatement: string) (readRow: IDataReader -> Expr list) =
   let c = conn.CreateCommand()
-  c.CommandText <- query
+  c.CommandText <- selectStatement
   let rd = c.ExecuteReader()
 
+  seq {
+    while rd.Read() do
+      let vs = readRow rd
+      yield vs
+  }
+  |> Seq.toList
 
-  let vss =
-    seq {
-      while rd.Read() do
-        let vs = readRow rd
-        yield vs
-    }
-    |> Seq.toList
+type RelationReader = SqliteConnection -> string -> string list -> (IDataReader -> Expr list) -> InsertInto
+
+let allRows (conn: SqliteConnection) (relation: string) (cols: string list) (readRow: IDataReader -> Expr list) =
+  let joinedCols = cols |> Migrate.SqlGeneration.Util.sepComma id
+  let statement = $"SELECT {joinedCols} FROM {relation}"
+  let vss = valuesFromStatement conn statement readRow
+
+  { table = relation
+    columns = cols
+    values = vss }
+
+let justOneRow (conn: SqliteConnection) (relation: string) (cols: string list) (readRow: IDataReader -> Expr list) =
+  let joinedCols = cols |> Migrate.SqlGeneration.Util.sepComma id
+  let statement = $"SELECT {joinedCols} FROM {relation} LIMIT 1"
+  let vss = valuesFromStatement conn statement readRow
 
   { table = relation
     columns = cols
@@ -49,13 +60,13 @@ let rowReader (xs: SqlType list) (rd: IDataReader) =
     | SqlText -> rd.GetString i |> String
     | SqlInteger -> rd.GetInt32 i |> Integer)
 
-let tableValues (conn: SqliteConnection) (ct: CreateTable) =
+let tableValues (conn: SqliteConnection) (relReader: RelationReader) (ct: CreateTable) =
   let cols = ct.columns |> List.map _.name
   let types = ct.columns |> List.map _.columnType
   let readRow = rowReader types
 
   try
-    relationValues conn ct.name cols readRow
+    relReader conn ct.name cols readRow
   with :? SqliteException as e ->
     if e.Message.Contains "no such table" then
       { table = ct.name
@@ -102,6 +113,7 @@ let dbSchema (p: Project) (conn: SqliteConnection) =
     { tables = []
       views = []
       tableSyncs = []
+      tableInits = []
       indexes = [] }
 
   let schema =
@@ -111,20 +123,30 @@ let dbSchema (p: Project) (conn: SqliteConnection) =
       | xs ->
         xs
         |> joinSql
-        |> parseSql conn.DataSource
+        |> parseSql p.inits conn.DataSource
         |> function
           | Ok f -> f
           | Error e -> FailedParse e |> raise
 
-  let schemaWithIns =
+  let schemaWithSyncs =
     p.syncs
     |> List.choose (fun ts ->
       p.source.tables
       |> List.tryFind (fun n -> n.name = ts)
-      |> Option.map (tableValues conn))
+      |> Option.map (tableValues conn allRows))
     |> (fun ins -> { schema with tableSyncs = ins })
 
-  schemaWithIns
+  let schemaWithInits =
+    p.inits
+    |> List.choose (fun tableInit ->
+      p.source.tables
+      |> List.tryFind (fun n -> n.name = tableInit)
+      |> Option.map (tableValues conn justOneRow))
+    |> (fun ins ->
+      { schemaWithSyncs with
+          tableInits = ins })
+
+  schemaWithInits
 
 let migrationSchema (conn: SqliteConnection) =
   sqliteMasterStatements conn
@@ -136,7 +158,7 @@ let migrationSchema (conn: SqliteConnection) =
     | xs ->
       xs
       |> joinSql
-      |> parseSql conn.DataSource
+      |> parseSql [] conn.DataSource
       |> function
         | Ok f -> Some f
         | Error e -> FailedParse $"Loading migration tables:\n{e}" |> raise

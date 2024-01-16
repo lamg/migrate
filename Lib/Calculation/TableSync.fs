@@ -87,7 +87,7 @@ let reorderList (swaps: int array) (xs: 'a list) =
 
   ys |> Array.toList
 
-let insertsMigration (dbSchema: SqlFile) (p: Project) =
+let tableSyncsMigration (dbSchema: SqlFile) (p: Project) =
   let key (i: InsertInto) = i.table
   let value = id
 
@@ -113,5 +113,5 @@ let insertsMigration (dbSchema: SqlFile) (p: Project) =
 
     let primaryKey = table |> findKeyCols |> findKeyIndexes table
 
-    Solver.insertInto primaryKey left right)
+    Solver.tableSyncs primaryKey left right)
   |> List.concat

@@ -61,10 +61,10 @@ type CreateIndex =
 
 type SqlFile =
   { tableSyncs: InsertInto list
+    tableInits: InsertInto list
     views: CreateView list
     tables: CreateTable list
     indexes: CreateIndex list }
-
 
 type TableSync = { table: string; idCol: int }
 
@@ -74,6 +74,7 @@ type Project =
   { dbFile: string
     source: SqlFile
     syncs: string list
+    inits: string list
     reports: Report list
     pullScript: string option
     schemaVersion: string
@@ -96,6 +97,10 @@ type DbTomlFile =
     /// </summary>
     syncs: string list
 
+    /// <summary>
+    /// List of tables to initialize with insert values if empty
+    /// </summary>
+    inits: string list
     /// <summary>
     /// List of reports (a view and a table that acts as cache for the data the view generates)
     /// </summary>

@@ -39,13 +39,26 @@ let constraintsMigration (dbSchema: SqlFile) (p: Project) =
   |> List.map (fun (table, left, right) -> Solver.constraints dbSchema.views (findTable p.source table) left right)
   |> List.concat
 
+let tableInitsMigration (dbSchema: SqlFile) (p: Project) =
+  let filterInits =
+    List.filter (fun (t: InsertInto) -> p.inits |> List.exists (fun x -> x = t.table))
+
+  let leftInits = dbSchema.tableInits |> filterInits
+  let rightInits = p.source.tableInits |> filterInits
+  let homologousInits = zipHomologous leftInits rightInits (_.table) id
+
+  homologousInits
+  |> List.map (fun (_, left, right) -> Solver.tableInits left right)
+  |> List.concat
+
 let migration (dbSchema: SqlFile) (p: Project) =
   let migrators =
     [ tablesMigration
       viewsMigration
       columnsMigration
       constraintsMigration
-      insertsMigration ]
+      tableSyncsMigration
+      tableInitsMigration ]
 
   let findMap (f: 'a -> 'b option) (xs: 'a list) = xs |> Seq.choose f |> Seq.tryHead
 

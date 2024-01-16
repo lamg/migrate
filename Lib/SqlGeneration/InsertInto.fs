@@ -27,10 +27,13 @@ let sqlRowToString (vs: Expr list) =
 let sqlColumnNames (i: InsertInto) =
   i.columns |> String.concat ", " |> (fun c -> $"({c})")
 
+let sqlValues (vss: Expr list list) =
+  vss |> List.map sqlRowToString |> String.concat ",\n"
+
 let sqlInsertInto (i: InsertInto) =
   match i.values with
   | [] -> []
   | _ ->
     let columns = sqlColumnNames i
-    let values = i.values |> List.map sqlRowToString |> String.concat ",\n"
+    let values = i.values |> sqlValues
     [ $"INSERT INTO {i.table}{columns} VALUES\n{values}" ]

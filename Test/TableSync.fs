@@ -18,50 +18,7 @@ open Xunit
 
 open Migrate.Types
 open Migrate.Calculation.TableSync
-
-let emptySchema =
-  { tableSyncs = []
-    tables = []
-    views = []
-    indexes = [] }
-
-let colInt name =
-  { name = name
-    columnType = SqlInteger
-    constraints = [ PrimaryKey [] ] }
-
-let colStr name =
-  { name = name
-    columnType = SqlInteger
-    constraints = [ NotNull ] }
-
-let emptyInsert: InsertInto =
-  { table = "table0"
-    columns = [ "id"; "name" ]
-    values = [] }
-
-let oneRowInsert: InsertInto =
-  { emptyInsert with
-      values = [ [ Integer 1; String "one" ] ] }
-
-let schemaWithOneTable =
-  { emptySchema with
-      tables =
-        [ { name = "table0"
-            columns = [ colInt "id"; colStr "name" ]
-            constraints = [] } ]
-      tableSyncs = [ oneRowInsert ] }
-
-
-let emptyProject =
-  { versionRemarks = "empty project"
-    schemaVersion = "0.0.1"
-    dbFile = "db.sqlite3"
-    source = schemaWithOneTable
-    syncs = [ "table0" ]
-    inits = []
-    reports = []
-    pullScript = None }
+open Util
 
 [<Fact>]
 let basicInsert () =
@@ -69,7 +26,7 @@ let basicInsert () =
     { schemaWithOneTable with
         tableSyncs = [ emptyInsert ] }
 
-  let xs = insertsMigration dbSchema emptyProject
+  let xs = tableSyncsMigration dbSchema projectWithOneTable
 
   let expected =
     [ { reason = Added "1"
@@ -85,7 +42,7 @@ let basicUpdate () =
           [ { oneRowInsert with
                 values = [ [ Integer 1; String "zero" ] ] } ] }
 
-  let xs = insertsMigration dbSchema emptyProject
+  let xs = tableSyncsMigration dbSchema projectWithOneTable
 
   let expected =
     [ { reason = Changed("zero", "one")
@@ -100,9 +57,9 @@ let basicDelete () =
         tableSyncs = [ oneRowInsert ] }
 
   let xs =
-    insertsMigration
+    tableSyncsMigration
       dbSchema
-      { emptyProject with
+      { projectWithOneTable with
           source.tableSyncs = [ emptyInsert ] }
 
   let expected =
@@ -129,11 +86,11 @@ let basicInsertWithKeyInPos2 () =
               values = [ [ String "one"; Integer 1 ] ] } ] }
 
   let project =
-    { emptyProject with
+    { projectWithOneTable with
         source = projectSchema
         syncs = [ "table0" ] }
 
-  let xs = insertsMigration schema project
+  let xs = tableSyncsMigration schema project
 
   let expected =
     [ { reason = Added "1"

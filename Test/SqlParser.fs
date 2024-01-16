@@ -72,5 +72,5 @@ VALUES ('value0'),
        ('value0');
   "
 
-  let r = Migrate.SqlParser.parseSql "parseInsert" sql
+  let r = Migrate.SqlParser.parseSql [] "parseInsert" sql
   r |> Result.isOk |> Assert.True

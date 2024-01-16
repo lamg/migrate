@@ -71,6 +71,7 @@ let tempDb =
     { tables = []
       indexes = []
       tableSyncs = []
+      tableInits = []
       views = [] }
     "store_insert_test"
 

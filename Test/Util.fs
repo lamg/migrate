@@ -14,5 +14,51 @@
 
 module Util
 
+open Migrate.Types
+
 let setenv var value =
   System.Environment.SetEnvironmentVariable(var, value)
+
+let emptySchema =
+  { tableSyncs = []
+    tableInits = []
+    tables = []
+    views = []
+    indexes = [] }
+
+let colInt name =
+  { name = name
+    columnType = SqlInteger
+    constraints = [ PrimaryKey [] ] }
+
+let colStr name =
+  { name = name
+    columnType = SqlInteger
+    constraints = [ NotNull ] }
+
+let emptyInsert: InsertInto =
+  { table = "table0"
+    columns = [ "id"; "name" ]
+    values = [] }
+
+let oneRowInsert: InsertInto =
+  { emptyInsert with
+      values = [ [ Integer 1; String "one" ] ] }
+
+let schemaWithOneTable =
+  { emptySchema with
+      tables =
+        [ { name = "table0"
+            columns = [ colInt "id"; colStr "name" ]
+            constraints = [] } ]
+      tableSyncs = [ oneRowInsert ] }
+
+let projectWithOneTable =
+  { versionRemarks = "empty project"
+    schemaVersion = "0.0.1"
+    dbFile = "db.sqlite3"
+    source = schemaWithOneTable
+    syncs = [ "table0" ]
+    inits = []
+    reports = []
+    pullScript = None }

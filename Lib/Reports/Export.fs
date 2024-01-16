@@ -31,7 +31,7 @@ let findRelation (p: Project) (relation: string) =
 let exportTable (p: Project) (table: CreateTable) =
   use conn = openConn p.dbFile
 
-  LoadDbSchema.tableValues conn table
+  LoadDbSchema.tableValues conn LoadDbSchema.allRows table
   |> SqlGeneration.InsertInto.sqlInsertInto
   |> joinSqlPretty
 
@@ -41,7 +41,7 @@ let exportView (p: Project) (view: string) =
   let rd = rowReader cols
   use conn = openConn p.dbFile
 
-  LoadDbSchema.relationValues conn view colNames rd
+  LoadDbSchema.allRows conn view colNames rd
   |> SqlGeneration.InsertInto.sqlInsertInto
   |> joinSqlPretty
 

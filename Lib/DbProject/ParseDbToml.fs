@@ -89,7 +89,9 @@ let parseDbToml (source: string) =
     | Some n -> n
     | None -> MalformedProject $"{ctx}: environment variable '{var}' not defined" |> raise
 
-  let syncs = tryGetArray doc syncTable
+  let syncs = tryGetArray doc tableSync
+
+  let inits = tryGetArray doc tableInit
 
   let reports =
     match tryGetTableArray doc reportTable with
@@ -125,6 +127,7 @@ let parseDbToml (source: string) =
       reports = reports
       files = files
       syncs = syncs
+      inits = inits
       pullScript = script
       schemaVersion = version
       versionRemarks = remarks }

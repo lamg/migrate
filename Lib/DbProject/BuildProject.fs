@@ -20,6 +20,7 @@ open Migrate.SqlParser
 let collectSql (xs: SqlFile list) =
   let r =
     { tableSyncs = []
+      tableInits = []
       tables = []
       views = []
       indexes = [] }
@@ -28,6 +29,7 @@ let collectSql (xs: SqlFile list) =
   |> List.fold
     (fun acc n ->
       { tableSyncs = acc.tableSyncs @ n.tableSyncs
+        tableInits = acc.tableInits @ n.tableInits
         tables = acc.tables @ n.tables
         views = acc.views @ n.views
         indexes = acc.indexes @ n.indexes })
@@ -38,13 +40,14 @@ let mergeTomlSql (p: DbTomlFile) (src: SqlFile) =
     dbFile = p.dbFile
     source = src
     syncs = p.syncs
+    inits = p.inits
     reports = p.reports
     pullScript = p.pullScript
     schemaVersion = p.schemaVersion }
 
 let buildProject (reader: string -> string) (p: DbTomlFile) =
   let parse (file, sql) =
-    match parseSql file sql with
+    match parseSql p.inits file sql with
     | Ok p -> p
     | Error e -> MalformedProject e |> raise
 

@@ -7,7 +7,7 @@ open Migrate.Types
 open SqlParser.Dialects
 open SqlParser.Tokens
 
-let classifyStatement (acc: SqlFile) (s: Statement) =
+let classifyStatement (inits: string list) (acc: SqlFile) (s: Statement) =
   match box s with
   | :? Statement.Insert as s ->
     let cols = s.Columns |> Seq.map _.Value |> Seq.toList
@@ -33,8 +33,12 @@ let classifyStatement (acc: SqlFile) (s: Statement) =
         columns = cols
         values = vss }
 
-    { acc with
-        tableSyncs = ins :: acc.tableSyncs }
+    if List.contains ins.table inits then
+      { acc with
+          tableInits = ins :: acc.tableInits }
+    else
+      { acc with
+          tableSyncs = ins :: acc.tableSyncs }
   | :? Statement.CreateTable as s ->
     let cols =
       s.Columns
@@ -121,7 +125,7 @@ let classifyStatement (acc: SqlFile) (s: Statement) =
         indexes = index :: acc.indexes }
   | _ -> acc
 
-let parseSql (file: string) (sql: string) =
+let parseSql (inits: string list) (file: string) (sql: string) =
   try
     let ast = Parser().ParseSql(sql, SQLiteDialect())
 
@@ -129,8 +133,9 @@ let parseSql (file: string) (sql: string) =
       { tables = []
         indexes = []
         tableSyncs = []
+        tableInits = []
         views = [] }
 
-    ast |> Seq.fold classifyStatement emptyFile |> Ok
+    ast |> Seq.fold (classifyStatement inits) emptyFile |> Ok
   with :? ParserException as e ->
     Error $"Error parsing {file}({e.Line},{e.Column}): {e.Message}"
