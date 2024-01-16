@@ -157,12 +157,17 @@ type ColumnType =
 
 type ExprType = { expr: Expr; sqlType: SqlType }
 
+type TableSyncSpec =
+  { table: string
+    tableCols: string list
+    insertCols: string list }
+
 exception NotMatchingTypes of (ExprType * ExprType)
 exception ExpectingType of (SqlType * ExprType)
 exception UnsupportedTypeInference of Expr
 exception TableShouldHavePrimaryKey of string
 exception TableShouldHaveSinglePrimaryKey of string
-
+exception InvalidTableSync of TableSyncSpec
 
 exception FailedLoadResFile of string
 exception FailedOpenStore of string

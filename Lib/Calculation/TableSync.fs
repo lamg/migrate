@@ -56,8 +56,17 @@ let findKeyCols (t: CreateTable) =
     | _ -> TableShouldHaveSinglePrimaryKey t.name |> raise
 
 let findKeyIndexes (c: CreateTable) (keyCols: string list) =
-  keyCols
-  |> List.map (fun col -> c.columns |> List.findIndex (fun c -> c.name = col))
+  let tableCols = c.columns |> List.mapi (fun i c -> c.name, i) |> Map.ofList
+
+  try
+    keyCols |> List.map (fun col -> tableCols[col])
+  with :? System.Collections.Generic.KeyNotFoundException ->
+    InvalidTableSync
+      { table = c.name
+        tableCols = tableCols.Keys |> Seq.toList
+        insertCols = keyCols }
+    |> raise
+
 
 let toSwaps (xs: string list) (ys: string list) =
   let xs = xs |> Array.ofList
