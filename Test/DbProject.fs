@@ -93,6 +93,7 @@ let wrapWithProject () =
       schemaVersion = "0.0.1"
       dbFile = "/data/db.sqlite3"
       syncs = [ "table0" ]
+      inits = []
       files = [ "file0.sql"; "file1.sql" ]
       pullScript = None
       reports =
@@ -100,7 +101,7 @@ let wrapWithProject () =
             dest = "destination_relation" } ] }
 
   let src: SqlFile =
-    { inserts =
+    { tableSyncs =
         [ { table = "table0"
             columns = [ "id"; "name" ]
             values = [ [ Integer 0; String "value0" ] ] } ]

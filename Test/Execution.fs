@@ -19,7 +19,7 @@ open Migrate
 open Types
 
 let emptySchema =
-  { inserts = []
+  { tableSyncs = []
     tables = []
     views = []
     indexes = [] }

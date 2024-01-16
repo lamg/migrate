@@ -19,7 +19,7 @@ open Migrate.Calculation.Migration
 open Xunit
 
 let emptySchema =
-  { inserts = []
+  { tableSyncs = []
     tables = []
     views = []
     indexes = [] }
@@ -92,7 +92,7 @@ let insertWithVar =
 
 let schemaWithInsert =
   { emptySchema with
-      inserts = [ insertWithVar ] }
+      tableSyncs = [ insertWithVar ] }
 
 [<Fact>]
 let emptyMigration () =

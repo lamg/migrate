@@ -29,7 +29,7 @@ let replicateInDb (schema: SqlFile) (dbFile: string) =
 
   let views = schema.views |> List.map View.sqlCreateView
 
-  let inserts = schema.inserts |> List.map InsertInto.sqlInsertInto
+  let inserts = schema.tableSyncs |> List.map InsertInto.sqlInsertInto
 
   let indexes = schema.indexes |> List.map Index.sqlCreateIndex
 

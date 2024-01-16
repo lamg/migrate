@@ -49,7 +49,7 @@ let exampleProject =
                     constraints = [ NotNull ] } ]
               constraints = [ Unique [ "col0" ] ] } ]
         views = []
-        inserts = []
+        tableSyncs = []
         indexes = [] } }
 
 type Rel0 = { col0: int; col1: string }

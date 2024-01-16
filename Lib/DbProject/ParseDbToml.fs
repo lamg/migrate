@@ -37,7 +37,10 @@ let projectFiles = "files"
 let pullScript = "pull_script"
 
 [<Literal>]
-let syncTable = "table_sync"
+let tableSync = "table_sync"
+
+[<Literal>]
+let tableInit = "table_init"
 
 [<Literal>]
 let reportTable = "report"

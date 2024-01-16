@@ -60,7 +60,7 @@ type CreateIndex =
     columns: string list }
 
 type SqlFile =
-  { inserts: InsertInto list
+  { tableSyncs: InsertInto list
     views: CreateView list
     tables: CreateTable list
     indexes: CreateIndex list }

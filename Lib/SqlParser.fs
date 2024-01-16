@@ -34,7 +34,7 @@ let classifyStatement (acc: SqlFile) (s: Statement) =
         values = vss }
 
     { acc with
-        inserts = ins :: acc.inserts }
+        tableSyncs = ins :: acc.tableSyncs }
   | :? Statement.CreateTable as s ->
     let cols =
       s.Columns
@@ -128,7 +128,7 @@ let parseSql (file: string) (sql: string) =
     let emptyFile =
       { tables = []
         indexes = []
-        inserts = []
+        tableSyncs = []
         views = [] }
 
     ast |> Seq.fold classifyStatement emptyFile |> Ok

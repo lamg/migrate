@@ -19,7 +19,7 @@ open Migrate.SqlParser
 
 let collectSql (xs: SqlFile list) =
   let r =
-    { inserts = []
+    { tableSyncs = []
       tables = []
       views = []
       indexes = [] }
@@ -27,7 +27,7 @@ let collectSql (xs: SqlFile list) =
   xs
   |> List.fold
     (fun acc n ->
-      { inserts = acc.inserts @ n.inserts
+      { tableSyncs = acc.tableSyncs @ n.tableSyncs
         tables = acc.tables @ n.tables
         views = acc.views @ n.views
         indexes = acc.indexes @ n.indexes })

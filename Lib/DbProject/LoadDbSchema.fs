@@ -101,7 +101,7 @@ let dbSchema (p: Project) (conn: SqliteConnection) =
   let empty =
     { tables = []
       views = []
-      inserts = []
+      tableSyncs = []
       indexes = [] }
 
   let schema =
@@ -122,7 +122,7 @@ let dbSchema (p: Project) (conn: SqliteConnection) =
       p.source.tables
       |> List.tryFind (fun n -> n.name = ts)
       |> Option.map (tableValues conn))
-    |> (fun ins -> { schema with inserts = ins })
+    |> (fun ins -> { schema with tableSyncs = ins })
 
   schemaWithIns
 

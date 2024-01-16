@@ -90,7 +90,9 @@ let reorderList (swaps: int array) (xs: 'a list) =
 let insertsMigration (dbSchema: SqlFile) (p: Project) =
   let key (i: InsertInto) = i.table
   let value = id
-  let homologousInserts = zipHomologous dbSchema.inserts p.source.inserts key value
+
+  let homologousInserts =
+    zipHomologous dbSchema.tableSyncs p.source.tableSyncs key value
 
   homologousInserts
   |> List.map (fun (_, left, right) ->

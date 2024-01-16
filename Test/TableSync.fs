@@ -20,7 +20,7 @@ open Migrate.Types
 open Migrate.Calculation.TableSync
 
 let emptySchema =
-  { inserts = []
+  { tableSyncs = []
     tables = []
     views = []
     indexes = [] }
@@ -50,7 +50,7 @@ let schemaWithOneTable =
         [ { name = "table0"
             columns = [ colInt "id"; colStr "name" ]
             constraints = [] } ]
-      inserts = [ oneRowInsert ] }
+      tableSyncs = [ oneRowInsert ] }
 
 
 let emptyProject =
@@ -59,6 +59,7 @@ let emptyProject =
     dbFile = "db.sqlite3"
     source = schemaWithOneTable
     syncs = [ "table0" ]
+    inits = []
     reports = []
     pullScript = None }
 
@@ -66,7 +67,7 @@ let emptyProject =
 let basicInsert () =
   let dbSchema =
     { schemaWithOneTable with
-        inserts = [ emptyInsert ] }
+        tableSyncs = [ emptyInsert ] }
 
   let xs = insertsMigration dbSchema emptyProject
 
@@ -80,7 +81,7 @@ let basicInsert () =
 let basicUpdate () =
   let dbSchema =
     { schemaWithOneTable with
-        inserts =
+        tableSyncs =
           [ { oneRowInsert with
                 values = [ [ Integer 1; String "zero" ] ] } ] }
 
@@ -96,13 +97,13 @@ let basicUpdate () =
 let basicDelete () =
   let dbSchema =
     { schemaWithOneTable with
-        inserts = [ oneRowInsert ] }
+        tableSyncs = [ oneRowInsert ] }
 
   let xs =
     insertsMigration
       dbSchema
       { emptyProject with
-          source.inserts = [ emptyInsert ] }
+          source.tableSyncs = [ emptyInsert ] }
 
   let expected =
     [ { reason = Removed "1"
@@ -118,11 +119,11 @@ let basicInsertWithKeyInPos2 () =
           [ { name = "table0"
               columns = [ colInt "id"; colStr "name" ]
               constraints = [] } ]
-        inserts = [ emptyInsert ] }
+        tableSyncs = [ emptyInsert ] }
 
   let projectSchema =
     { schema with
-        inserts =
+        tableSyncs =
           [ { table = "table0"
               columns = [ "name"; "id" ]
               values = [ [ String "one"; Integer 1 ] ] } ] }

@@ -70,7 +70,7 @@ let tempDb =
   Execution.Commit.createTempDb
     { tables = []
       indexes = []
-      inserts = []
+      tableSyncs = []
       views = [] }
     "store_insert_test"
 
