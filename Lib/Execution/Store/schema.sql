@@ -32,7 +32,3 @@ CREATE TABLE github_com_lamg_migrate_step_reason
     status      text    NOT NULL,
     entity      text    NOT NULL
 );
-
--- migration:
--- parse all reasons and insert them in github_com_lamg_migrate_step_reason
--- alter table github_com_lamg_migrate_step drop column reason;
