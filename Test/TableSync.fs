@@ -47,7 +47,7 @@ let schemaWithReal =
             constraints = [] } ]
       tableSyncs =
         [ { insertRealEmpty with
-              values = [ [ Integer 1; Real 0.5 ] ] } ] }
+              values = [ [ Integer 1; Real -0.5 ] ] } ] }
 
 [<Fact>]
 let basicInsertWithReal () =
@@ -63,7 +63,7 @@ let basicInsertWithReal () =
 
   let expected =
     [ { reason = Added "1"
-        statements = [ "INSERT INTO table0(id, v) VALUES (1, 0.5)" ] } ]
+        statements = [ "INSERT INTO table0(id, v) VALUES (1, -0.5)" ] } ]
 
   Assert.Equal<SolverProposal list>(expected, xs)
 

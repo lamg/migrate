@@ -27,6 +27,13 @@ let classifyStatement (inits: string list) (acc: SqlFile) (s: Statement) =
               | Some v -> v |> int |> Integer
               | None -> n.Value |> double |> Real
             | v -> failwith $"unsupported literal {v}"
+          | :? Expression.UnaryOp as u when u.Op = UnaryOperator.Minus ->
+            match u.Expression.AsLiteral().Value with
+            | :? Value.Number as n ->
+              match n.AsInt() |> Option.ofNullable with
+              | Some v -> v |> int |> Integer
+              | None -> n.Value |> double |> Real
+            | v -> failwith $"unsupported literal {v}"
           | v -> failwith $"value {v} not supported in insert")
         |> Seq.toList)
       |> Seq.toList
