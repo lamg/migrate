@@ -14,7 +14,8 @@ let rowReader (xs: ColumnType list) (rd: IDataReader) =
   |> List.mapi (fun i x ->
     match x.sqlType with
     | SqlInteger -> rd.GetInt32 i |> Integer
-    | SqlText -> rd.GetString i |> String)
+    | SqlText -> rd.GetString i |> String
+    | SqlReal -> rd.GetDouble i |> Real)
 
 let findRelation (p: Project) (relation: string) =
   let table = p.source.tables |> List.tryFind (fun t -> t.name = relation)

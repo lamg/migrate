@@ -34,6 +34,39 @@ let basicInsert () =
 
   Assert.Equal<SolverProposal list>(expected, xs)
 
+let insertRealEmpty =
+  { table = "table0"
+    columns = [ "id"; "v" ]
+    values = [] }
+
+let schemaWithReal =
+  { emptySchema with
+      tables =
+        [ { name = "table0"
+            columns = [ colInt "id"; colReal "v" ]
+            constraints = [] } ]
+      tableSyncs =
+        [ { insertRealEmpty with
+              values = [ [ Integer 1; Real 0.5 ] ] } ] }
+
+[<Fact>]
+let basicInsertWithReal () =
+  let dbSchema =
+    { schemaWithReal with
+        tableSyncs = [ insertRealEmpty ] }
+
+  let xs =
+    tableSyncsMigration
+      dbSchema
+      { projectWithOneTable with
+          source = schemaWithReal }
+
+  let expected =
+    [ { reason = Added "1"
+        statements = [ "INSERT INTO table0(id, v) VALUES (1, 0.5)" ] } ]
+
+  Assert.Equal<SolverProposal list>(expected, xs)
+
 [<Fact>]
 let basicUpdate () =
   let dbSchema =

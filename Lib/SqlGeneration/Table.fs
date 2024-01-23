@@ -25,6 +25,7 @@ let sqlConstraint =
   | Autoincrement -> "AUTOINCREMENT"
   | Default(String v) -> $"DEFAULT '{v}'"
   | Default(Integer v) -> $"DEFAULT {v}"
+  | Default(Real v) -> $"DEFAULT {v}"
   | Unique [] -> "UNIQUE"
   | Unique xs -> $"UNIQUE({sepComma id xs})"
   | ForeignKey f ->
@@ -36,6 +37,7 @@ let sqlColType =
   function
   | SqlInteger -> "integer"
   | SqlText -> "text"
+  | SqlReal -> "real"
 
 let sqlColumnDef (c: ColumnDef) =
   let constraints = c.constraints |> List.map sqlConstraint |> String.concat " "

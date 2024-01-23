@@ -33,7 +33,12 @@ let colInt name =
 
 let colStr name =
   { name = name
-    columnType = SqlInteger
+    columnType = SqlText
+    constraints = [ NotNull ] }
+
+let colReal name =
+  { name = name
+    columnType = SqlReal
     constraints = [ NotNull ] }
 
 let emptyInsert: InsertInto =

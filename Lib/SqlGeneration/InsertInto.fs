@@ -20,6 +20,7 @@ let sqlLiteral (e: Expr) =
   match e with
   | Integer c -> $"{c}"
   | String s -> $"'{s}'"
+  | Real r -> $"{r}"
 
 let sqlRowToString (vs: Expr list) =
   vs |> List.map sqlLiteral |> String.concat ", " |> (fun v -> $"({v})")

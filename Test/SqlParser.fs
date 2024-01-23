@@ -74,3 +74,11 @@ VALUES ('value0'),
 
   let r = Migrate.SqlParser.parseSql [] "parseInsert" sql
   r |> Result.isOk |> Assert.True
+
+
+[<Fact>]
+let parseReal () =
+  let sql = "CREATE TABLE table0(id integer PRIMARY KEY, v real NOT NULL)"
+
+  let r = Migrate.SqlParser.parseSql [] "parseReal" sql
+  r |> Result.isOk |> Assert.True

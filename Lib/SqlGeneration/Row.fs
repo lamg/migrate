@@ -21,6 +21,7 @@ let sqlExpr =
   function
   | Integer v -> string v
   | String v -> $"'{v}'"
+  | Real v -> string v
 
 let rowToSetEqual (colValues: (string * Expr) list) =
   colValues |> sepComma (fun (c, v) -> $"{c} = {sqlExpr v}")

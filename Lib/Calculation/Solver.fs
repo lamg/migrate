@@ -144,8 +144,9 @@ let tableSyncs (keyIndexes: int list) (left: InsertInto) (right: InsertInto) =
     indexes
     |> List.map (fun i -> xs[i])
     |> List.map (function
-      | Integer i -> $"{i}"
-      | String s -> s)
+      | Integer i -> string i
+      | String s -> s
+      | Real v -> string v)
     |> String.concat "|"
 
   let nonKeyIndexes =

@@ -17,12 +17,14 @@ module Migrate.Types
 type SqlType =
   | SqlInteger
   | SqlText
+  | SqlReal
 
 type Autoincrement = Autoincrement
 
 type Expr =
   | String of string
   | Integer of int
+  | Real of double
 
 type InsertInto =
   { table: string

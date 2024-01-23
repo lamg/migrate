@@ -58,7 +58,8 @@ let rowReader (xs: SqlType list) (rd: IDataReader) =
   |> List.mapi (fun i c ->
     match c with
     | SqlText -> rd.GetString i |> String
-    | SqlInteger -> rd.GetInt32 i |> Integer)
+    | SqlInteger -> rd.GetInt32 i |> Integer
+    | SqlReal -> rd.GetDouble i |> Real)
 
 let tableValues (conn: SqliteConnection) (relReader: RelationReader) (ct: CreateTable) =
   let cols = ct.columns |> List.map _.name

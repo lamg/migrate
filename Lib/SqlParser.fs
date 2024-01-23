@@ -22,7 +22,10 @@ let classifyStatement (inits: string list) (acc: SqlFile) (s: Statement) =
           | :? Expression.LiteralValue as l ->
             match box l.Value with
             | :? Value.SingleQuotedString as s -> s.Value |> String
-            | :? Value.Number as n -> n.Value |> int |> Integer
+            | :? Value.Number as n ->
+              match n.AsInt() |> Option.ofNullable with
+              | Some v -> v |> int |> Integer
+              | None -> n.Value |> double |> Real
             | v -> failwith $"unsupported literal {v}"
           | v -> failwith $"value {v} not supported in insert")
         |> Seq.toList)
@@ -47,6 +50,7 @@ let classifyStatement (inits: string list) (acc: SqlFile) (s: Statement) =
           match box c.DataType with
           | :? DataType.Integer -> SqlInteger
           | :? DataType.Text -> SqlText
+          | :? DataType.Real -> SqlReal
           | _ -> failwith $"unsupported type {c.DataType}"
 
         let cs =
