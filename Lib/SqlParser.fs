@@ -31,8 +31,8 @@ let classifyStatement (inits: string list) (acc: SqlFile) (s: Statement) =
             match u.Expression.AsLiteral().Value with
             | :? Value.Number as n ->
               match n.AsInt() |> Option.ofNullable with
-              | Some v -> v |> int |> Integer
-              | None -> n.Value |> double |> Real
+              | Some v -> v |> int |> (fun x -> x * -1) |> Integer
+              | None -> n.Value |> double |> (fun x -> x * -1.0) |> Real
             | v -> failwith $"unsupported literal {v}"
           | v -> failwith $"value {v} not supported in insert")
         |> Seq.toList)
