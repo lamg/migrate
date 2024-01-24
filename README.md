@@ -1,16 +1,21 @@
 <p align="center">
-  <img
-    src="https://raw.githubusercontent.com/lamg/migrate/master/doc/images/logo.png"
-    alt="Migrate – Declarative migrations with SQL"
-    style="border-radius: 50%;width: 100px"
-  />
+  <a href="https://www.nuget.org/packages/migtool">
+    <img
+      src="https://raw.githubusercontent.com/lamg/migrate/master/doc/images/logo.png"
+      alt="Migrate – Declarative migrations with SQL"
+      style="border-radius: 50%;width: 100px"
+    />
+  </a>
 </p>
 
 [![NuGet Version][nuget-version]][migtool]
 [![NuGet Downloads][nuget-downloads]][migtool]
 ![Tests][tests]
 
-Migrate is a tool for migrating databases in a declarative way. It can be used from the command line or as a [library][MigrateLib].
+Migrate is a tool for performing declarative migrations by finding
+differences between a declared and desired database schema, and the
+existing one, currently in a SQLite database. It can be used from the
+command line or as a [library][MigrateLib].
 
 ## Installation
 
