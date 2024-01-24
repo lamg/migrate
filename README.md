@@ -1,9 +1,8 @@
 <p align="center">
   <img
-    width="100"
-    style="border-radius: 50%;"
     src="https://raw.githubusercontent.com/lamg/migrate/master/doc/images/logo.png"
     alt="Migrate – Declarative migrations with SQL"
+    style="border-radius: 50%;width: 100px"
   />
 </p>
 
