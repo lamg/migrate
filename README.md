@@ -1,7 +1,6 @@
 <p align="center">
-  <h1>Migrate</h1>
   <img
-    width="400"
+    width="100"
     src="https://raw.githubusercontent.com/lamg/migrate/master/doc/images/logo.png"
     alt="Migrate – Declarative migrations with SQL"
   />
