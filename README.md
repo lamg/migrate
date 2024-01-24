@@ -66,4 +66,4 @@ See [contributing_guideline](doc/contributing_guideline.md)
 [MigrateLib]: https://www.nuget.org/packages/MigrateLib
 [nuget-version]: https://img.shields.io/nuget/v/migtool?style=flat-square
 [nuget-downloads]: https://img.shields.io/nuget/dt/migtool?style=flat-square
-[tests]: https://github.com/lamg/migrate/workflows/tests/badge.svg?style=flat
+[tests]: https://img.shields.io/github/actions/workflow/status/lamg/migrate/test.yml?style=flat-square&label=tests
