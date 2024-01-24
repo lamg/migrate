@@ -1,13 +1,14 @@
 # Migrate
 
-[![NuGet][nuget-shield]][nuget]
+[![NuGet Version][nuget-version]][migtool]
+[![NuGet Downloads][nuget-downloads]][migtool]
 ![Tests][tests]
 
-Migrate is a tool for migrating databases in a declarative way. It can be used from the command line or as a library.
+Migrate is a tool for migrating databases in a declarative way. It can be used from the command line or as a [library][MigrateLib].
 
 ## Installation
 
-If you just want to test the tool without installing [.Net][0],
+If you just want to test the tool without installing [.Net][dotnet],
 then you can use a Docker image:
 
 ```sh
@@ -20,7 +21,7 @@ Inside the container run:
 export PATH="$PATH:/root/.dotnet/tools"
 ```
 
-After having [.Net][0] in your system you can run
+After having [.Net][dotnet] in your system you can run
 
 ```sh
 dotnet tool install --global migtool
@@ -55,14 +56,14 @@ See [contributing_guideline](doc/contributing_guideline.md)
 
 ## License
 
-[Apache 2.0][1]
+[Apache 2.0][apache2]
 
-[0]: https://dotnet.microsoft.com/en-us/download/dotnet/8.0
+[dotnet]: https://dotnet.microsoft.com/en-us/download/dotnet/8.0
 
-[1]: https://www.apache.org/licenses/LICENSE-2.0
+[apache2]: https://www.apache.org/licenses/LICENSE-2.0
 
-[nuget]: https://www.nuget.org/packages/migtool
-
-[nuget-shield]: https://buildstats.info/Nuget/migtool
-
-[tests]: https://github.com/lamg/migrate/workflows/tests/badge.svg
+[migtool]: https://www.nuget.org/packages/migtool
+[MigrateLib]: https://www.nuget.org/packages/MigrateLib
+[nuget-version]: https://img.shields.io/nuget/v/migtool?style=flat-square
+[nuget-downloads]: https://img.shields.io/nuget/dt/migtool?style=flat-square
+[tests]: https://github.com/lamg/migrate/workflows/tests/badge.svg?style=flat
