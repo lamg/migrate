@@ -1,4 +1,11 @@
-# Migrate
+<p align="center">
+  <h1>Migrate</h1>
+  <img
+    width="400"
+    src="https://raw.githubusercontent.com/lamg/migrate/master/doc/images/logo.png"
+    alt="Migrate – Declarative migrations with SQL"
+  />
+</p>
 
 [![NuGet Version][nuget-version]][migtool]
 [![NuGet Downloads][nuget-downloads]][migtool]
