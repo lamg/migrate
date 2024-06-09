@@ -118,7 +118,7 @@ let classifyStatement (inits: string list) (acc: SqlFile) (s: Statement) =
     let cv =
       { name = s.Name.Values |> Seq.head |> _.Value
         selectUnion = s.Query.ToSql() }
-
+    
     { acc with views = cv :: acc.views }
   | :? Statement.CreateIndex as s ->
     let name = s.Name.Values |> Seq.head |> _.Value

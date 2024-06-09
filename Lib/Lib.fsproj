@@ -45,7 +45,7 @@
         <Compile Include="Execution\Store\Amend.fs"/>
         <Compile Include="Execution\Store\Print.fs"/>
         <Compile Include="Execution\Commit.fs"/>
-        <Compile Include="Checks\Algorithms.fs"/>
+        <Compile Include="Checks\Types.fs" />
         <Compile Include="Reports\Report.fs"/>
         <Compile Include="Reports\RelationsSummary.fs"/>
         <Compile Include="Reports\Export.fs"/>

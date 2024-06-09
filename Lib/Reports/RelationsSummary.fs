@@ -12,10 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module internal Migrate.Reports.RelationsSummary
+module internal Migrate.Checks.Types
 
+open System.Collections.Generic
 open Migrate
+open Migrate.Types
 open Types
+
+type Record = Map<string, SqlType>
+
+let createTableType (ct: CreateTable) : Record =
+  ct.columns |> List.map (fun c -> c.name, c.columnType) |> Map.ofList
+
+let projectionType (t: Record) (projection: string list) : Record option =
+  try
+    projection |> List.map (fun col -> col, t[col]) |> Map.ofList |> Some
+  with :? KeyNotFoundException ->
+    None
+
+let implicitJoinType (joined: Map<string, Record>) (projection: (string * string) list) : Record option =
+  try
+    projection
+    |> List.map (fun (qualifier, column) -> column, joined[qualifier][column])
+    |> Map.ofList
+    |> Some
+  with :? KeyNotFoundException ->
+    None
+
 
 // let colsToString: ColumnType list -> string =
 //   List.map (fun c ->
