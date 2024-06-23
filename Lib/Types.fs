@@ -49,7 +49,9 @@ type ColumnDef =
     columnType: SqlType
     constraints: ColumnConstraint list }
 
-type CreateView = { name: string; selectUnion: string }
+type CreateView =
+  { name: string
+    selectUnion: SqlParser.Ast.Select }
 
 type CreateTable =
   { name: string

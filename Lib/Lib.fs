@@ -23,4 +23,7 @@ let loadProjectWith (loadFile: string -> string) =
 /// Loads a project from a directory if specified or the current one instead
 /// </summary>
 let loadProjectFromDir (dir: string option) =
-  Migrate.DbProject.LoadProjectFiles.loadProjectFromDir dir
+  try
+    DbProject.LoadProjectFiles.loadProjectFromDir dir |> Ok
+  with e ->
+    Error e.Message

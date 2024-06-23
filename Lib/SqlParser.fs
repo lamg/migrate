@@ -7,7 +7,7 @@ open Migrate.Types
 open SqlParser.Dialects
 open SqlParser.Tokens
 
-let classifyStatement (inits: string list) (acc: SqlFile) (s: Statement) =
+let classifyStatement (initializedTables: string list) (acc: SqlFile) (s: Statement) =
   match box s with
   | :? Statement.Insert as s ->
     let cols = s.Columns |> Seq.map _.Value |> Seq.toList
@@ -43,7 +43,7 @@ let classifyStatement (inits: string list) (acc: SqlFile) (s: Statement) =
         columns = cols
         values = vss }
 
-    if List.contains ins.table inits then
+    if List.contains ins.table initializedTables then
       { acc with
           tableInits = ins :: acc.tableInits }
     else
@@ -117,8 +117,8 @@ let classifyStatement (inits: string list) (acc: SqlFile) (s: Statement) =
   | :? Statement.CreateView as s ->
     let cv =
       { name = s.Name.Values |> Seq.head |> _.Value
-        selectUnion = s.Query.ToSql() }
-    
+        selectUnion = s.Query.Query.Body.AsSelect() }
+
     { acc with views = cv :: acc.views }
   | :? Statement.CreateIndex as s ->
     let name = s.Name.Values |> Seq.head |> _.Value

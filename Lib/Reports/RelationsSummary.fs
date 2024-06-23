@@ -12,55 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module internal Migrate.Checks.Types
+module internal Migrate.Reports.RelationSummary
 
-open System.Collections.Generic
 open Migrate
-open Migrate.Types
 open Types
 
-type Record = Map<string, SqlType>
+let colsToString (xs: list<Checks.Types.ColumnId * SqlType>) =
+  xs
+  |> List.map (fun (col, t) ->
+    let colType =
+      match t with
+      | SqlInteger -> "INTEGER"
+      | SqlText -> "TEXT"
+      | SqlReal -> "REAL"
 
-let createTableType (ct: CreateTable) : Record =
-  ct.columns |> List.map (fun c -> c.name, c.columnType) |> Map.ofList
+    $"{col.name} {colType}")
+  |> String.concat ", "
 
-let projectionType (t: Record) (projection: string list) : Record option =
-  try
-    projection |> List.map (fun col -> col, t[col]) |> Map.ofList |> Some
-  with :? KeyNotFoundException ->
-    None
+let formatRelations s =
+  let types, errs = Checks.Types.typeCheck s
 
-let implicitJoinType (joined: Map<string, Record>) (projection: (string * string) list) : Record option =
-  try
-    projection
-    |> List.map (fun (qualifier, column) -> column, joined[qualifier][column])
-    |> Map.ofList
-    |> Some
-  with :? KeyNotFoundException ->
-    None
-
-
-// let colsToString: ColumnType list -> string =
-//   List.map (fun c ->
-//     let colType =
-//       match c.sqlType with
-//       | Int -> "INTEGER"
-//       | Text -> "TEXT"
-//       | Bool -> "BOOLEAN"
-//       | Real -> "REAL"
-//
-//     $"{c.column} {colType}")
-//   >> String.concat ", "
-
-let formatRelations = failwith "not implemented"
-// Checks.TypeChecker.checkTypes
-// >> List.groupBy _.table
-// >> List.map (fun (table, cols) -> $"{table} ({colsToString cols})")
-// >> String.concat "\n"
+  match errs with
+  | [] ->
+    types
+    |> Map.toList
+    |> List.groupBy (fun (k, _) -> k.table)
+    |> List.map (fun (table, cols) -> $"{table} ({colsToString cols})")
+    |> String.concat "\n"
+    |> DbUtil.colorizeSql
+    |> printfn "%s"
+  | _ ->
+    let e = errs |> String.concat "\n"
+    eprintfn $"type check errors:\n{e}"
 
 let databaseRelations (p: Project) =
   use conn = DbUtil.openConn p.dbFile
   DbProject.LoadDbSchema.dbSchema p conn |> formatRelations
 
-let projectRelations (p: Project) =
-  p.source |> formatRelations |> DbUtil.colorizeSql
+let projectRelations (p: Project) = p.source |> formatRelations

@@ -56,10 +56,11 @@ let schemaWithUnique (tableName: string) =
             constraints = [ Unique [ "id" ] ] } ] }
 
 let schemaWithView (viewName: string) =
-  { emptySchema with
-      views =
-        [ { name = viewName
-            selectUnion = "SELECT * FROM table0" } ] }
+  $"CREATE VIEW {viewName} AS SELECT * FROM table0"
+  |> Migrate.SqlParser.parseSql [] "Calculation.fs"
+  |> function
+    | Ok f -> f
+    | Error e -> failwith e
 
 let schemaWithTwoCols =
   { emptySchema with

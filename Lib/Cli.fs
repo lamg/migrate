@@ -270,9 +270,8 @@ let initProject () =
 
 let printDbRelations (p: Project) =
   try
-    let summary = RelationsSummary.databaseRelations p
     Print.printYellow "relations"
-    printfn $"{summary}"
+    RelationSummary.databaseRelations p
     0
   with
   | FailedOpenDb e ->
@@ -290,9 +289,8 @@ let printDbRelations (p: Project) =
 
 let printProjectRelations (p: Project) =
   try
-    let summary = RelationsSummary.projectRelations p
     Print.printYellow "relations"
-    printfn $"{summary}"
+    RelationSummary.projectRelations p
     0
   with
   | UnsupportedTypeInference e ->

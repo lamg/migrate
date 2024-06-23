@@ -17,7 +17,9 @@ module internal Migrate.SqlGeneration.View
 open Migrate.Types
 
 let sqlCreateView (view: CreateView) =
-
-  [ $"CREATE VIEW {view.name} AS\n{view.selectUnion}" ]
+  let sb = System.Text.StringBuilder()
+  let sw = new SqlParser.SqlTextWriter(sb)
+  view.selectUnion.ToSql sw
+  [ $"CREATE VIEW {view.name} AS\n{sw}" ]
 
 let sqlDropView (view: CreateView) = [ $"DROP VIEW {view.name}" ]

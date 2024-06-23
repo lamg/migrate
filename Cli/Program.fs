@@ -222,23 +222,27 @@ let main (args: string array) =
         let opts = dotenv.net.DotEnvOptions(envFilePaths = [| $"{path.Value}/.env" |])
         dotenv.net.DotEnv.Load opts
 
-      let p = Lib.loadProjectFromDir path
+      match Lib.loadProjectFromDir path with
+      | Ok p ->
 
-      match command with
-      | Some(DbSchema flags) -> dumpSchema p flags
-      | Some(Commit flags) -> commit p flags
-      | Some(Log flags) -> showLog p flags
-      | Some(Pull _) -> pullDb p
-      | Some(Report flags) -> syncReports p flags
-      | Some(Init _) -> failwith "violated project init precondition"
-      | Some(Status _) -> Cli.status p
-      | Some(Relations flags) -> relations p flags
-      | Some(Version _) ->
-        Assembly.GetExecutingAssembly().GetName().Version.ToString() |> printfn "%s"
-        0
-      | Some(Export args) -> exportRelation p args
-      | _ ->
-        Print.printRed "no command given"
+        match command with
+        | Some(DbSchema flags) -> dumpSchema p flags
+        | Some(Commit flags) -> commit p flags
+        | Some(Log flags) -> showLog p flags
+        | Some(Pull _) -> pullDb p
+        | Some(Report flags) -> syncReports p flags
+        | Some(Init _) -> failwith "violated project init precondition"
+        | Some(Status _) -> Cli.status p
+        | Some(Relations flags) -> relations p flags
+        | Some(Version _) ->
+          Assembly.GetExecutingAssembly().GetName().Version.ToString() |> printfn "%s"
+          0
+        | Some(Export args) -> exportRelation p args
+        | _ ->
+          Print.printRed "no command given"
+          1
+      | Error e ->
+        Print.printRed e
         1
   with MalformedProject e ->
     Print.printRed e
