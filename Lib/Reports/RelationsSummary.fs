@@ -17,7 +17,7 @@ module internal Migrate.Reports.RelationSummary
 open Migrate
 open Types
 
-let colsToString (xs: list<Checks.Types.ColumnId * SqlType>) =
+let colsToString (xs: list<string * SqlType>) =
   xs
   |> List.map (fun (col, t) ->
     let colType =
@@ -26,7 +26,7 @@ let colsToString (xs: list<Checks.Types.ColumnId * SqlType>) =
       | SqlText -> "TEXT"
       | SqlReal -> "REAL"
 
-    $"{col.name} {colType}")
+    $"{col} {colType}")
   |> String.concat ", "
 
 let formatRelations s =
@@ -35,9 +35,8 @@ let formatRelations s =
   match errs with
   | [] ->
     types
-    |> Map.toList
-    |> List.groupBy (fun (k, _) -> k.table)
-    |> List.map (fun (table, cols) -> $"{table} ({colsToString cols})")
+    |> Checks.Types.relationTypes
+    |> List.map (fun r -> $"{r.name} ({colsToString r.columns})")
     |> String.concat "\n"
     |> DbUtil.colorizeSql
     |> printfn "%s"

@@ -29,6 +29,10 @@ type Types = Map<ColumnId, SqlType>
 
 type TypeConnections = Map<ColumnId, ColumnId>
 
+type Relation =
+  { name: string
+    columns: list<string * SqlType> }
+
 let fromToId (ts: TableWithJoins seq) =
   ts
   |> Seq.map (fun r ->
@@ -171,3 +175,11 @@ let typeCheck (s: SqlFile) =
       (initial, [])
 
   | _ -> initial, errs
+
+let relationTypes (types: Types) =
+  types
+  |> Map.toList
+  |> List.groupBy (fun (k, _) -> k.table)
+  |> List.map (fun (table, cols) ->
+    { name = table
+      columns = cols |> List.map (fun (c, t) -> c.name, t) })
