@@ -17,6 +17,7 @@
         <Compile Include="Store.fs"/>
         <Compile Include="TableSync.fs"/>
         <Compile Include="TableInit.fs"/>
+        <Compile Include="CheckTypes.fs"/>
         <Compile Include="Program.fs"/>
     </ItemGroup>
 
