@@ -32,3 +32,4 @@ let r =
 // |> printfn "%s"
 
 relationToFsRecord r |> toFsString |> printfn "%s"
+relationToSelect r |> toFsString |> printfn "%s"
