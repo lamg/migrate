@@ -53,7 +53,7 @@ let relationToFsRecord (r: Relation) =
 
   Record(pascalCase r.name) { yield! fields }
 
-let relationToSelect (r: Relation) =
+let relationToSelectAll (r: Relation) =
   let cols = r.columns |> Seq.map fst |> String.concat ", "
   let selectQuery = $"SELECT {cols} FROM {r.name}"
 
@@ -61,9 +61,9 @@ let relationToSelect (r: Relation) =
     r.columns
     |> List.mapi (fun i (c, t) ->
       match t with
-      | SqlInteger -> RecordFieldExpr(c, $"rd.GetInt32 {i}")
-      | SqlText -> RecordFieldExpr(c, $"rd.GetString {i}")
-      | SqlReal -> RecordFieldExpr(c, $"rd.GetDouble {i}"))
+      | SqlInteger -> RecordFieldExpr(camelCase c, $"rd.GetInt32 {i}")
+      | SqlText -> RecordFieldExpr(camelCase c, $"rd.GetString {i}")
+      | SqlReal -> RecordFieldExpr(camelCase c, $"rd.GetDouble {i}"))
     |> RecordExpr
 
   let whileBody =
@@ -93,7 +93,7 @@ let queryModule (rs: Relation list) =
       for x in rs |> List.map relationToFsRecord do
         yield x
 
-      for x in rs |> List.map relationToSelect do
+      for x in rs |> List.map relationToSelectAll do
         yield x
     }
   }
