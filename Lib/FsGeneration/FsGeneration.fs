@@ -51,7 +51,7 @@ let relationToFsRecord (r: Relation) =
 
       Field(camelCase name, ``type``))
 
-  Oak() { AnonymousModule() { Record(pascalCase r.name) { yield! fields } } }
+  Record(pascalCase r.name) { yield! fields }
 
 let relationToSelect (r: Relation) =
   let cols = r.columns |> Seq.map fst |> String.concat ", "
@@ -73,18 +73,27 @@ let relationToSelect (r: Relation) =
 
   let selectBody =
     CompExprBodyExpr
-      [ LetOrUseExpr(Value("c", $"new SqliteCommand(\"{selectQuery}\", conn, tx)"))
-        LetOrUseExpr(Value("rd", "c.ExecuteReader()"))
+      [ LetOrUseExpr(Use("rd", $"env.ExecuteReader(\"{selectQuery}\")"))
         OtherExpr(NamedComputationExpr("seq", WhileExpr(ConstantExpr("rd.Read()"), whileBody))) ]
 
+
+  Function(
+    $"selectAll{pascalCase r.name}",
+    [ ParenPat(ParameterPat(NamedPat("env"), LongIdent "ReaderExecuter")) ],
+    selectBody
+  )
+
+let queryModule (rs: Relation list) =
+
   Oak() {
-    AnonymousModule() {
-      Function(
-        $"selectAll{pascalCase r.name}",
-        [ ParenPat(ParameterPat(NamedPat("conn"), LongIdent "SqliteConnection"))
-          ParenPat(ParameterPat(NamedPat("tx"), LongIdent "SqliteTransaction")) ],
-        selectBody
-      )
+    TopLevelModule "Database.Query" {
+      yield Open "Migrate.DbUtil"
+
+      for x in rs |> List.map relationToFsRecord do
+        yield x
+
+      for x in rs |> List.map relationToSelect do
+        yield x
     }
   }
 

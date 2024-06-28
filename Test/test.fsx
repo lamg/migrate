@@ -31,5 +31,4 @@ let r =
 // |> Async.RunSynchronously
 // |> printfn "%s"
 
-relationToFsRecord r |> toFsString |> printfn "%s"
-relationToSelect r |> toFsString |> printfn "%s"
+queryModule [ r ] |> toFsString |> printfn "%s"
