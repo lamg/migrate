@@ -77,6 +77,7 @@ type Report = { src: string; dest: string }
 type Project =
   { dbFile: string
     source: SqlFile
+    includeFsFiles: string list
     syncs: string list
     inits: string list
     reports: Report list
@@ -124,6 +125,12 @@ type DbTomlFile =
     /// Remarks about the version
     /// </summary>
     versionRemarks: string
+
+    /// <summary>
+    /// F# files in the database project directory written by the user,
+    /// to be included in the generated Database.fsproj file
+    /// </summary>
+    includeFsFiles: string list
   }
 
 type SqlStep = { sql: string; error: string option }

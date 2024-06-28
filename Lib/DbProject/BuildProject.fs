@@ -43,7 +43,8 @@ let mergeTomlSql (p: DbTomlFile) (src: SqlFile) =
     inits = p.inits
     reports = p.reports
     pullScript = p.pullScript
-    schemaVersion = p.schemaVersion }
+    schemaVersion = p.schemaVersion
+    includeFsFiles = p.includeFsFiles }
 
 let buildProject (reader: string -> string) (p: DbTomlFile) =
   let parse (file, sql) =

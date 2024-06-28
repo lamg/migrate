@@ -45,6 +45,9 @@ let tableInit = "table_init"
 [<Literal>]
 let reportTable = "report"
 
+[<Literal>]
+let includeFsFiles = "include_fs_files"
+
 let tryGet (t: Tomlyn.Model.TomlTable) (key: string) =
   if t.ContainsKey(key) then Some(t[key]) else None
 
@@ -118,6 +121,8 @@ let parseDbToml (source: string) =
     | Some v -> v
     | _ -> MalformedProject $"no {versionRemarks} field defined in db.toml" |> raise
 
+  let included = tryGetArray doc includeFsFiles
+
   match tryGetString doc dbFileKey with
   | None -> MalformedProject $"no {dbFileKey} defined" |> raise
   | Some f ->
@@ -130,7 +135,8 @@ let parseDbToml (source: string) =
       inits = inits
       pullScript = script
       schemaVersion = version
-      versionRemarks = remarks }
+      versionRemarks = remarks
+      includeFsFiles = included }
 
 let parseDbTomlFile (path: string) =
   try

@@ -37,6 +37,7 @@ let exampleProject =
     syncs = []
     inits = []
     pullScript = None
+    includeFsFiles = []
     source =
       { tables =
           [ { name = "table0"

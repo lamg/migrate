@@ -317,3 +317,6 @@ let exportRelation (p: Project) (relation: string) =
   | None ->
     Print.printError $"relation {relation} not found"
     1
+
+let generateFsProj (p: Project) =
+  FsGeneration.Main.generateDatabaseProj None p

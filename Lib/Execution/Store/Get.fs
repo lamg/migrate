@@ -54,15 +54,17 @@ let getStepReason (conn: SqliteConnection) (migrationId: int64) (stepIndex: int6
 /// <param name="conn"></param>
 let getMigrations (conn: SqliteConnection) =
   let migrations =
-    select {
-      for m in migrationTable do
-        orderByDescending m.date
-    }
-    |> conn.SelectAsync<StoredMigration>
-    |> Async.AwaitTask
-    |> Async.RunSynchronously
-    |> Seq.toList
-
+    try
+      select {
+        for m in migrationTable do
+          orderByDescending m.date
+      }
+      |> conn.SelectAsync<StoredMigration>
+      |> Async.AwaitTask
+      |> Async.RunSynchronously
+      |> Seq.toList
+    with :? System.AggregateException as _ ->
+      []
 
   migrations
   |> List.map (fun (m: StoredMigration) ->

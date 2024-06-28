@@ -93,12 +93,3 @@ let loadFromRes (asm: Assembly) (namespaceForResx: string) (file: string) =
   with ex ->
     FailedLoadResFile $"failed loading resource file {namespaceDotFile}: {ex.Message}"
     |> raise
-
-type ReaderExecuter =
-  abstract member ExecuteReader: string -> IDataReader
-
-type SqliteReaderExecuter(connection: SqliteConnection, transaction: SqliteTransaction) =
-  interface ReaderExecuter with
-    member _.ExecuteReader(sql: string) =
-      let command = new SqliteCommand(sql, connection, transaction)
-      command.ExecuteReader()

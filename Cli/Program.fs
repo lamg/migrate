@@ -30,6 +30,7 @@ type MigArgs =
   | [<CliPrefix(CliPrefix.None)>] DbSchema of ParseResults<DumpSchemaArgs>
   | [<CliPrefix(CliPrefix.None)>] Relations of ParseResults<RelationsArgs>
   | [<CliPrefix(CliPrefix.None)>] Export of ParseResults<ExportArgs>
+  | [<CliPrefix(CliPrefix.None)>] GenFs of ParseResults<GenFsArgs>
   | [<AltCommandLine("-p")>] ProjectPath of path: string
 
   interface IArgParserTemplate with
@@ -46,6 +47,13 @@ type MigArgs =
       | Relations _ -> "shows the relations (tables + views) type signatures in the database or project"
       | Export _ -> "exports the content of a relation as an insert statement"
       | ProjectPath _ -> "project path"
+      | GenFs _ -> "generates an F# project with queries to the database"
+
+and GenFsArgs =
+  | [<NoCommandLine>] DummyGenFs
+
+  interface IArgParserTemplate with
+    member _.Usage = "generates an F# project with queries to the database"
 
 and VersionArgs =
   | [<NoCommandLine>] Dummy
@@ -224,7 +232,6 @@ let main (args: string array) =
 
       match Lib.loadProjectFromDir path with
       | Ok p ->
-
         match command with
         | Some(DbSchema flags) -> dumpSchema p flags
         | Some(Commit flags) -> commit p flags
@@ -238,6 +245,7 @@ let main (args: string array) =
           Assembly.GetExecutingAssembly().GetName().Version.ToString() |> printfn "%s"
           0
         | Some(Export args) -> exportRelation p args
+        | Some(GenFs _) -> Cli.generateFsProj p
         | _ ->
           Print.printRed "no command given"
           1

@@ -28,6 +28,7 @@ let exampleProject =
     reports = [ { src = "rel0"; dest = "rel0_report" } ]
     syncs = []
     inits = []
+    includeFsFiles = []
     pullScript = None
     source =
       { tables =

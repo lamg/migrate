@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module Migrate.FsGeneration.FsGeneration
+module internal Migrate.FsGeneration.QueryModule
 
 open System
 open Migrate.Types
@@ -87,7 +87,8 @@ let queryModule (rs: Relation list) =
 
   Oak() {
     TopLevelModule "Database.Query" {
-      yield Open "Migrate.DbUtil"
+      yield Open "System"
+      yield Open "Migrate.FsGeneration.Util"
 
       for x in rs |> List.map relationToFsRecord do
         yield x

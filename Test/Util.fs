@@ -65,5 +65,6 @@ let projectWithOneTable =
     source = schemaWithOneTable
     syncs = [ "table0" ]
     inits = []
+    includeFsFiles = []
     reports = []
     pullScript = None }

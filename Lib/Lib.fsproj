@@ -45,8 +45,11 @@
         <Compile Include="Execution\Store\Amend.fs"/>
         <Compile Include="Execution\Store\Print.fs"/>
         <Compile Include="Execution\Commit.fs"/>
-        <Compile Include="Checks\Types.fs" />
-        <Compile Include="FsGeneration\FsGeneration.fs" />
+        <Compile Include="Checks\Types.fs"/>
+        <Compile Include="FsGeneration\Util.fs"/>
+        <Compile Include="FsGeneration\QueryModule.fs"/>
+        <Compile Include="FsGeneration\FsprojFile.fs"/>
+        <Compile Include="FsGeneration\Main.fs"/>
         <Compile Include="Reports\Report.fs"/>
         <Compile Include="Reports\RelationsSummary.fs"/>
         <Compile Include="Reports\Export.fs"/>
@@ -63,6 +66,9 @@
         <None Include="..\README.md" Pack="true" PackagePath="\"/>
         <None Include="..\doc\images\logo.png" Pack="true" PackagePath="\"/>
     </ItemGroup>
-    
+    <ItemGroup>
+        <PackageReference Include="LamgEnv" Version="0.0.2"/>
+    </ItemGroup>
+
     <Import Project="..\.paket\Paket.Restore.targets"/>
 </Project>

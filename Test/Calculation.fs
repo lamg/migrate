@@ -33,7 +33,8 @@ let emptyProject =
     syncs = []
     inits = []
     reports = []
-    pullScript = None }
+    pullScript = None
+    includeFsFiles = [] }
 
 let schemaWithOneTable (tableName: string) =
   { emptySchema with

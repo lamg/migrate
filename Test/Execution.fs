@@ -33,6 +33,7 @@ let emptyProject: Project =
     syncs = []
     inits = []
     reports = []
+    includeFsFiles = []
     pullScript = None }
 
 let schema0 =
