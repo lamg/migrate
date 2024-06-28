@@ -45,7 +45,7 @@ let projectToFsproj (p: Project) =
       XElement(
         XName.Get "PackageReference",
         XAttribute(XName.Get "Include", "MigrateLib"),
-        XAttribute(XName.Get "Version", "0.0.18")
+        XAttribute(XName.Get "Version", "0.0.19")
       )
     )
   )
