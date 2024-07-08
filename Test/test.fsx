@@ -1,8 +1,8 @@
-#r "/home/lamg/src/migrate/Lib/bin/Debug/net8.0/Migrate.dll"
+#r "../Lib/bin/Debug/net8.0/Migrate.dll"
 #r "nuget: Fabulous.AST, 1.0.0-pre9"
 #r "nuget: Fantomas.Core, 6.3.3"
 
-open Migrate.FsGeneration.FsGeneration
+open Migrate.FsGeneration.QueryModule
 open Migrate.Checks.Types
 open Migrate.Types
 open Fantomas.Core

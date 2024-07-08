@@ -25,3 +25,20 @@ type SqliteReaderExecuter(connection: SqliteConnection, transaction: SqliteTrans
     member _.ExecuteReader(sql: string) =
       let command = new SqliteCommand(sql, connection, transaction)
       command.ExecuteReader()
+
+type InsertExecuter =
+  abstract member Insert: string -> string array -> obj array array -> Result<unit, string>
+
+type SqliteInserter(connection: SqliteConnection, transaction: SqliteTransaction) =
+  interface InsertExecuter with
+
+    member _.Insert (sql: string) (columns: string array) (vss: obj array array) =
+      try
+        for vs in vss do
+          use c = new SqliteCommand(sql, connection, transaction)
+          vs |> Array.zip columns |> Seq.iter (c.Parameters.AddWithValue >> ignore)
+          c.ExecuteNonQuery() |> ignore
+
+        Ok()
+      with e ->
+        Error e.Message
