@@ -1,12 +1,4 @@
-<p align="center">
-  <a href="https://www.nuget.org/packages/migtool">
-    <img
-      src="https://raw.githubusercontent.com/lamg/migrate/master/doc/images/logo.png"
-      alt="Migrate – Declarative migrations with SQL"
-      style="border-radius: 50%;width: 100px"
-    />
-  </a>
-</p>
+[![logo](doc/images/logo.png)][migtool]
 
 [![NuGet Version][nuget-version]][migtool]
 [![NuGet Downloads][nuget-downloads]][migtool]
