@@ -1,4 +1,4 @@
-[![logo](doc/images/logo.png)][migtool]
+[![logo](doc/images/logo_small.png)][migtool]
 
 [![NuGet Version][nuget-version]][migtool]
 [![NuGet Downloads][nuget-downloads]][migtool]
