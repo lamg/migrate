@@ -72,7 +72,7 @@ See [contributing_guideline](doc/contributing_guideline.md)
 
 [Apache 2.0][apache2]
 
-[dotnet]: https://dotnet.microsoft.com/en-us/download/dotnet/8.0
+[dotnet]: https://dotnet.microsoft.com/en-us/download/dotnet/9.0
 
 [apache2]: https://www.apache.org/licenses/LICENSE-2.0
 
