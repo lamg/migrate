@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SqliteParser</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Antlr4 Include="SQLiteLexer.g4">
+      <Listener>false</Listener>
+      <Visitor>false</Visitor>
+      <GAtn>false</GAtn>
+      <Package>SqliteParserCs</Package>
+      <Error>true</Error>
+    </Antlr4>
+    <Antlr4 Include="SQLiteParser.g4">
+      <Listener>false</Listener>
+      <Visitor>true</Visitor>
+      <GAtn>false</GAtn>
+      <Package>SqliteParserCs</Package>
+      <Error>true</Error>
+    </Antlr4>
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Antlr4.Runtime.Standard"/>
+    <PackageReference Include="Antlr4BuildTasks"/>
+  </ItemGroup>
+
+</Project>
