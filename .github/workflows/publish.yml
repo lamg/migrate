@@ -2,35 +2,22 @@ name: Publish NuGet Package
 on:
   push:
     tags:
-      - '*'
+      - "*"
 
-jobs:                                                                        
-    build:
-      runs-on: ubuntu-latest
-      container:
-        image: mcr.microsoft.com/dotnet/sdk:8.0
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:9.0
 
-      steps:
+    steps:
       - uses: actions/checkout@v4
 
       - name: publish migtool
         run: |
-          dotnet tool restore
-          dotnet paket restore
           dotnet publish -c Release
           dotnet pack
           dotnet nuget push nupkg/*.nupkg -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json
-        working-directory: ./Cli
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-
-      - name: publish MigrateLib
-        run: |
-          dotnet tool restore
-          dotnet paket restore
-          dotnet publish -c Release
-          dotnet pack
-          dotnet nuget push nupkg/*.nupkg -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json
-        working-directory: ./Lib
+        working-directory: ./src/mig
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}

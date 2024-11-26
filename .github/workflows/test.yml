@@ -6,13 +6,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: mcr.microsoft.com/dotnet/sdk:8.0
+      image: mcr.microsoft.com/dotnet/sdk:9.0
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Run tests
-      run: |
-        dotnet tool restore
-        dotnet paket restore
-        dotnet test
+      - name: Run tests
+        run: |
+          dotnet test
