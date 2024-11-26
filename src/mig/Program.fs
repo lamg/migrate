@@ -15,6 +15,7 @@ type Args =
   | [<CliPrefix(CliPrefix.None)>] Init of ParseResults<InitArgs>
   | [<AltCommandLine("-nc")>] NoColors
   | [<AltCommandLine("-nl")>] NoLog
+  | [<AltCommandLine("-v")>] Version
 
   interface IArgParserTemplate with
     member s.Usage =
@@ -27,6 +28,7 @@ type Args =
       | Log _ -> "print the migration log"
       | NoLog -> "do not log the migration"
       | Init _ -> "Initialize a project in the current directory with example definitions"
+      | Version -> "Prints mig's version"
 
 and InitArgs =
   | [<NoCommandLine>] Dummy
@@ -174,6 +176,12 @@ let init () =
   File.WriteAllText("schema.sql", sql)
   0
 
+let version () =
+  let asm = System.Reflection.Assembly.GetExecutingAssembly()
+  let version = asm.GetName().Version
+  printfn $"{version.Major}.{version.Minor}.{version.Revision}"
+  0
+
 [<EntryPoint>]
 let main args =
 
@@ -196,6 +204,7 @@ let main args =
 
   try
     match command with
+    | _ when results.Contains Version -> version()
     | Some(Gen _) -> generate withColors
     | Some(Args.Exec flags) when withLog -> Exec.execAndLog flags
     | Some(Args.Exec _) -> Exec.exec ()
