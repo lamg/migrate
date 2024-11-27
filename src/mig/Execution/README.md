@@ -18,8 +18,7 @@ The command
 mig schema
 ```
 
-outputs the schema of the database in SQL and with syntax highlighting. In order to deactivate the syntax highlighting pass the
-`-n` flag before any subcommand. This is useful when creating a SQL script because it removes the ANSI color sequences from the output.
+outputs the schema of the database in SQL and with syntax highlighting. In order to deactivate the syntax highlighting pass the `-n` flag before any subcommand. This is useful when creating a SQL script because it removes the ANSI color sequences from the output.
 
 ## Execute migration
 
@@ -46,8 +45,7 @@ test_db
 └── test_db.sqlite
 ```
 
-Now `test_db.sqlite` has the desired schema. In case
-`test_db.sqlite` already exists it will generate only the necessary steps in order to migrate the database.
+Now `test_db.sqlite` has the desired schema. In case `test_db.sqlite` already exists it will generate only the necessary steps in order to migrate the database.
 
 ## Generate script
 
@@ -60,5 +58,10 @@ test_db
 └── test_db.sqlite
 ```
 
-It will output a script that allows to review and migrate the
-`test_db.sqlite` database, which will be created in case it doesn't exist.
+the command
+
+```sh
+mig gen
+```
+
+will output a script that allows to review and migrate the `test_db.sqlite` database, which will be created in case it doesn't exist.
