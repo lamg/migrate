@@ -1,0 +1,1 @@
+package declarative_migrations
