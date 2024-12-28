@@ -1,6 +1,6 @@
 // Code generated from SQLiteLexer.g4 by ANTLR 4.13.2. DO NOT EDIT.
 
-package parser
+package sqlite_parser
 
 import (
 	"fmt"
