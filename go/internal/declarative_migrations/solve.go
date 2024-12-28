@@ -48,9 +48,7 @@ func (g *Graph[T]) topologicalSort() []T {
 
 	for node := range g.graph {
 		if _, exists := visited[node]; !exists {
-			if !visit(node) {
-				panic("cycle detected in graph")
-			}
+			visit(node)
 		}
 	}
 	return order
@@ -68,10 +66,58 @@ func (g *Graph[T]) hasEdge(x, y T) bool {
 }
 
 func (g *Graph[T]) isDependency(x T) bool {
-	if g.graph == nil {
-		return false
-	}
-
 	_, ok := g.graph[x]
 	return ok
+}
+
+func dependentRelations(file SqlFile) (*Graph[string], []string) {
+	g := NewGraph[string]()
+	return g, []string{}
+}
+
+func tableDifferences(left, right SqlFile) (adds, removes, renames []string) {
+	return
+}
+
+type fileSorted struct {
+	file            SqlFile
+	sortedRelations []string
+}
+
+func tableMigrations(left, right fileSorted) (creates []CreateTable, drops []string, renames []string) {
+	return
+}
+
+func sortFile(file SqlFile) fileSorted {
+	return fileSorted{file: file, sortedRelations: []string{}}
+}
+
+func tableMigrationsSql(left, right fileSorted) []string {
+	return []string{}
+}
+
+type setSortSql struct {
+	set    Set[string]
+	sql    func(string) string
+	sorted []string
+}
+
+func simpleMigrationSql(left, right setSortSql) []string {
+	return []string{}
+}
+
+func viewMigrationSql(left, right fileSorted) []string {
+	return []string{}
+}
+
+func indexMigrationSql(left, right fileSorted) []string {
+	return []string{}
+}
+
+func triggerMigrationSql(left, right fileSorted) []string {
+	return []string{}
+}
+
+func columnMigrations(left, right []CreateTable) []string {
+	return []string{}
 }
