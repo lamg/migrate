@@ -1,4 +1,4 @@
-[![logo](images/logo_small.png)][migtool]
+[![logo][logo]][migtool]
 
 [![NuGet Version][nuget-version]][migtool]
 [![NuGet Downloads][nuget-downloads]][migtool]
@@ -72,14 +72,10 @@ See [contributing_guideline](doc/contributing_guideline.md)
 
 [Apache 2.0][apache2]
 
+[logo]: https://raw.githubusercontent.com/lamg/migrate/refs/heads/master/images/logo_small.png
 [dotnet]: https://dotnet.microsoft.com/en-us/download/dotnet/9.0
-
 [apache2]: https://www.apache.org/licenses/LICENSE-2.0
-
 [migtool]: https://www.nuget.org/packages/migtool
-
 [nuget-version]: https://img.shields.io/nuget/v/migtool?style=flat-square
-
 [nuget-downloads]: https://img.shields.io/nuget/dt/migtool?style=flat-square
-
 [tests]: https://img.shields.io/github/actions/workflow/status/lamg/migrate/test.yml?style=flat-square&label=tests
