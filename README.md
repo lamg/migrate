@@ -44,10 +44,11 @@ mig log
 
 ## Features
 
-- [Declarative migrations](./src/mig/DeclarativeMigrations/README.md)
-- [Migration execution](./src/mig/Execution/README.md)
-- [Import Goose migrations](./src/mig/ImportGoose/README.md)
-- [Migration log](./src/mig/MigrationLog/README.md)
+- [Declarative migrations](./src/MigLib/DeclarativeMigrations/README.md)
+- [Migration execution](./src/MigLib/Execution/README.md)
+- [Migration execution as library](./src/MigLib/Execution/README.md#migration-execution-using-miglib)
+- [Import Goose migrations](./src/MigLib/ImportGoose/README.md)
+- [Migration log](./src/MigLib/MigrationLog/README.md)
 
 ## Contributing
 
