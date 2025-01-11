@@ -5,6 +5,20 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>SqliteParser</RootNamespace>
+    <PackageId>SqliteParserCs</PackageId>
+    <Version>1.0.2</Version>
+    <PackageOutputPath>./nupkg</PackageOutputPath>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyName>SqliteParserCs</AssemblyName>
+    
+    <Authors>Luis Ángel Méndez Gort</Authors>
+    <PackageProjectUrl>https://github.com/lamg/migrate</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/lamg/migrate</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/lamg/migrate</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/lamg/migrate</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageIcon>logo.png</PackageIcon>
   </PropertyGroup>
   <ItemGroup>
     <Antlr4 Include="SQLiteLexer.g4">
@@ -22,6 +36,12 @@
       <Error>true</Error>
     </Antlr4>
   </ItemGroup>
+  
+  <ItemGroup>
+    <Content Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <Content Include="..\..\images\logo.png" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  
   <ItemGroup>
     <PackageReference Include="Antlr4.Runtime.Standard"/>
     <PackageReference Include="Antlr4BuildTasks"/>
