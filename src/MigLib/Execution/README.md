@@ -65,3 +65,22 @@ mig gen
 ```
 
 will output a script that allows to review and migrate the `test_db.sqlite` database, which will be created in case it doesn't exist.
+
+## Migration execution using MigLib
+
+MigLib is a library designed for other projects to run migrations relying on internal source code and not in the command line interface `mig`. The usage is as follows:
+
+```fsharp
+open migrate.Execution.Exec
+open FsToolkit.ErrorHandling
+
+let sources = [
+  { name = "schema0.sql"; content="CREATE TABLE table0(id INTEGER NOT NULL)" }
+] 
+
+result {
+  let! statements = migrationStatementsForDb ("/path/to/db.sqlite", sources)
+  let! results = executeMigration statements
+  return results
+}
+```

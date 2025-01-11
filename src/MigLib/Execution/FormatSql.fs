@@ -1,4 +1,4 @@
-module internal migrate.Execution.FormatSql
+module migrate.Execution.FormatSql
 
 open System.Text.RegularExpressions
 open SqlPrettify

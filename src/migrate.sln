@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SqliteParserCs", "SqlitePar
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Test", "Test\Test.fsproj", "{FED9A465-A5D9-48EB-B9E6-1034974A9DD5}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MigLib", "MigLib\MigLib.fsproj", "{053AFA3D-80E7-43C0-80E6-BC462120398E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,5 +32,9 @@ Global
 		{FED9A465-A5D9-48EB-B9E6-1034974A9DD5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{FED9A465-A5D9-48EB-B9E6-1034974A9DD5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{FED9A465-A5D9-48EB-B9E6-1034974A9DD5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{053AFA3D-80E7-43C0-80E6-BC462120398E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{053AFA3D-80E7-43C0-80E6-BC462120398E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{053AFA3D-80E7-43C0-80E6-BC462120398E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{053AFA3D-80E7-43C0-80E6-BC462120398E}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

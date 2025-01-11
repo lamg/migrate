@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="UseAsLib.fs" />
     <Compile Include="CompareObjects.fs" />
     <Compile Include="TableMigration.fs" />
     <Compile Include="ViewMigration.fs" />
@@ -24,7 +25,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\mig\mig.fsproj" />
+    <ProjectReference Include="..\MigLib\MigLib.fsproj" />
   </ItemGroup>
 
 </Project>

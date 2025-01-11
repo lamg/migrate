@@ -46,13 +46,13 @@ let internal migrationSteps: Types.CreateTable =
 let migrationStatements () =
   result {
     let dir = Environment.CurrentDirectory |> DirectoryInfo
-    let! expectedSchema = Exec.readDirSql dir
+    let! expectedSchema = Exec.readDirSql dir |> Exec.parseSqlFiles
 
     let expectedWithMigTables =
       { expectedSchema with
           tables = expectedSchema.tables @ [ migrationLog; migrationSteps ] }
-
-    let! dbSchema = Exec.dbSchema dir
+    let dbFile = Exec.getDbFile dir
+    let! dbSchema = Exec.dbSchema dbFile
     return! Migration.migration (dbSchema, expectedWithMigTables)
   }
 

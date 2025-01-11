@@ -42,9 +42,7 @@ let internal dbElements (conn: SqliteConnection) =
 
 let internal getDbFile (dir: DirectoryInfo) = $"{dir.FullName}/{dir.Name}.sqlite"
 
-let internal dbSchema (dir: DirectoryInfo) =
-  let dbFile = getDbFile dir
-
+let internal dbSchema (dbFile: string) =
   result {
     use! conn = connect dbFile
     let! sql = dbElements conn
@@ -64,15 +62,11 @@ let internal readFile path =
   with e ->
     Error(Types.ReadFileFailed e.Message)
 
-let internal readDirSql (dir: DirectoryInfo) =
-  dir.EnumerateFiles()
-  |> Seq.toList
-  |> List.choose (fun f ->
-    if f.Extension = ".sql" then
-      let sql = f.OpenText().ReadToEnd()
-      SqlParser.parse (f.FullName, sql) |> Some
-    else
-      None)
+type SqlSource = {name:string; content:string}
+
+let internal parseSqlFiles (sources: SqlSource list) =
+  sources
+  |> List.map (fun s -> SqlParser.parse(s.name, s.content))
   |> Solve.splitResult
   |> function
     | xs, [] ->
@@ -89,12 +83,30 @@ let internal readDirSql (dir: DirectoryInfo) =
       |> Ok
     | _, errs -> errs |> List.map Types.ParsingFailed |> Types.Composed |> Error
 
-let migrationStatements () =
+let internal readDirSql (dir: DirectoryInfo) =
+  dir.EnumerateFiles()
+  |> Seq.toList
+  |> List.choose (fun f ->
+    if f.Extension = ".sql" then
+      let sql = f.OpenText().ReadToEnd()
+      {name = f.FullName; content = sql} |> Some
+    else
+      None)
+
+let migrationStatementsForDb(dbFile:string, sources: SqlSource list) =
   result {
-    let dir = Environment.CurrentDirectory |> DirectoryInfo
-    let! expectedSchema = readDirSql dir
-    let! dbSchema = dbSchema dir
+    let! expectedSchema = parseSqlFiles sources
+    let! dbSchema = dbSchema dbFile
     return! Migration.migration (dbSchema, expectedSchema)
+  }
+
+let migrationStatements () =
+  let dir = Environment.CurrentDirectory
+  result {
+    let dir = DirectoryInfo dir
+    let dbFile = getDbFile dir
+    let sources = readDirSql dir
+    return! migrationStatementsForDb(dbFile, sources)
   }
 
 let generateMigrationScript (withColors: bool) =

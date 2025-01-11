@@ -1,0 +1,54 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RollForward>major</RollForward>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    
+    <PackageId>MigLib</PackageId>
+    <Version>1.0.2</Version>
+    <PackageOutputPath>./nupkg</PackageOutputPath>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RootNamespace>migrate</RootNamespace>
+    <AssemblyName>MigLib</AssemblyName>
+    
+    <Authors>Luis Ángel Méndez Gort</Authors>
+    <PackageProjectUrl>https://github.com/lamg/migrate</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/lamg/migrate</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/lamg/migrate</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/lamg/migrate</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageIcon>logo.png</PackageIcon>
+  </PropertyGroup>
+
+  
+  <ItemGroup>
+    <Compile Include="AssemblyInfo.fs" />
+    <Compile Include="DeclarativeMigrations\Types.fs"/>
+    <Compile Include="DeclarativeMigrations\SqlParser.fs"/>
+    <Compile Include="DeclarativeMigrations\GenerateSql.fs"/>
+    <Compile Include="DeclarativeMigrations\Solve.fs"/>
+    <Compile Include="DeclarativeMigrations\Migration.fs"/>
+    <Compile Include="Execution\FormatSql.fs"/>
+    <Compile Include="Execution\Exec.fs"/>
+    <Compile Include="MigrationLog\ExecAndLog.fs" />
+    <Compile Include="ImportGoose\ImportGoose.fs"/>
+    <Content Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <Content Include="..\..\images\logo.png" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core"/>
+    <PackageReference Include="FsToolkit.ErrorHandling"/>
+    <PackageReference Include="Microsoft.Data.Sqlite"/>
+    <PackageReference Include="SqlParserCS"/>
+    <PackageReference Include="SqlPrettify"/>
+    <PackageReference Include="FSharpPlus"/>
+  </ItemGroup>
+  
+  <ItemGroup>
+    <ProjectReference Include="..\SqliteParserCs\SqliteParserCs.csproj"/>
+  </ItemGroup>
+
+</Project>
