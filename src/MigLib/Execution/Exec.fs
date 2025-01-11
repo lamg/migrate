@@ -116,10 +116,7 @@ let generateMigrationScript (withColors: bool) =
     return statements |> FormatSql.formatSeq withColors
   }
 
-let executeMigration (statements: string list) =
-  let dir = Environment.CurrentDirectory |> DirectoryInfo
-  let dbFile = getDbFile dir
-
+let executeMigrationInDb (dbFile:string) (statements:string list) =
   match connect dbFile with
   | Ok conn ->
     use conn = conn
@@ -161,8 +158,13 @@ let executeMigration (statements: string list) =
           Error(Types.FailedSteps xs)
 
   | Error e -> Error e
-
-
+  
+/// uses <current_directory>.sqlite as default database
+let executeMigration (statements: string list) =
+  let dir = Environment.CurrentDirectory |> DirectoryInfo
+  let dbFile = getDbFile dir
+  executeMigrationInDb dbFile statements
+  
 let getDbSql withColors =
   let dir = Environment.CurrentDirectory |> DirectoryInfo
   let dbFile = getDbFile dir

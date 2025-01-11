@@ -6,7 +6,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     
     <PackageId>MigLib</PackageId>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <InvariantGlobalization>true</InvariantGlobalization>
     <RootNamespace>migrate</RootNamespace>
