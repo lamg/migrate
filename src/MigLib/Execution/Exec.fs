@@ -40,7 +40,18 @@ let internal dbElements (conn: SqliteConnection) =
   with e ->
     Error(Types.ReadSchemaFailed $"{e.Message}")
 
-let internal getDbFile (dir: DirectoryInfo) = $"{dir.FullName}/{dir.Name}.sqlite"
+[<Literal>]
+let migrateDbEnvVar = "migrate_db"
+
+let internal getDbFile (dir: DirectoryInfo) =
+  dotenv.net.DotEnv.Load()
+
+  let getEnv s =
+    Environment.GetEnvironmentVariable s |> Option.ofObj
+
+  match getEnv migrateDbEnvVar with
+  | Some x -> x
+  | None -> $"{dir.FullName}/{dir.Name}.sqlite"
 
 let internal dbSchema (dbFile: string) =
   result {
@@ -62,11 +73,11 @@ let internal readFile path =
   with e ->
     Error(Types.ReadFileFailed e.Message)
 
-type SqlSource = {name:string; content:string}
+type SqlSource = { name: string; content: string }
 
 let internal parseSqlFiles (sources: SqlSource list) =
   sources
-  |> List.map (fun s -> SqlParser.parse(s.name, s.content))
+  |> List.map (fun s -> SqlParser.parse (s.name, s.content))
   |> Solve.splitResult
   |> function
     | xs, [] ->
@@ -89,11 +100,11 @@ let internal readDirSql (dir: DirectoryInfo) =
   |> List.choose (fun f ->
     if f.Extension = ".sql" then
       let sql = f.OpenText().ReadToEnd()
-      {name = f.FullName; content = sql} |> Some
+      { name = f.FullName; content = sql } |> Some
     else
       None)
 
-let migrationStatementsForDb(dbFile:string, sources: SqlSource list) =
+let migrationStatementsForDb (dbFile: string, sources: SqlSource list) =
   result {
     let! expectedSchema = parseSqlFiles sources
     let! dbSchema = dbSchema dbFile
@@ -102,11 +113,12 @@ let migrationStatementsForDb(dbFile:string, sources: SqlSource list) =
 
 let migrationStatements () =
   let dir = Environment.CurrentDirectory
+
   result {
     let dir = DirectoryInfo dir
     let dbFile = getDbFile dir
     let sources = readDirSql dir
-    return! migrationStatementsForDb(dbFile, sources)
+    return! migrationStatementsForDb (dbFile, sources)
   }
 
 let generateMigrationScript (withColors: bool) =

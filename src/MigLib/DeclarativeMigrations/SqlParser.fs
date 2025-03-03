@@ -93,7 +93,21 @@ type SqlVisitor() =
     let constraints =
       context.table_constraint ()
       |> Array.choose (fun c ->
-        if c.FOREIGN_() <> null then
+        match c with
+        | _ when c.PRIMARY_() <> null ->
+          { constraintName = None
+            columns = c.indexed_column () |> Array.map _.column_name().GetText() |> Array.toList
+            isAutoincrement = false }
+          |> PrimaryKey
+          |> Some
+
+        | _ when c.UNIQUE_() <> null ->
+          c.indexed_column ()
+          |> Array.map _.column_name().GetText()
+          |> Array.toList
+          |> Unique
+          |> Some
+        | _ when c.FOREIGN_() <> null ->
           let columns = c.column_name () |> Array.map _.GetText() |> Array.toList
           let refTable = c.foreign_key_clause().foreign_table().GetText()
 
@@ -108,8 +122,7 @@ type SqlVisitor() =
                 refTable = refTable
                 refColumns = refColumns }
           )
-        else
-          None)
+        | _ -> None)
       |> Array.toList
 
     Table
