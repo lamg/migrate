@@ -6,7 +6,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     
     <PackageId>MigLib</PackageId>
-    <Version>1.0.3</Version>
+    <Version>1.0.4</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <InvariantGlobalization>true</InvariantGlobalization>
     <RootNamespace>migrate</RootNamespace>
@@ -43,7 +43,6 @@
     <PackageReference Include="FSharp.Core" />
     <PackageReference Include="FsToolkit.ErrorHandling" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
-    <PackageReference Include="SqlParserCS" />
     <PackageReference Include="SqlPrettify" />
     <PackageReference Include="FSharpPlus" />
   </ItemGroup>

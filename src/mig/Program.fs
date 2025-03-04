@@ -178,8 +178,9 @@ let init () =
 
 let version () =
   let asm = System.Reflection.Assembly.GetExecutingAssembly()
+
   let version = asm.GetName().Version
-  printfn $"{version.Major}.{version.Minor}.{version.Revision}"
+  printfn $"{version.Major}.{version.Minor}.{version.Build}"
   0
 
 [<EntryPoint>]
@@ -204,7 +205,7 @@ let main args =
 
   try
     match command with
-    | _ when results.Contains Version -> version()
+    | _ when results.Contains Version -> version ()
     | Some(Gen _) -> generate withColors
     | Some(Args.Exec flags) when withLog -> Exec.execAndLog flags
     | Some(Args.Exec _) -> Exec.exec ()
