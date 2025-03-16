@@ -132,7 +132,8 @@ let tableDifferences (left: SqlFile) (right: SqlFile) =
     List.map (fun (t: CreateTable) -> (t.columns, t.constraints), t.name)
     >> Map.ofList
 
-  let leftSchemaNames, rightSchemaNames = schemaToName left.tables, schemaToName right.tables
+  let leftSchemaNames, rightSchemaNames =
+    schemaToName left.tables, schemaToName right.tables
 
   let commonSchemas =
     Set.intersect (Set.ofSeq leftSchemaNames.Keys) (Set.ofSeq rightSchemaNames.Keys)
@@ -229,7 +230,7 @@ let viewMigrationsSql (left: FileSorted) (right: FileSorted) =
 
   let rs =
     { set = viewToSet right.file.views
-      sql = (fun v -> right.file.views |> findOne (fun n -> n.name = v) |> View.createSql)
+      sql = fun v -> right.file.views |> findOne (fun n -> n.name = v) |> View.createSql
       sorted = right.sortedRelations }
 
   simpleMigrationSql ls rs
@@ -244,7 +245,7 @@ let indexMigrationsSql (left: FileSorted) (right: FileSorted) =
 
   let rs =
     { set = indexToSet right.file.indexes
-      sql = (fun i -> right.file.indexes |> findOne (fun n -> n.name = i) |> Index.createSql)
+      sql = fun i -> right.file.indexes |> findOne (fun n -> n.name = i) |> Index.createSql
       sorted = right.sortedRelations }
 
   simpleMigrationSql ls rs

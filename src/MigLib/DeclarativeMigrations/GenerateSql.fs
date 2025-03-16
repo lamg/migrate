@@ -78,22 +78,25 @@ module Table =
          $"ALTER TABLE {auxTable.name} RENAME TO {table.name}" ]
 
 let tokensToString xs =
-  xs
-  |> Seq.pairwise
-  |> Seq.mapi (fun i (pred, curr) ->
-    if i = 0 then
-      $"{pred} {curr}"
-    else
-      match pred, curr with
-      | ",", _ -> $" {curr}"
-      | _, ","
-      | _, "."
-      | ".", _
-      | _, ")"
-      | _, "(" -> curr
-      | _ -> $" {curr}")
+  match xs with
+  | _ when Seq.length xs = 1 -> Seq.head xs
+  | _ ->
+    xs
+    |> Seq.pairwise
+    |> Seq.mapi (fun i (pred, curr) ->
+      if i = 0 then
+        $"{pred} {curr}"
+      else
+        match pred, curr with
+        | ",", _ -> $" {curr}"
+        | _, ","
+        | _, "."
+        | ".", _
+        | _, ")"
+        | _, "(" -> curr
+        | _ -> $" {curr}")
 
-  |> String.concat ""
+    |> String.concat ""
 
 module View =
   let createSql (view: CreateView) =

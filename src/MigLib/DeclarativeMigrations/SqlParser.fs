@@ -1,5 +1,7 @@
 module internal migrate.DeclarativeMigrations.SqlParser
 
+open System
+open System.Text.RegularExpressions
 open System.IO
 open Antlr4.Runtime
 open SqliteParserCs
@@ -182,9 +184,27 @@ type SqlVisitor() =
         sqlTokens = sql
         dependencies = [ table ] }
 
+let prostProcViews (sql: string) (file: SqlFile) =
+  let extractViewTokens view =
+    let start = sql.IndexOf $"CREATE VIEW {view}"
+
+    let viewStr =
+      sql |> Seq.skip start |> Seq.takeWhile (fun c -> c <> ';') |> Array.ofSeq
+
+    let r = new string (viewStr) |> _.Trim()
+    [ r ]
+
+  let views =
+    file.views
+    |> List.map (fun v ->
+      { v with
+          sqlTokens = v.name |> extractViewTokens })
+
+  { file with views = views }
+
 let parse (_file: string, sql: string) =
   use reader = new StringReader(sql)
-  let input = AntlrInputStream(reader)
+  let input = AntlrInputStream reader
   let lexer = SQLiteLexer input
   let tokens = CommonTokenStream lexer
   let parser = SQLiteParser tokens
@@ -211,6 +231,7 @@ let parse (_file: string, sql: string) =
                 triggers = t :: acc.triggers }
           | StatList ys -> failwith $"unexpected statement list {ys}")
         emptyFile
-      |> Result.Ok
-    | Some expr -> Result.Error $"expecting statement list, got {expr}"
-    | None -> Result.Ok emptyFile
+      |> prostProcViews sql
+      |> Ok
+    | Some expr -> Error $"expecting statement list, got {expr}"
+    | None -> Ok emptyFile
