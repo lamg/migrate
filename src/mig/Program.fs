@@ -7,8 +7,8 @@ open migrate.Execution
 open FsToolkit.ErrorHandling
 
 type Args =
-  | [<CliPrefix(CliPrefix.None)>] Gen of ParseResults<GenArgs>
-  | [<CliPrefix(CliPrefix.None)>] Exec of ParseResults<ExecArgs>
+  | [<CliPrefix(CliPrefix.None)>] Status of ParseResults<GenArgs>
+  | [<CliPrefix(CliPrefix.None)>] Commit of ParseResults<ExecArgs>
   | [<CliPrefix(CliPrefix.None)>] Schema of ParseResults<SchemaArgs>
   | [<CliPrefix(CliPrefix.None)>] Import of ParseResults<ImportArgs>
   | [<CliPrefix(CliPrefix.None)>] Log of ParseResults<LogArgs>
@@ -20,8 +20,8 @@ type Args =
   interface IArgParserTemplate with
     member s.Usage =
       match s with
-      | Gen _ -> "generates a migration script"
-      | Exec _ -> "generates and executes step by step a migration script"
+      | Status _ -> "generates a migration script"
+      | Commit _ -> "generates and executes step by step a migration script"
       | Schema _ -> "show the database schema"
       | NoColors -> "when present deactivates the SQL syntax highlighting"
       | Import _ -> "imports Goose migrations from a directory"
@@ -206,9 +206,9 @@ let main args =
   try
     match command with
     | _ when results.Contains Version -> version ()
-    | Some(Gen _) -> generate withColors
-    | Some(Args.Exec flags) when withLog -> Exec.execAndLog flags
-    | Some(Args.Exec _) -> Exec.exec ()
+    | Some(Status _) -> generate withColors
+    | Some(Args.Commit flags) when withLog -> Exec.execAndLog flags
+    | Some(Args.Commit _) -> Exec.exec ()
     | Some(Schema _) -> schema withColors
     | Some(Import flags) when withLog -> Goose.importLog (withColors, flags)
     | Some(Import flags) -> Goose.import (withColors, flags)
