@@ -19,18 +19,12 @@ type SqlVisitor() =
   let rec childrenToText (x: Tree.IParseTree) =
     seq {
       if x.ChildCount = 0 then
+
         yield x.GetText()
       else
         for n in { 0 .. x.ChildCount - 1 } do
-          yield! childrenToText (x.GetChild(n))
+          yield! n |> x.GetChild |> childrenToText
     }
-
-  let selectDependencies (context: SQLiteParser.Select_stmtContext) =
-    context.select_core ()
-    |> Seq.head
-    |> _.table_or_subquery()
-    |> Seq.map (fun t -> t.table_name().GetText())
-    |> Seq.toList
 
   override this.VisitSql_stmt_list(context: SQLiteParser.Sql_stmt_listContext) =
     context.sql_stmt ()
@@ -131,7 +125,15 @@ type SqlVisitor() =
         constraints = constraints } //TODO parse table constraints
 
 
-  override this.VisitCreate_view_stmt(context: SQLiteParser.Create_view_stmtContext) =
+  override _.VisitCreate_view_stmt(context: SQLiteParser.Create_view_stmtContext) =
+    let selectDependencies (context: SQLiteParser.Select_stmtContext) =
+      context.select_core ()
+      |> Seq.head
+      |> _.table_or_subquery()
+      |> Seq.map (fun t -> t.table_name().GetText())
+      |> Seq.toList
+
+    // FIXME it's possible the remaining UNION  clauses are ignored because of a bug in the grammar
     let sql = context.children |> Seq.map childrenToText |> Seq.concat
 
     let name = context.view_name().GetText().Trim '"'
@@ -139,10 +141,22 @@ type SqlVisitor() =
     // FIXME assumes a query in the form `FROM table0, table1, …`
     let tables = context.select_stmt () |> selectDependencies
 
+    let withTables, withDeps =
+      match context.select_stmt().common_table_stmt () with
+      | null -> [], []
+      | ct ->
+        ct.common_table_expression ()
+        |> Array.map (fun x -> x.table_name().GetText(), selectDependencies (x.select_stmt ()))
+        |> Array.unzip
+        |> fun (xs, yss) -> Array.toList xs, yss |> Array.toList |> List.concat
+
+    // FIXME for WITH statements inside WITH statements this trick might not work
+    let topLevelTables = set tables + set withDeps - set withTables |> Set.toList
+
     View
       { name = name
         sqlTokens = sql
-        dependencies = tables }
+        dependencies = topLevelTables }
 
   override this.VisitCreate_index_stmt(context: SQLiteParser.Create_index_stmtContext) =
     let name = context.index_name().GetText().Trim '"'
@@ -197,6 +211,6 @@ let parse (_file: string, sql: string) =
                 triggers = t :: acc.triggers }
           | StatList ys -> failwith $"unexpected statement list {ys}")
         emptyFile
-      |> Ok
-    | Some expr -> Error $"expecting statement list, got {expr}"
-    | None -> Ok emptyFile
+      |> Result.Ok
+    | Some expr -> Result.Error $"expecting statement list, got {expr}"
+    | None -> Result.Ok emptyFile

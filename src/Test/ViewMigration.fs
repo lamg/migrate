@@ -20,13 +20,35 @@ let view0 =
 
 let schema0 = student
 
-let schema1 =
+let schema0' =
   $"
   {student};
   {view0}
 "
 
-let cases = [ schema0, schema1, Ok [ view0 ] ]
+let view1 =
+  "CREATE VIEW view0 AS WITH bla AS( SELECT * FROM coco) SELECT * FROM bla b, student s"
+
+let schema1 =
+  $"
+  {student};
+  {view1}
+"
+
+// let view2 = "CREATE VIEW view0 AS SELECT * FROM coco UNION SELECT * FROM pepe"
+
+// let schema2 =
+//   $"
+//   {student};
+//   {view2}
+// "
+
+let cases =
+  [ schema0, schema0', Ok [ view0 ]
+    schema0, schema1, Ok [ view1 ]
+    // schema0, schema2, Ok [ view2 ] ]
+    ]
+
 
 let testViewMigration (case: int) (left: string, right: string, r: Result<string list, string>) =
   result {
