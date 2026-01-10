@@ -2,7 +2,7 @@
 
 **Branch:** `fsharp-generation`
 **Last Updated:** 2026-01-10
-**Status:** Code generation working, FParsec parser in progress
+**Status:** Code generation working, FParsec parser complete and active
 
 ## Overview
 
@@ -203,126 +203,67 @@ All 3 existing tests pass.
 - Added performance considerations for code generation
 - Removed Goose import documentation
 
-## 🚧 In Progress
+### 7. Completed FParsec-based SQL Parser
 
-### FParsec-based SQL Parser
+**File:** `src/MigLib/DeclarativeMigrations/FParsecSqlParser.fs` (now active)
 
-**File:** `src/MigLib/DeclarativeMigrations/FParsecSqlParser.fs` (currently commented out in .fsproj)
+**Goal:** Replace regex-based parser with robust FParsec parser combinator implementation ✅
 
-**Goal:** Replace regex-based parser with robust FParsec parser combinator implementation
+**Status:** COMPLETE - All tests passing, parser in active use
 
-**Status:** Skeleton complete, has compilation errors
+**Fixes Applied:**
+1. **Fixed parse {} type errors**: Added `>>% ()` to all `do!` expressions that return values
+   - Column constraint parsers: `defaultValue`, `check`, `foreignKey`
+   - Table constraint parsers: `primaryKey`, `foreignKey`, `unique`
 
-**Completed Parts:**
-```fsharp
-// Core parsers
-let ws = spaces
-let identifier : Parser<string, unit> = ...  // ✅ Complete
-let sqlType : Parser<SqlType, unit> = ...    // ✅ Complete
-let expression : Parser<Expr, unit> = ...    // ✅ Complete
+2. **Fixed function naming conflict**: Renamed `parse` to `parseSqlFile` to avoid conflict with FParsec's `parse` computation expression
 
-// Constraint parsers
-let columnConstraint : Parser<ColumnConstraint, unit> = ...  // ✅ Partially complete
-  - notNull ✅
-  - primaryKey ❌ (parse {} syntax errors)
-  - unique ✅
-  - defaultValue ❌ (parse {} syntax errors)
-  - check ❌ (parse {} syntax errors)
-  - foreignKey ❌ (parse {} syntax errors)
+3. **Fixed Result constructor issue**: Used fully qualified `Result.Ok` and `Result.Error`
 
-let tableConstraint : Parser<ColumnConstraint, unit> = ...  // ❌ Not started
-let columnDef : Parser<ColumnDef, unit> = ...               // ✅ Complete
+4. **Made parser case-insensitive**: Changed `pstring` to `pstringCI` in all string parsers
+   - Allows both "INTEGER" and "integer", "TEXT" and "text", etc.
 
-// Statement parsers
-let createTable : Parser<CreateTable, unit> = ...    // ✅ Converted to combinator style
-let createView : Parser<CreateView, unit> = ...      // ✅ Converted to combinator style
-let createIndex : Parser<CreateIndex, unit> = ...    // ✅ Converted to combinator style
-let createTrigger : Parser<CreateTrigger, unit> = ... // ✅ Converted to combinator style
-```
+5. **Fixed statement backtracking**: Added `attempt` to all statement parsers in `choice` to allow proper backtracking when parsing multiple statements
 
-**Current Errors:**
-1. **Type mismatches in parse {} blocks** (lines 79, 88, 95, 96, 103):
-   - `do!` expects parsers returning `unit`, but we're using parsers that return values
-   - Error: "This expression was expected to have type 'string' but here has type 'unit'"
+6. **Fixed SQL type whitespace handling**: Changed `str_ws1` to `str_ws` in `typeParser` to allow no whitespace before comma
 
-2. **Incomplete pattern matches** (lines 137, 138, 150, 151, 153, 154, 168, 169, 171):
-   - Warning about non-exhaustive pattern matching in table constraint parsers
+**Integration:**
+- Updated `SqlParser.fs` to use `FParsecSqlParser.parseSqlFile` instead of regex parsing
+- Kept view post-processing logic (`prostProcViews`) for dependency extraction
+- Removed all old regex-based parsing code
+- Removed debug test file and backup file
 
-3. **Application errors** (lines 275, 277):
-   - "This value is not a function and cannot be applied"
-   - Likely in the main parse function
-
-**What Needs Fixing:**
-
-**Option 1 - Convert parse {} to combinator style (RECOMMENDED):**
-```fsharp
-// ❌ Current (broken):
-let primaryKey =
-  parse {
-    do! str_ws1 "PRIMARY" >>. str_ws "KEY"
-    let! isAuto = opt (str_ws "AUTOINCREMENT")
-    return PrimaryKey { constraintName = None; columns = []; isAutoincrement = isAuto.IsSome }
-  }
-
-// ✅ Fixed:
-let primaryKey =
-  str_ws1 "PRIMARY" >>. str_ws "KEY" >>.
-  opt (str_ws "AUTOINCREMENT")
-  |>> (fun isAuto -> PrimaryKey { constraintName = None; columns = []; isAutoincrement = isAuto.IsSome })
-```
-
-**Option 2 - Fix parse {} syntax:**
-- Use `>>%` for parsers that should discard results
-- Ensure proper types for `do!` expressions
-
-**Remaining Work:**
-1. Fix all constraint parsers (primaryKey, defaultValue, check, foreignKey)
-2. Complete table constraint parsers
-3. Test against existing test cases:
-   - `CREATE TABLE table0(id integer NOT NULL)`
-   - `CREATE TABLE student(id integer NOT NULL, name text NOT NULL)`
-   - Foreign key dependencies
-4. Handle edge cases:
-   - Quoted identifiers
-   - IF NOT EXISTS clauses
-   - Complex column constraints
-5. Replace regex parser once all tests pass
+**Test Results:**
+- ✅ All 3 existing tests pass (TableMigration, ViewMigration, UseAsLib)
+- ✅ Manual testing with real SQL files successful
+- ✅ Code generation works with FParsec parser
 
 ## ⏭️ Next Steps (Priority Order)
 
-### 1. Complete FParsec Parser (High Priority)
-- [ ] Fix all parse {} syntax errors by converting to combinator style
-- [ ] Complete table constraint parsers
-- [ ] Test against all existing test cases
-- [ ] Enable FParsecSqlParser.fs in .fsproj
-- [ ] Update SqlParser.fs to use FParsec parser
-- [ ] Verify all 3 tests still pass
-- [ ] Commit working FParsec parser
-
-### 2. Add More CRUD Methods (Medium Priority)
+### 1. Add More CRUD Methods (High Priority)
 - [ ] Implement `Update` method
 - [ ] Implement `Delete` method
 - [ ] Implement `GetAll` method
 - [ ] Test generated CRUD methods
 
-### 3. Add JOIN Query Generation (Medium Priority)
+### 2. Add JOIN Query Generation (Medium Priority)
 - [ ] Detect foreign key relationships
 - [ ] Generate methods like `GetStudentWithCourses`
 - [ ] Handle one-to-many relationships
 - [ ] Test JOIN queries
 
-### 4. Add Transaction Support (Medium Priority)
+### 3. Add Transaction Support (Medium Priority)
 - [ ] Generate `WithTransaction` helper method
 - [ ] Add transaction examples to generated code
 - [ ] Test transaction rollback scenarios
 
-### 5. Update mig exec (High Priority)
+### 4. Update mig exec (High Priority)
 - [ ] Add call to `CodeGen.generateCode` after successful migration
 - [ ] Handle errors gracefully
 - [ ] Add flag to disable auto-generation if needed
 - [ ] Test integration
 
-### 6. Add Code Generation Tests (High Priority)
+### 5. Add Code Generation Tests (High Priority)
 - [ ] Test type generation from various SQL schemas
 - [ ] Test CRUD method generation
 - [ ] Test nullable vs non-nullable handling
@@ -331,7 +272,7 @@ let primaryKey =
 - [ ] Integration test: generate code, compile, run queries
 - [ ] Test project file generation
 
-### 7. Handle Complex Scenarios (Low Priority)
+### 6. Handle Complex Scenarios (Low Priority)
 - [ ] Composite primary keys (currently skipped)
 - [ ] Many-to-many relationships via bridge tables
 - [ ] Views (should they generate read-only types?)
@@ -343,20 +284,15 @@ let primaryKey =
    - `generateGet` returns None for tables with multi-column PKs
    - Need to implement later
 
-2. **FParsec Parser Incomplete**
-   - Has compilation errors
-   - Currently commented out
-   - Regex parser is active
-
-3. **Limited CRUD Methods**
+2. **Limited CRUD Methods**
    - Only Insert and GetById implemented
    - Need Update, Delete, GetAll
 
-4. **No JOIN Generation**
+3. **No JOIN Generation**
    - Foreign keys detected but not used for query generation
    - Planned for future
 
-5. **No Transaction Helpers**
+4. **No Transaction Helpers**
    - Planned for future
 
 ## 📁 File Structure
@@ -372,9 +308,8 @@ src/
 │   │   ├── QueryGenerator.fs       (CRUD method generation)
 │   │   └── TypeGenerator.fs        (Record type generation)
 │   ├── DeclarativeMigrations/
-│   │   ├── FParsecSqlParser.fs     (❌ Commented out - WIP)
-│   │   ├── SqlParser.fs            (✅ Working regex parser)
-│   │   └── SqlParser.fs.backup     (Backup)
+│   │   ├── FParsecSqlParser.fs     (✅ Active FParsec parser)
+│   │   └── SqlParser.fs            (✅ Uses FParsec parser, view post-processing)
 │   └── MigLib.fsproj
 ├── mig/
 │   └── Program.fs                  (Added codegen command)
@@ -524,8 +459,11 @@ ff92a05 Fix SQL parser to handle multiline CREATE TABLE statements
 ## 📞 Contact Points
 
 When resuming:
-1. Start with completing FParsec parser if prioritizing parser robustness
-2. Or proceed with adding more CRUD methods if prioritizing functionality
-3. Check current test status: `cd src && dotnet test`
+1. **FParsec parser is COMPLETE** - Now focus on expanding functionality
+2. Next priorities:
+   - Add more CRUD methods (Update, Delete, GetAll)
+   - Add code generation tests
+   - Integrate with `mig exec` for automatic code generation
+3. Check current test status: `cd src && dotnet test` (all 3 tests passing)
 4. Check current build: `cd src && dotnet build`
-5. Test codegen: `cd /tmp && mkdir test && cd test && echo "CREATE TABLE test(id INTEGER PRIMARY KEY);" > test.sql && dotnet /path/to/mig codegen`
+5. Test codegen: `mkdir /tmp/test && cd /tmp/test && echo "CREATE TABLE test(id INTEGER PRIMARY KEY);" > test.sql && dotnet /path/to/mig codegen`
