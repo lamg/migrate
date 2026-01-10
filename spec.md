@@ -1,10 +1,10 @@
-# Migrate - Database Migration Tool Specification
+# Migrate - Database Migration Tool & F# Type Generator Specification
 
 ## Overview
 
-Migrate is a declarative database migration tool for SQLite that automatically generates and executes SQL statements to transform an actual database schema into an expected schema. Rather than requiring developers to write migration scripts manually, Migrate compares the two schemas and generates the necessary DDL statements.
+Migrate is a declarative database migration tool and F# type generator for SQLite. It automatically generates and executes SQL statements to transform an actual database schema into an expected schema, and generates type-safe F# code for database access. Rather than requiring developers to write migration scripts or data access code manually, Migrate compares schemas, generates DDL statements, and produces F# types with CRUD operations.
 
-**Version:** 1.0.5
+**Version:** 2.0.0 (planned - major feature: F# code generation)
 **Target Framework:** .NET 10.0
 **Language:** F#
 **Database:** SQLite
@@ -90,11 +90,11 @@ Provides both CLI and library interfaces for executing migrations:
 - `mig init` - Initialize migration project with example files
 - `mig gen` - Generate migration SQL (dry-run)
 - `mig status` - Show migration status
-- `mig exec` - Execute generated migration
+- `mig exec` - Execute generated migration and auto-regenerate F# types
 - `mig commit` - Commit migration to database
 - `mig log` - Display migration history and metadata
 - `mig schema` - Show current database schema
-- `mig import` - Import Goose migrations
+- `mig codegen` - Generate F# types from SQL schema files
 
 **Library Interface:**
 - MigLib NuGet package for programmatic access
@@ -107,11 +107,93 @@ Tracks all executed migrations with:
 - Success/failure status
 - Metadata storage in `_schema_migration` table
 
-### 7. Goose Migration Import
-Supports importing existing Goose-format migrations:
-- Parses Goose migration file format
-- Converts to Migrate format
-- Maintains migration history consistency
+### 7. F# Type Generation
+Generates type-safe F# code from SQL schema definitions:
+
+**Generated Code Structure:**
+- One F# module per SQL file (e.g., `students.sql` → `Students.fs`)
+- Record types for each table
+- Static CRUD methods on types
+- Automatic JOIN queries for foreign key relationships
+- Transaction helper methods
+
+**Code Generation Features:**
+- **Type Mapping:** SQL types → F# types (INTEGER → int64, TEXT → string, etc.)
+- **Null Handling:** NOT NULL columns → direct types, nullable columns → option types
+- **CRUD Operations:**
+  - `Insert` - Returns `Result<int64, SqliteException>` with last_insert_rowid
+  - `Update` - Returns `Result<unit, SqliteException>`
+  - `Delete` - Returns `Result<unit, SqliteException>`
+  - `Get` - Returns `Result<T option, SqliteException>`
+  - `GetAll` - Returns `Result<T list, SqliteException>`
+- **Foreign Key Queries:** Automatic generation of methods to query related entities via JOINs
+- **Transaction Support:** `WithTransaction` helper methods for atomic operations
+- **Error Handling:** All operations return `Result<T, SqliteException>`
+
+**Implementation:**
+- Uses [Fabulous.AST](https://github.com/edgarfgp/Fabulous.AST) for type-safe F# code generation
+- Uses raw ADO.NET (Microsoft.Data.Sqlite) for database operations
+- Generated code colocated with SQL files in same directory
+
+**Example Generated Code:**
+```fsharp
+module Students
+
+open Microsoft.Data.Sqlite
+open FsToolkit.ErrorHandling
+
+type Student = {
+    Id: int64
+    Name: string
+    Email: string option
+    EnrollmentDate: DateTime
+}
+
+type Student with
+    static member Insert(conn: SqliteConnection, student: Student) : Result<int64, SqliteException> =
+        result {
+            use cmd = new SqliteCommand("INSERT INTO students (name, email, enrollment_date) VALUES (@name, @email, @enrollment_date)", conn)
+            cmd.Parameters.AddWithValue("@name", student.Name) |> ignore
+            cmd.Parameters.AddWithValue("@email", Option.toObj student.Email) |> ignore
+            cmd.Parameters.AddWithValue("@enrollment_date", student.EnrollmentDate) |> ignore
+            do! cmd.ExecuteNonQuery() |> ignore
+            let lastId = conn.LastInsertRowId
+            return lastId
+        }
+
+    static member GetById(conn: SqliteConnection, id: int64) : Result<Student option, SqliteException> =
+        result {
+            use cmd = new SqliteCommand("SELECT id, name, email, enrollment_date FROM students WHERE id = @id", conn)
+            cmd.Parameters.AddWithValue("@id", id) |> ignore
+            use reader = cmd.ExecuteReader()
+            if reader.Read() then
+                return Some {
+                    Id = reader.GetInt64(0)
+                    Name = reader.GetString(1)
+                    Email = if reader.IsDBNull(2) then None else Some (reader.GetString(2))
+                    EnrollmentDate = reader.GetDateTime(3)
+                }
+            else
+                return None
+        }
+
+    static member WithTransaction(conn: SqliteConnection, action: SqliteTransaction -> Result<'T, SqliteException>) : Result<'T, SqliteException> =
+        result {
+            use transaction = conn.BeginTransaction()
+            try
+                let! result = action transaction
+                transaction.Commit()
+                return result
+            with
+            | :? SqliteException as ex ->
+                transaction.Rollback()
+                return! Error ex
+        }
+```
+
+**CLI Integration:**
+- `mig codegen` - Generate F# types from SQL schema files
+- `mig exec` - Execute migration and auto-regenerate types
 
 ## Architecture
 
@@ -146,12 +228,24 @@ Supports importing existing Goose-format migrations:
 │  │  │ - Execution logging        │  │   │
 │  │  └────────────────────────────┘  │   │
 │  │                                  │   │
+│  │  ┌────────────────────────────┐  │   │
+│  │  │ CodeGen                    │  │   │
+│  │  │ - TypeGenerator            │  │   │
+│  │  │ - QueryGenerator           │  │   │
+│  │  │ - ProjectGenerator         │  │   │
+│  │  │ - FileMapper               │  │   │
+│  │  │ - FabulousAstHelpers       │  │   │
+│  │  └────────────────────────────┘  │   │
+│  │                                  │   │
 │  └──────────────────────────────────┘  │
 │                                         │
 └─────────────────────────────────────────┘
          │
          ▼
     SQLite Database
+         │
+         ▼
+   Generated F# Code
 ```
 
 ### Key Modules
@@ -234,8 +328,86 @@ Supports importing existing Goose-format migrations:
 
 **Schema Tracking:** Stores executed migrations in `_schema_migration` table
 
+#### TypeGenerator.fs
+**Purpose:** Generate F# record types from SQL table definitions
+
+**Key Functions:**
+- `generateType(table)` - Create F# record type from table schema
+- `mapSqlType(sqlType, isNullable)` - Map SQL types to F# types
+- `generateFieldDefinitions(columns)` - Create record fields with proper types
+
+**Type Mapping:**
+- INTEGER → int64 (option if nullable)
+- TEXT → string (option if nullable)
+- REAL → float (option if nullable)
+- TIMESTAMP → DateTime (option if nullable)
+- STRING → string (option if nullable)
+
+**Output:** Fabulous.AST record type definitions
+
+#### QueryGenerator.fs
+**Purpose:** Generate CRUD methods and JOIN queries
+
+**Key Functions:**
+- `generateInsert(table)` - Create INSERT method returning Result<int64, SqliteException>
+- `generateUpdate(table)` - Create UPDATE method
+- `generateDelete(table)` - Create DELETE method
+- `generateGet(table)` - Create SELECT by primary key method
+- `generateGetAll(table)` - Create SELECT all method
+- `generateJoinQueries(table, foreignKeys)` - Create JOIN methods for related entities
+- `generateTransactionHelper()` - Create WithTransaction method
+
+**Features:**
+- Parameterized queries (SQL injection protection)
+- Result type error handling
+- Proper resource disposal (use statements)
+- Option type handling for nullable values
+
+**Output:** Fabulous.AST method definitions
+
+#### ProjectGenerator.fs
+**Purpose:** Generate .fsproj file for generated code
+
+**Key Functions:**
+- `generateProjectFile(projectName)` - Create .fsproj with proper dependencies
+- `addSourceFiles(files)` - Include generated F# files in compilation order
+
+**Generated Project:**
+- References Microsoft.Data.Sqlite
+- References FsToolkit.ErrorHandling
+- Targets .NET 10.0
+
+#### FileMapper.fs
+**Purpose:** Map SQL files to F# module files
+
+**Key Functions:**
+- `mapSqlToModule(sqlFile)` - Convert students.sql → Students.fs
+- `determineModuleName(sqlFileName)` - Capitalize first letter for module name
+- `ensureColocatedOutput(sqlFile)` - Write F# file in same directory as SQL
+
+**Naming Convention:**
+- SQL file: `students.sql` → F# module: `Students.fs`
+- SQL file: `course_enrollments.sql` → F# module: `CourseEnrollments.fs`
+
+#### FabulousAstHelpers.fs
+**Purpose:** Helper functions for working with Fabulous.AST
+
+**Key Functions:**
+- `createModule(name, declarations)` - Create F# module structure
+- `createRecordType(name, fields)` - Create record type definition
+- `createStaticMethod(name, parameters, returnType, body)` - Create static method
+- `createOpenDirective(namespace)` - Add open statements
+- `generateSourceFile(module)` - Convert AST to F# source code string
+
+**Fabulous.AST Integration:**
+- Type-safe F# code generation
+- No string concatenation for code generation
+- Proper indentation and formatting
+- Syntax correctness guaranteed by AST
+
 ### Data Flow
 
+#### Migration Flow
 ```
 SQL Schema Files
        │
@@ -270,6 +442,47 @@ SQL Schema Files
        │
        ▼
    Database
+```
+
+#### Code Generation Flow
+```
+SQL Schema Files
+       │
+       ▼
+   SqlParser
+       │
+       ▼
+   Typed AST (SqlFile)
+       │
+       ▼
+   FileMapper
+       │
+       ▼
+SQL File → Module Name Mapping
+       │
+       ▼
+   TypeGenerator
+       │
+       ▼
+F# Record Types (Fabulous.AST)
+       │
+       ▼
+   QueryGenerator
+       │
+       ▼
+CRUD Methods + JOINs (Fabulous.AST)
+       │
+       ▼
+   FabulousAstHelpers
+       │
+       ▼
+Complete F# Source Files
+       │
+       ▼
+   ProjectGenerator
+       │
+       ▼
+.fsproj File + Generated F# Files
 ```
 
 ## Design Decisions
@@ -336,6 +549,63 @@ SQL Schema Files
 - Provides library for programmatic integration
 - Single codebase serves multiple use cases
 
+### 7. Fabulous.AST for Code Generation
+**Decision:** Use Fabulous.AST library for type-safe F# code generation instead of string templates
+
+**Rationale:**
+- **Type Safety:** AST-based generation guarantees syntactically correct F# code
+- **No String Concatenation:** Eliminates entire class of code generation bugs
+- **Maintainability:** Changes to generated code structure are easier to implement
+- **Formatting:** Automatic proper indentation and F# idioms
+- **Refactoring:** AST transformations are safer than text transformations
+
+**Trade-off:** Additional dependency and learning curve, but benefits far outweigh costs for code generation quality
+
+### 8. Static Methods for CRUD Operations
+**Decision:** Generate static methods on types rather than separate repository classes
+
+**Rationale:**
+- **Simplicity:** `Student.Insert(conn, student)` is more direct than `StudentRepository.Insert(student)`
+- **Discoverability:** Methods appear with type definition, easier for IDE autocomplete
+- **No State:** Static methods make it clear there's no hidden state or configuration
+- **F# Idiomatic:** Aligns with F# preference for functions over objects
+
+**Trade-off:** Less flexibility for dependency injection patterns, but appropriate for lightweight data access
+
+### 9. Result Types for Error Handling
+**Decision:** All database operations return `Result<T, SqliteException>` instead of throwing exceptions
+
+**Rationale:**
+- **Explicit Error Handling:** Compiler enforces error handling at call sites
+- **F# Idiomatic:** Result types are standard F# error handling approach
+- **Composability:** Works naturally with FsToolkit.ErrorHandling computation expressions
+- **No Silent Failures:** Impossible to ignore errors accidentally
+
+**Implementation:** Use `result { }` computation expressions for clean error propagation
+
+### 10. Colocation of SQL and F# Files
+**Decision:** Generate F# files in same directory as SQL schema files
+
+**Rationale:**
+- **File System Proximity:** Related files sort alphabetically near each other (students.sql, Students.fs)
+- **Discoverability:** Easy to find generated code for a given SQL schema
+- **Single Source of Truth:** SQL schema and generated types live together
+- **Simple Mental Model:** One SQL file → one F# module, same location
+
+**Alternative Considered:** Separate src/generated directory was rejected for being less discoverable
+
+### 11. Raw ADO.NET Over Micro-ORMs
+**Decision:** Generate code using Microsoft.Data.Sqlite directly, no Dapper/FsSql/etc.
+
+**Rationale:**
+- **Minimal Dependencies:** Only SQLite driver required, no additional abstractions
+- **Full Control:** Complete visibility into SQL execution and parameter handling
+- **Performance:** No overhead from mapping layers
+- **Simplicity:** Generated code is straightforward ADO.NET, easy to understand and debug
+- **Learning Curve:** Developers familiar with any database library will understand the code
+
+**Trade-off:** More verbose generated code, but generated code doesn't need to be manually written anyway
+
 ## Dependencies
 
 **NuGet Packages:**
@@ -346,6 +616,8 @@ SQL Schema Files
 - `FSharpPlus` 1.6.1 - Functional programming utilities
 - `dotenv.net` 3.2.1 - Environment variable loading
 - `Argu` 6.2.4 - Command-line argument parsing
+- `Fabulous.AST` (latest) - Type-safe F# code generation
+- `FParsec` 1.1.1 - Parser combinators (available for future enhancements)
 
 **Build Tools:**
 - .NET SDK 10.0.0
@@ -359,8 +631,10 @@ SQL Schema Files
 3. **Complex expressions** - Stored as token sequences rather than fully analyzed
 4. **Single RDBMS** - Only SQLite supported (though architecture allows extension)
 5. **Manual data migrations** - Cannot automatically transform data during schema changes
+6. **Composite Primary Keys** - Code generation deferred for future implementation
+7. **Many-to-Many Relationships** - JOIN queries only for direct foreign keys currently
 
-### Not Supported
+### Not Supported (SQLite Limitations)
 - Stored procedures (SQLite doesn't support)
 - Sequences (SQLite doesn't support)
 - Partial indexes
@@ -369,7 +643,14 @@ SQL Schema Files
 
 ## Future Enhancements
 
-### Planned Features
+### Planned Features (Code Generation)
+1. **Composite Primary Keys** - Support tables with multi-column primary keys
+2. **Many-to-Many Relationships** - Generate bridge table query helpers
+3. **Custom Query Generation** - Allow users to define additional queries in annotations
+4. **Async Database Operations** - Generate async/Task-based methods alongside synchronous ones
+5. **Connection String Management** - Helper functions for connection lifecycle
+
+### Planned Features (Migration)
 1. Support for PostgreSQL, MySQL/MariaDB
 2. Better error messages and diagnostics
 3. Dry-run with preview of generated SQL
@@ -382,27 +663,64 @@ SQL Schema Files
 3. Integration with version control systems
 4. Web UI for migration management
 5. Performance optimizations for large schemas
+6. Generated code optimization (cached SqliteCommand instances)
+7. Query result streaming for large datasets
+8. Bulk insert operations
 
 ## Testing Strategy
 
 **Test Coverage:**
+
+**Migration Tests:**
 - Table migration tests - verifies DDL generation for various schema changes
 - View migration tests - ensures dependency ordering for views
 - Library usage tests - confirms programmatic API functionality
 - Parser tests - validates SQL parsing accuracy
 
+**Code Generation Tests:**
+- Type generation tests - verifies correct F# record type generation from SQL
+- CRUD method tests - ensures generated Insert/Update/Delete/Get methods compile and work
+- JOIN query tests - validates foreign key relationship query generation
+- Transaction helper tests - confirms transaction methods work correctly
+- Type mapping tests - verifies SQL type → F# type conversions
+- Null handling tests - ensures option types generated for nullable columns
+- Project file generation tests - validates .fsproj structure and dependencies
+- Integration tests - end-to-end tests from SQL schema to working F# code
+
 **Test Framework:** xUnit
 **Run Tests:** `cd src && dotnet test`
 
+**Code Generation Test Strategy:**
+1. Generate code from test schemas
+2. Compile generated code to ensure syntactic correctness
+3. Execute generated code against test database
+4. Verify query results match expected data
+5. Test error handling paths (constraint violations, etc.)
+
 ## Performance Considerations
 
-**Typical Performance:**
+**Migration Performance:**
 - Schema parsing: < 100ms for most schemas
 - Dependency resolution: O(n log n) with topological sort
 - SQL generation: < 50ms for moderate schemas
 - Database execution: Depends on data volume and constraint checking
 
+**Code Generation Performance:**
+- Schema parsing: < 100ms (reuses migration parser)
+- Type generation: < 50ms per table (using Fabulous.AST)
+- Method generation: < 100ms per table (CRUD + JOINs)
+- File writing: < 10ms per module
+- Project file generation: < 50ms
+- **Total for medium schema (20 tables):** < 5 seconds
+
+**Generated Code Performance:**
+- CRUD operations: Direct ADO.NET, minimal overhead
+- Parameterized queries: Prevents SQL injection, slight prep overhead
+- Result type wrapping: Negligible performance impact
+- No reflection or dynamic code: Fully AOT-compatible
+
 **Optimization Opportunities:**
-- Cache parsed schemas
-- Parallel migration testing for large schemas
-- Incremental schema comparison
+- Cache parsed schemas between migration and codegen
+- Parallel code generation for multiple tables
+- Incremental regeneration (only changed schemas)
+- Connection pooling in generated code (future enhancement)

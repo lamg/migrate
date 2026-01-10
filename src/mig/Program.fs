@@ -1,16 +1,16 @@
 ﻿open System.IO
 open Argu
 open migrate.DeclarativeMigrations
-open migrate.ImportGoose
 open migrate.MigrationLog
 open migrate.Execution
+open migrate.CodeGen
 open FsToolkit.ErrorHandling
 
 type Args =
   | [<CliPrefix(CliPrefix.None)>] Status of ParseResults<GenArgs>
   | [<CliPrefix(CliPrefix.None)>] Commit of ParseResults<ExecArgs>
   | [<CliPrefix(CliPrefix.None)>] Schema of ParseResults<SchemaArgs>
-  | [<CliPrefix(CliPrefix.None)>] Import of ParseResults<ImportArgs>
+  | [<CliPrefix(CliPrefix.None)>] Codegen of ParseResults<CodegenArgs>
   | [<CliPrefix(CliPrefix.None)>] Log of ParseResults<LogArgs>
   | [<CliPrefix(CliPrefix.None)>] Init of ParseResults<InitArgs>
   | [<AltCommandLine("-nc")>] NoColors
@@ -23,8 +23,8 @@ type Args =
       | Status _ -> "generates a migration script"
       | Commit _ -> "generates and executes step by step a migration script"
       | Schema _ -> "show the database schema"
+      | Codegen _ -> "generate F# types and queries from SQL schema files"
       | NoColors -> "when present deactivates the SQL syntax highlighting"
-      | Import _ -> "imports Goose migrations from a directory"
       | Log _ -> "print the migration log"
       | NoLog -> "do not log the migration"
       | Init _ -> "Initialize a project in the current directory with example definitions"
@@ -54,17 +54,13 @@ and SchemaArgs =
   interface IArgParserTemplate with
     member s.Usage = ""
 
-and ImportArgs =
+and CodegenArgs =
   | [<AltCommandLine("-d")>] Directory of string
-  | [<AltCommandLine("-g")>] GenerateScript
-  | [<AltCommandLine("-e")>] Exec
 
   interface IArgParserTemplate with
     member s.Usage =
       match s with
-      | Directory _ -> "Goose directory with a list of SQL migration scripts"
-      | GenerateScript -> "Generate script from Goose migrations without executing them"
-      | Exec -> "Execute imported Goose migrations in the current directory"
+      | Directory _ -> "Directory containing SQL schema files (defaults to current directory)"
 
 and LogArgs =
   | [<AltCommandLine("-s")>] StepsId of string
@@ -139,37 +135,24 @@ let schema withColors =
       eprintfn $"{e}"
       1
 
-module Goose =
-  type Importer = string -> Result<string list, Types.MigrationError>
-
-  let baseImport importer (withColors, flags: ParseResults<ImportArgs>) =
+let codegen (flags: ParseResults<CodegenArgs>) =
+  let directory =
     match flags.TryGetResult Directory with
-    | Some dir ->
-      match flags.Contains GenerateScript, flags.Contains ImportArgs.Exec with
-      | _, true ->
-        match importer dir with
-        | Ok steps ->
-          steps |> List.iter (printfn "%s")
-          0
-        | Error(e: Types.MigrationError) ->
-          eprintfn $"import error: {e}"
-          1
+    | Some dir -> dir
+    | None -> "."
 
-      | _ ->
-        match ImportGoose.scriptFromGoose (withColors, dir) with
-        | Ok script ->
-          printfn $"{script}"
-          0
-        | Error e ->
-          eprintfn $"error generating import script: {e}"
-          1
-    | None ->
-      eprintfn "A directory is required to import Goose migrations"
-      eprintfn $"{flags.Parser.PrintUsage()}"
+  CodeGen.generateCode directory
+  |> function
+    | Ok files ->
+      printfn "Generated files:"
+
+      for file in files do
+        printfn $"  {file}"
+
+      0
+    | Error e ->
+      eprintfn $"Code generation error: {e}"
       1
-
-  let import = baseImport ImportGoose.execGooseImport
-  let importLog = baseImport ImportGoose.execGooseImportLog
 
 let init () =
   let sql = "CREATE TABLE student(id integer PRIMARY KEY);"
@@ -210,8 +193,7 @@ let main args =
     | Some(Args.Commit flags) when withLog -> Exec.execAndLog flags
     | Some(Args.Commit _) -> Exec.exec ()
     | Some(Schema _) -> schema withColors
-    | Some(Import flags) when withLog -> Goose.importLog (withColors, flags)
-    | Some(Import flags) -> Goose.import (withColors, flags)
+    | Some(Codegen flags) -> codegen flags
     | Some(Log flags) -> log flags
     | Some(Init _) -> init ()
     | _ ->

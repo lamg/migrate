@@ -6,7 +6,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     
     <PackageId>MigLib</PackageId>
-    <Version>1.0.5</Version>
+    <Version>2.0.0</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <InvariantGlobalization>true</InvariantGlobalization>
     <RootNamespace>migrate</RootNamespace>
@@ -33,13 +33,19 @@
     <Compile Include="Execution\FormatSql.fs" />
     <Compile Include="Execution\Exec.fs" />
     <Compile Include="MigrationLog\ExecAndLog.fs" />
-    <Compile Include="ImportGoose\ImportGoose.fs" />
+    <Compile Include="CodeGen\FabulousAstHelpers.fs" />
+    <Compile Include="CodeGen\TypeGenerator.fs" />
+    <Compile Include="CodeGen\QueryGenerator.fs" />
+    <Compile Include="CodeGen\FileMapper.fs" />
+    <Compile Include="CodeGen\ProjectGenerator.fs" />
+    <Compile Include="CodeGen\CodeGen.fs" />
     <Content Include="..\..\README.md" Pack="true" PackagePath="\" />
     <Content Include="..\..\images\logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>
   
   <ItemGroup>
     <PackageReference Include="dotenv.net" />
+    <PackageReference Include="Fabulous.AST" />
     <PackageReference Include="FSharp.Core" />
     <PackageReference Include="FsToolkit.ErrorHandling" />
     <PackageReference Include="FParsec" />
