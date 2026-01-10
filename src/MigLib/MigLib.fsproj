@@ -42,13 +42,10 @@
     <PackageReference Include="dotenv.net" />
     <PackageReference Include="FSharp.Core" />
     <PackageReference Include="FsToolkit.ErrorHandling" />
+    <PackageReference Include="FParsec" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="SqlPrettify" />
     <PackageReference Include="FSharpPlus" />
-  </ItemGroup>
-  
-  <ItemGroup>
-    <ProjectReference Include="..\SqliteParserCs\SqliteParserCs.csproj" />
   </ItemGroup>
 
 </Project>

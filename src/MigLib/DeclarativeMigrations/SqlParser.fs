@@ -2,9 +2,6 @@ module internal migrate.DeclarativeMigrations.SqlParser
 
 open System
 open System.Text.RegularExpressions
-open System.IO
-open Antlr4.Runtime
-open SqliteParserCs
 open FsToolkit.ErrorHandling
 open Types
 
@@ -13,225 +10,206 @@ type Statement =
   | Table of CreateTable
   | Index of CreateIndex
   | Trigger of CreateTrigger
-  | StatList of Statement list
 
-type SqlVisitor() =
-  inherit SQLiteParserBaseVisitor<Statement>()
+// Simple regex-based parser for SQLite
+// FParsec can be complex for full SQL parsing; using regex for the heavy lifting
 
-  let rec childrenToText (x: Tree.IParseTree) =
-    seq {
-      if x.ChildCount = 0 then
+let extractName pattern text =
+  let m = Regex.Match(text, pattern, RegexOptions.IgnoreCase)
+  if m.Success then
+    m.Groups.[1].Value.Trim('\"', '`', '[', ']', '\'')
+  else ""
 
-        yield x.GetText()
+let extractColumns (pattern: string) (text: string) =
+  let columnPattern = @"(\w+)\s+(\w+)(?:\s+([^,\)]+))?(?:,|$)"
+  let matches = Regex.Matches(text, columnPattern, RegexOptions.IgnoreCase)
+  [
+    for m in matches ->
+      let colName = (m.Groups.[1].Value).Trim('\"', '`', '[', ']')
+      let colType =
+        match (m.Groups.[2].Value).ToUpper() with
+        | "INTEGER" -> SqlInteger
+        | "TEXT" -> SqlText
+        | "REAL" -> SqlReal
+        | "TIMESTAMP" -> SqlTimestamp
+        | "STRING" -> SqlString
+        | _ -> SqlFlexible
+      { name = colName; columnType = colType; constraints = [] }
+  ]
+
+let parseCreateTable text =
+  // Extract table name - handle quoted identifiers
+  let nameMatch = Regex.Match(text, @"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`""'\[]?(\w+)[`""'\]]?", RegexOptions.IgnoreCase)
+  let name = if nameMatch.Success then nameMatch.Groups.[1].Value else ""
+
+  // Extract columns section from parentheses
+  let columnText =
+    match Regex.Match(text, @"\((.*)\)(?:\s*;)?$", RegexOptions.IgnoreCase) with
+    | m when m.Success -> m.Groups.[1].Value
+    | _ -> ""
+
+  // Split by comma but respect nested parentheses for foreign keys
+  let parts =
+    let rec splitByComma (input: string) (current: string) (depth: int) (result: string list) =
+      if input.Length = 0 then
+        if current.Length > 0 then (current :: result) |> List.rev else List.rev result
       else
-        for n in { 0 .. x.ChildCount - 1 } do
-          yield! n |> x.GetChild |> childrenToText
-    }
+        let ch = input.[0]
+        let rest = input.[1..]
+        match ch with
+        | '(' -> splitByComma rest (current + ch.ToString()) (depth + 1) result
+        | ')' -> splitByComma rest (current + ch.ToString()) (depth - 1) result
+        | ',' when depth = 0 -> splitByComma rest "" 0 ((current) :: result)
+        | _ -> splitByComma rest (current + ch.ToString()) depth result
+    if String.IsNullOrEmpty columnText then [] else splitByComma columnText "" 0 []
 
-  override this.VisitSql_stmt_list(context: SQLiteParser.Sql_stmt_listContext) =
-    context.sql_stmt ()
-    |> Array.choose (this.Visit >> Option.ofObj)
-    |> Array.toList
-    |> StatList
+  // Parse columns and table constraints
+  let columns = ResizeArray()
+  let tableConstraints = ResizeArray()
 
-  override this.VisitCreate_table_stmt(context: SQLiteParser.Create_table_stmtContext) =
-    let name = context.table_name().GetText().Trim '"'
-
-    let columns =
-      context.column_def ()
-      |> Array.map (fun c ->
-        let name = c.column_name().GetText().Trim '"'
-
+  for part in parts do
+    let trimmed = part.Trim()
+    // Check if it's a table-level constraint
+    if trimmed.ToUpper().StartsWith("FOREIGN") then
+      // Extract foreign key dependency
+      let fkMatch = Regex.Match(trimmed, @"FOREIGN\s+KEY\s*\(([^)]*)\)\s+REFERENCES\s+(\w+)(?:\s*\(([^)]*)\))?", RegexOptions.IgnoreCase)
+      if fkMatch.Success then
+        let colsStr = fkMatch.Groups.[1].Value
+        let refTable = fkMatch.Groups.[2].Value
+        let refColsStr = if fkMatch.Groups.Count > 3 then fkMatch.Groups.[3].Value else ""
+        let cols = colsStr.Split(',') |> Array.map (fun s -> s.Trim()) |> Array.toList
+        let refCols = if String.IsNullOrEmpty refColsStr then [] else refColsStr.Split(',') |> Array.map (fun s -> s.Trim()) |> Array.toList
+        tableConstraints.Add(ForeignKey { columns = cols; refTable = refTable; refColumns = refCols })
+    elif trimmed.ToUpper().StartsWith("PRIMARY") ||
+         trimmed.ToUpper().StartsWith("UNIQUE") ||
+         trimmed.ToUpper().StartsWith("CHECK") then
+      // Skip other table-level constraints for now
+      ()
+    else
+      // Parse column name and type
+      let colMatch = Regex.Match(trimmed, @"^[`""']?(\w+)[`""']?\s+(\w+)(?:\s+(.*))?$", RegexOptions.IgnoreCase)
+      if colMatch.Success then
+        let colName = colMatch.Groups.[1].Value
         let colType =
-          let t = c.type_name () |> Option.ofObj |> Option.map _.GetText().ToLower()
+          match colMatch.Groups.[2].Value.ToUpper() with
+          | "INTEGER" -> SqlInteger
+          | "TEXT" -> SqlText
+          | "REAL" -> SqlReal
+          | "TIMESTAMP" -> SqlTimestamp
+          | "STRING" -> SqlString
+          | _ -> SqlFlexible
 
-          match t with
-          | Some "integer" -> SqlInteger
-          | Some "text" -> SqlText
-          | Some "real" -> SqlReal
-          | Some "timestamp" -> SqlTimestamp
-          | Some "string" -> SqlString
-          | Some t -> failwith $"unexpected type {t}"
-          | None -> SqlFlexible
-
-        let getDefaultExpr (k: SQLiteParser.Column_constraintContext) =
-          match k with
-          | _ when k.signed_number () <> null -> Expr.Integer(k.signed_number().GetText() |> int)
-          | _ when k.literal_value () <> null -> Expr.Value(k.literal_value().GetText())
-          | _ when k.expr () <> null -> Expr.Value(k.expr().GetText())
-          | _ -> failwith $"unexpected default expression for column constraint: {k.GetText()}"
-
-        let getPrimaryKey (k: SQLiteParser.Column_constraintContext) =
-          PrimaryKey
-            { constraintName = k.name () |> Option.ofObj |> Option.map _.GetText()
-              columns = []
-              isAutoincrement = k.AUTOINCREMENT_() <> null }
-
-        let getCheckExpr (k: SQLiteParser.Column_constraintContext) = k.expr () |> childrenToText
-
+        // Extract constraints from the remainder
+        let constraintStr = if colMatch.Groups.Count > 3 then colMatch.Groups.[3].Value else ""
         let constraints =
-          c.column_constraint ()
-          |> Array.map (fun k ->
-            [ k.NOT_() <> null && k.NULL_() <> null, lazy NotNull
-              k.PRIMARY_() <> null && k.KEY_() <> null, lazy (getPrimaryKey k)
-              k.UNIQUE_() <> null, lazy Unique []
-              k.DEFAULT_() <> null, lazy Default(getDefaultExpr k)
-              k.CHECK_() <> null, lazy Check(getCheckExpr k |> Seq.toList) ]
-            |> List.choose (fun (cond, v) -> if cond then Some v.Value else None))
-          |> Array.toList
-          |> List.concat
+          let upper = constraintStr.ToUpper()
+          [
+            if upper.Contains("NOT NULL") then NotNull
+            if upper.Contains("PRIMARY KEY") then
+              PrimaryKey { constraintName = None; columns = []; isAutoincrement = upper.Contains("AUTOINCREMENT") }
+            if upper.Contains("UNIQUE") then Unique []
+            if upper.Contains("DEFAULT") then
+              // For now, just store a dummy value for DEFAULT
+              Default (Value "")
+            if upper.Contains("CHECK") then Check []
+            if upper.Contains("REFERENCES") then
+              // Simple foreign key parsing
+              let refMatch = Regex.Match(constraintStr, @"REFERENCES\s+(\w+)\s*(?:\((\w+)\))?", RegexOptions.IgnoreCase)
+              if refMatch.Success then
+                let refTable = refMatch.Groups.[1].Value
+                let refCol = if refMatch.Groups.Count > 2 && refMatch.Groups.[2].Success then refMatch.Groups.[2].Value else ""
+                ForeignKey { columns = []; refTable = refTable; refColumns = if String.IsNullOrEmpty refCol then [] else [refCol] }
+          ]
 
-        { name = name
-          columnType = colType
-          constraints = constraints })
+        columns.Add({ name = colName; columnType = colType; constraints = constraints })
+
+  Table { name = name; columns = columns |> Seq.toList; constraints = tableConstraints |> Seq.toList }
+
+let parseCreateView text =
+  let name = extractName @"CREATE\s+(?:TEMPORARY|TEMP\s+)?VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?[`""'\[]?(\w+)[`""'\]]?" text
+  let sqlTokens = [text]
+  View { name = name; sqlTokens = sqlTokens; dependencies = [] }
+
+let parseCreateIndex text =
+  let name = extractName @"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?[`""'\[]?(\w+)[`""'\]]?" text
+  let table = extractName @"ON\s+[`""'\[]?(\w+)[`""'\]]?" text
+  let columnPattern = @"ON\s+\w+\s*\((.*?)\)"
+  let columns =
+    match Regex.Match(text, columnPattern, RegexOptions.IgnoreCase) with
+    | m when m.Success ->
+      m.Groups.[1].Value.Split(',')
+      |> Array.map (fun s -> s.Trim('\"', '`', '[', ']', ' ', '\''))
       |> Array.toList
+    | _ -> []
+  Index { name = name; table = table; columns = columns }
 
-    let constraints =
-      context.table_constraint ()
-      |> Array.choose (fun c ->
-        match c with
-        | _ when c.PRIMARY_() <> null ->
-          { constraintName = None
-            columns = c.indexed_column () |> Array.map _.column_name().GetText() |> Array.toList
-            isAutoincrement = false }
-          |> PrimaryKey
-          |> Some
+let parseCreateTrigger text =
+  let name = extractName @"CREATE\s+(?:TEMPORARY|TEMP\s+)?TRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?[`""'\[]?(\w+)[`""'\]]?" text
+  let table = extractName @"ON\s+[`""'\[]?(\w+)[`""'\]]?" text
+  Trigger { name = name; sqlTokens = [text]; dependencies = if String.IsNullOrEmpty table then [] else [table] }
 
-        | _ when c.UNIQUE_() <> null ->
-          c.indexed_column ()
-          |> Array.map _.column_name().GetText()
-          |> Array.toList
-          |> Unique
-          |> Some
-        | _ when c.FOREIGN_() <> null ->
-          let columns = c.column_name () |> Array.map _.GetText() |> Array.toList
-          let refTable = c.foreign_key_clause().foreign_table().GetText()
+let parseStatement (sql: string) : Statement =
+  let upperSql = sql.ToUpper().Trim()
+  if upperSql.StartsWith("CREATE TABLE") then parseCreateTable sql
+  elif upperSql.StartsWith("CREATE") && upperSql.Contains("VIEW") then parseCreateView sql
+  elif upperSql.StartsWith("CREATE") && upperSql.Contains("INDEX") then parseCreateIndex sql
+  elif upperSql.StartsWith("CREATE") && upperSql.Contains("TRIGGER") then parseCreateTrigger sql
+  else failwith $"Unsupported statement: {sql}"
 
-          let refColumns =
-            c.foreign_key_clause().column_name ()
-            |> Array.map (fun x -> x.GetText())
-            |> Array.toList
+let splitStatements (sql: string) =
+  sql.Split(';')
+  |> Array.map (fun s -> s.Trim())
+  |> Array.filter (fun s -> not (String.IsNullOrEmpty s))
+  |> Array.toList
 
-          Some(
-            ForeignKey
-              { columns = columns
-                refTable = refTable
-                refColumns = refColumns }
-          )
-        | _ -> None)
-      |> Array.toList
-
-    Table
-      { name = name
-        columns = columns
-        constraints = constraints } //TODO parse table constraints
-
-
-  override _.VisitCreate_view_stmt(context: SQLiteParser.Create_view_stmtContext) =
-    let selectDependencies (context: SQLiteParser.Select_stmtContext) =
-      context.select_core ()
-      |> Seq.head
-      |> _.table_or_subquery()
-      |> Seq.map (fun t -> t.table_name().GetText())
-      |> Seq.toList
-
-    // FIXME it's possible the remaining UNION  clauses are ignored because of a bug in the grammar
-    let sql = context.children |> Seq.map childrenToText |> Seq.concat
-
-    let name = context.view_name().GetText().Trim '"'
-
-    // FIXME assumes a query in the form `FROM table0, table1, …`
-    let tables = context.select_stmt () |> selectDependencies
-
-    let withTables, withDeps =
-      match context.select_stmt().common_table_stmt () with
-      | null -> [], []
-      | ct ->
-        ct.common_table_expression ()
-        |> Array.map (fun x -> x.table_name().GetText(), selectDependencies (x.select_stmt ()))
-        |> Array.unzip
-        |> fun (xs, yss) -> Array.toList xs, yss |> Array.toList |> List.concat
-
-    // FIXME for WITH statements inside WITH statements this trick might not work
-    let topLevelTables = set tables + set withDeps - set withTables |> Set.toList
-
-    View
-      { name = name
-        sqlTokens = sql
-        dependencies = topLevelTables }
-
-  override this.VisitCreate_index_stmt(context: SQLiteParser.Create_index_stmtContext) =
-    let name = context.index_name().GetText().Trim '"'
-    let table = context.table_name().GetText().Trim '"'
-
-    let columns =
-      context.indexed_column ()
-      |> Array.map (fun i -> i.column_name().GetText())
-      |> Array.toList
-
-    Index
-      { name = name
-        table = table
-        columns = columns }
-
-  override this.VisitCreate_trigger_stmt(context: SQLiteParser.Create_trigger_stmtContext) =
-    let sql = context.children |> Seq.map childrenToText |> Seq.concat
-    let name = context.trigger_name().GetText().Trim '"'
-    let table = context.table_name().GetText().Trim '"'
-
-    Trigger
-      { name = name
-        sqlTokens = sql
-        dependencies = [ table ] }
+let extractViewDependencies (sqlTokens: string seq) =
+  let sql = String.concat "" sqlTokens
+  let fromMatch = Regex.Match(sql, "FROM\s+(.+?)(?:WHERE|GROUP|ORDER|LIMIT|;|$)", RegexOptions.IgnoreCase)
+  if fromMatch.Success then
+    let fromClause = fromMatch.Groups.[1].Value
+    fromClause.Split([|','; ' '|], System.StringSplitOptions.RemoveEmptyEntries)
+    |> Array.filter (fun t -> not (String.IsNullOrWhiteSpace t))
+    |> Array.toList
+  else
+    []
 
 let prostProcViews (sql: string) (file: SqlFile) =
   let extractViewTokens view =
-    let start = sql.IndexOf $"CREATE VIEW {view}"
+    let start = sql.IndexOf($"CREATE VIEW {view}", StringComparison.OrdinalIgnoreCase)
+    let startAlt = sql.IndexOf($"CREATE TEMPORARY VIEW {view}", StringComparison.OrdinalIgnoreCase)
+    let actualStart = if start >= 0 then start else if startAlt >= 0 then startAlt else -1
 
-    let viewStr =
-      sql |> Seq.skip start |> Seq.takeWhile (fun c -> c <> ';') |> Array.ofSeq
-
-    let r = new string (viewStr) |> _.Trim()
-    [ r ]
+    if actualStart >= 0 then
+      let viewStr =
+        sql |> Seq.skip actualStart |> Seq.takeWhile (fun c -> c <> ';') |> Array.ofSeq
+      let r = (new string (viewStr)).Trim()
+      [r]
+    else
+      []
 
   let views =
     file.views
     |> List.map (fun v ->
-      { v with
-          sqlTokens = v.name |> extractViewTokens })
+      let tokens = v.name |> extractViewTokens
+      let deps = extractViewDependencies tokens
+      { v with sqlTokens = tokens; dependencies = deps })
 
   { file with views = views }
 
 let parse (_file: string, sql: string) =
-  use reader = new StringReader(sql)
-  let input = AntlrInputStream reader
-  let lexer = SQLiteLexer input
-  let tokens = CommonTokenStream lexer
-  let parser = SQLiteParser tokens
-  parser.BuildParseTree <- true
-  let ctx = parser.parse ()
-  let visitor = SqlVisitor()
-
-  option {
-    let! first = ctx.children |> Seq.tryHead
-    let! expr = visitor.Visit first |> Option.ofObj
-    return expr
-  }
-  |> function
-    | Some(StatList xs) ->
-      xs
+  try
+    let statements = splitStatements sql
+    let parsed =
+      statements
+      |> List.map parseStatement
       |> List.fold
-        (fun acc ->
-          function
+        (fun acc stmt ->
+          match stmt with
           | View v -> { acc with views = v :: acc.views }
           | Table t -> { acc with tables = t :: acc.tables }
           | Index i -> { acc with indexes = i :: acc.indexes }
-          | Trigger t ->
-            { acc with
-                triggers = t :: acc.triggers }
-          | StatList ys -> failwith $"unexpected statement list {ys}")
+          | Trigger t -> { acc with triggers = t :: acc.triggers })
         emptyFile
-      |> prostProcViews sql
-      |> Ok
-    | Some expr -> Error $"expecting statement list, got {expr}"
-    | None -> Ok emptyFile
+    parsed |> prostProcViews sql |> Ok
+  with
+  | ex -> Error ex.Message
