@@ -16,30 +16,37 @@ type Statement =
 
 let extractName pattern text =
   let m = Regex.Match(text, pattern, RegexOptions.IgnoreCase)
+
   if m.Success then
     m.Groups.[1].Value.Trim('\"', '`', '[', ']', '\'')
-  else ""
+  else
+    ""
 
 let extractColumns (pattern: string) (text: string) =
   let columnPattern = @"(\w+)\s+(\w+)(?:\s+([^,\)]+))?(?:,|$)"
   let matches = Regex.Matches(text, columnPattern, RegexOptions.IgnoreCase)
-  [
-    for m in matches ->
-      let colName = (m.Groups.[1].Value).Trim('\"', '`', '[', ']')
+
+  [ for m in matches ->
+      let colName = m.Groups.[1].Value.Trim('\"', '`', '[', ']')
+
       let colType =
-        match (m.Groups.[2].Value).ToUpper() with
+        match m.Groups.[2].Value.ToUpper() with
         | "INTEGER" -> SqlInteger
         | "TEXT" -> SqlText
         | "REAL" -> SqlReal
         | "TIMESTAMP" -> SqlTimestamp
         | "STRING" -> SqlString
         | _ -> SqlFlexible
-      { name = colName; columnType = colType; constraints = [] }
-  ]
+
+      { name = colName
+        columnType = colType
+        constraints = [] } ]
 
 let parseCreateTable text =
   // Extract table name - handle quoted identifiers
-  let nameMatch = Regex.Match(text, @"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`""'\[]?(\w+)[`""'\]]?", RegexOptions.IgnoreCase)
+  let nameMatch =
+    Regex.Match(text, @"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`""'\[]?(\w+)[`""'\]]?", RegexOptions.IgnoreCase)
+
   let name = if nameMatch.Success then nameMatch.Groups.[1].Value else ""
 
   // Extract columns section from parentheses
@@ -52,16 +59,24 @@ let parseCreateTable text =
   let parts =
     let rec splitByComma (input: string) (current: string) (depth: int) (result: string list) =
       if input.Length = 0 then
-        if current.Length > 0 then (current :: result) |> List.rev else List.rev result
+        if current.Length > 0 then
+          current :: result |> List.rev
+        else
+          List.rev result
       else
         let ch = input.[0]
         let rest = input.[1..]
+
         match ch with
         | '(' -> splitByComma rest (current + ch.ToString()) (depth + 1) result
         | ')' -> splitByComma rest (current + ch.ToString()) (depth - 1) result
-        | ',' when depth = 0 -> splitByComma rest "" 0 ((current) :: result)
+        | ',' when depth = 0 -> splitByComma rest "" 0 (current :: result)
         | _ -> splitByComma rest (current + ch.ToString()) depth result
-    if String.IsNullOrEmpty columnText then [] else splitByComma columnText "" 0 []
+
+    if String.IsNullOrEmpty columnText then
+      []
+    else
+      splitByComma columnText "" 0 []
 
   // Parse columns and table constraints
   let columns = ResizeArray()
@@ -70,26 +85,54 @@ let parseCreateTable text =
   for part in parts do
     let trimmed = part.Trim()
     // Check if it's a table-level constraint
-    if trimmed.ToUpper().StartsWith("FOREIGN") then
+    if trimmed.ToUpper().StartsWith "FOREIGN" then
       // Extract foreign key dependency
-      let fkMatch = Regex.Match(trimmed, @"FOREIGN\s+KEY\s*\(([^)]*)\)\s+REFERENCES\s+(\w+)(?:\s*\(([^)]*)\))?", RegexOptions.IgnoreCase)
+      let fkMatch =
+        Regex.Match(
+          trimmed,
+          @"FOREIGN\s+KEY\s*\(([^)]*)\)\s+REFERENCES\s+(\w+)(?:\s*\(([^)]*)\))?",
+          RegexOptions.IgnoreCase
+        )
+
       if fkMatch.Success then
         let colsStr = fkMatch.Groups.[1].Value
         let refTable = fkMatch.Groups.[2].Value
-        let refColsStr = if fkMatch.Groups.Count > 3 then fkMatch.Groups.[3].Value else ""
-        let cols = colsStr.Split(',') |> Array.map (fun s -> s.Trim()) |> Array.toList
-        let refCols = if String.IsNullOrEmpty refColsStr then [] else refColsStr.Split(',') |> Array.map (fun s -> s.Trim()) |> Array.toList
-        tableConstraints.Add(ForeignKey { columns = cols; refTable = refTable; refColumns = refCols })
-    elif trimmed.ToUpper().StartsWith("PRIMARY") ||
-         trimmed.ToUpper().StartsWith("UNIQUE") ||
-         trimmed.ToUpper().StartsWith("CHECK") then
+
+        let refColsStr =
+          if fkMatch.Groups.Count > 3 then
+            fkMatch.Groups.[3].Value
+          else
+            ""
+
+        let cols = colsStr.Split ',' |> Array.map (fun s -> s.Trim()) |> Array.toList
+
+        let refCols =
+          if String.IsNullOrEmpty refColsStr then
+            []
+          else
+            refColsStr.Split ',' |> Array.map (fun s -> s.Trim()) |> Array.toList
+
+        tableConstraints.Add(
+          ForeignKey
+            { columns = cols
+              refTable = refTable
+              refColumns = refCols }
+        )
+    elif
+      trimmed.ToUpper().StartsWith "PRIMARY"
+      || trimmed.ToUpper().StartsWith "UNIQUE"
+      || trimmed.ToUpper().StartsWith "CHECK"
+    then
       // Skip other table-level constraints for now
       ()
     else
       // Parse column name and type
-      let colMatch = Regex.Match(trimmed, @"^[`""']?(\w+)[`""']?\s+(\w+)(?:\s+(.*))?$", RegexOptions.IgnoreCase)
+      let colMatch =
+        Regex.Match(trimmed, @"^[`""']?(\w+)[`""']?\s+(\w+)(?:\s+(.*))?$", RegexOptions.IgnoreCase)
+
       if colMatch.Success then
         let colName = colMatch.Groups.[1].Value
+
         let colType =
           match colMatch.Groups.[2].Value.ToUpper() with
           | "INTEGER" -> SqlInteger
@@ -100,40 +143,77 @@ let parseCreateTable text =
           | _ -> SqlFlexible
 
         // Extract constraints from the remainder
-        let constraintStr = if colMatch.Groups.Count > 3 then colMatch.Groups.[3].Value else ""
+        let constraintStr =
+          if colMatch.Groups.Count > 3 then
+            colMatch.Groups.[3].Value
+          else
+            ""
+
         let constraints =
           let upper = constraintStr.ToUpper()
-          [
-            if upper.Contains("NOT NULL") then NotNull
-            if upper.Contains("PRIMARY KEY") then
-              PrimaryKey { constraintName = None; columns = []; isAutoincrement = upper.Contains("AUTOINCREMENT") }
-            if upper.Contains("UNIQUE") then Unique []
-            if upper.Contains("DEFAULT") then
+
+          [ if upper.Contains "NOT NULL" then
+              NotNull
+            if upper.Contains "PRIMARY KEY" then
+              PrimaryKey
+                { constraintName = None
+                  columns = []
+                  isAutoincrement = upper.Contains "AUTOINCREMENT" }
+            if upper.Contains "UNIQUE" then
+              Unique []
+            if upper.Contains "DEFAULT" then
               // For now, just store a dummy value for DEFAULT
-              Default (Value "")
-            if upper.Contains("CHECK") then Check []
-            if upper.Contains("REFERENCES") then
+              Default <| Value ""
+            if upper.Contains "CHECK" then
+              Check []
+            if upper.Contains "REFERENCES" then
               // Simple foreign key parsing
-              let refMatch = Regex.Match(constraintStr, @"REFERENCES\s+(\w+)\s*(?:\((\w+)\))?", RegexOptions.IgnoreCase)
+              let refMatch =
+                Regex.Match(constraintStr, @"REFERENCES\s+(\w+)\s*(?:\((\w+)\))?", RegexOptions.IgnoreCase)
+
               if refMatch.Success then
                 let refTable = refMatch.Groups.[1].Value
-                let refCol = if refMatch.Groups.Count > 2 && refMatch.Groups.[2].Success then refMatch.Groups.[2].Value else ""
-                ForeignKey { columns = []; refTable = refTable; refColumns = if String.IsNullOrEmpty refCol then [] else [refCol] }
-          ]
 
-        columns.Add({ name = colName; columnType = colType; constraints = constraints })
+                let refCol =
+                  if refMatch.Groups.Count > 2 && refMatch.Groups.[2].Success then
+                    refMatch.Groups.[2].Value
+                  else
+                    ""
 
-  Table { name = name; columns = columns |> Seq.toList; constraints = tableConstraints |> Seq.toList }
+                ForeignKey
+                  { columns = []
+                    refTable = refTable
+                    refColumns = if String.IsNullOrEmpty refCol then [] else [ refCol ] } ]
+
+        columns.Add(
+          { name = colName
+            columnType = colType
+            constraints = constraints }
+        )
+
+  Table
+    { name = name
+      columns = columns |> Seq.toList
+      constraints = tableConstraints |> Seq.toList }
 
 let parseCreateView text =
-  let name = extractName @"CREATE\s+(?:TEMPORARY|TEMP\s+)?VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?[`""'\[]?(\w+)[`""'\]]?" text
-  let sqlTokens = [text]
-  View { name = name; sqlTokens = sqlTokens; dependencies = [] }
+  let name =
+    extractName @"CREATE\s+(?:TEMPORARY|TEMP\s+)?VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?[`""'\[]?(\w+)[`""'\]]?" text
+
+  let sqlTokens = [ text ]
+
+  View
+    { name = name
+      sqlTokens = sqlTokens
+      dependencies = [] }
 
 let parseCreateIndex text =
-  let name = extractName @"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?[`""'\[]?(\w+)[`""'\]]?" text
+  let name =
+    extractName @"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?[`""'\[]?(\w+)[`""'\]]?" text
+
   let table = extractName @"ON\s+[`""'\[]?(\w+)[`""'\]]?" text
   let columnPattern = @"ON\s+\w+\s*\((.*?)\)"
+
   let columns =
     match Regex.Match(text, columnPattern, RegexOptions.IgnoreCase) with
     | m when m.Success ->
@@ -141,20 +221,36 @@ let parseCreateIndex text =
       |> Array.map (fun s -> s.Trim('\"', '`', '[', ']', ' ', '\''))
       |> Array.toList
     | _ -> []
-  Index { name = name; table = table; columns = columns }
+
+  Index
+    { name = name
+      table = table
+      columns = columns }
 
 let parseCreateTrigger text =
-  let name = extractName @"CREATE\s+(?:TEMPORARY|TEMP\s+)?TRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?[`""'\[]?(\w+)[`""'\]]?" text
+  let name =
+    extractName @"CREATE\s+(?:TEMPORARY|TEMP\s+)?TRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?[`""'\[]?(\w+)[`""'\]]?" text
+
   let table = extractName @"ON\s+[`""'\[]?(\w+)[`""'\]]?" text
-  Trigger { name = name; sqlTokens = [text]; dependencies = if String.IsNullOrEmpty table then [] else [table] }
+
+  Trigger
+    { name = name
+      sqlTokens = [ text ]
+      dependencies = if String.IsNullOrEmpty table then [] else [ table ] }
 
 let parseStatement (sql: string) : Statement =
   let upperSql = sql.ToUpper().Trim()
-  if upperSql.StartsWith("CREATE TABLE") then parseCreateTable sql
-  elif upperSql.StartsWith("CREATE") && upperSql.Contains("VIEW") then parseCreateView sql
-  elif upperSql.StartsWith("CREATE") && upperSql.Contains("INDEX") then parseCreateIndex sql
-  elif upperSql.StartsWith("CREATE") && upperSql.Contains("TRIGGER") then parseCreateTrigger sql
-  else failwith $"Unsupported statement: {sql}"
+
+  if upperSql.StartsWith "CREATE TABLE" then
+    parseCreateTable sql
+  elif upperSql.StartsWith "CREATE" && upperSql.Contains "VIEW" then
+    parseCreateView sql
+  elif upperSql.StartsWith "CREATE" && upperSql.Contains "INDEX" then
+    parseCreateIndex sql
+  elif upperSql.StartsWith "CREATE" && upperSql.Contains "TRIGGER" then
+    parseCreateTrigger sql
+  else
+    failwith $"Unsupported statement: {sql}"
 
 let splitStatements (sql: string) =
   sql.Split(';')
@@ -164,10 +260,14 @@ let splitStatements (sql: string) =
 
 let extractViewDependencies (sqlTokens: string seq) =
   let sql = String.concat "" sqlTokens
-  let fromMatch = Regex.Match(sql, "FROM\s+(.+?)(?:WHERE|GROUP|ORDER|LIMIT|;|$)", RegexOptions.IgnoreCase)
+
+  let fromMatch =
+    Regex.Match(sql, "FROM\s+(.+?)(?:WHERE|GROUP|ORDER|LIMIT|;|$)", RegexOptions.IgnoreCase)
+
   if fromMatch.Success then
     let fromClause = fromMatch.Groups.[1].Value
-    fromClause.Split([|','; ' '|], System.StringSplitOptions.RemoveEmptyEntries)
+
+    fromClause.Split([| ','; ' ' |], System.StringSplitOptions.RemoveEmptyEntries)
     |> Array.filter (fun t -> not (String.IsNullOrWhiteSpace t))
     |> Array.toList
   else
@@ -176,14 +276,21 @@ let extractViewDependencies (sqlTokens: string seq) =
 let prostProcViews (sql: string) (file: SqlFile) =
   let extractViewTokens view =
     let start = sql.IndexOf($"CREATE VIEW {view}", StringComparison.OrdinalIgnoreCase)
-    let startAlt = sql.IndexOf($"CREATE TEMPORARY VIEW {view}", StringComparison.OrdinalIgnoreCase)
-    let actualStart = if start >= 0 then start else if startAlt >= 0 then startAlt else -1
+
+    let startAlt =
+      sql.IndexOf($"CREATE TEMPORARY VIEW {view}", StringComparison.OrdinalIgnoreCase)
+
+    let actualStart =
+      if start >= 0 then start
+      else if startAlt >= 0 then startAlt
+      else -1
 
     if actualStart >= 0 then
       let viewStr =
         sql |> Seq.skip actualStart |> Seq.takeWhile (fun c -> c <> ';') |> Array.ofSeq
+
       let r = (new string (viewStr)).Trim()
-      [r]
+      [ r ]
     else
       []
 
@@ -192,13 +299,17 @@ let prostProcViews (sql: string) (file: SqlFile) =
     |> List.map (fun v ->
       let tokens = v.name |> extractViewTokens
       let deps = extractViewDependencies tokens
-      { v with sqlTokens = tokens; dependencies = deps })
+
+      { v with
+          sqlTokens = tokens
+          dependencies = deps })
 
   { file with views = views }
 
 let parse (_file: string, sql: string) =
   try
     let statements = splitStatements sql
+
     let parsed =
       statements
       |> List.map parseStatement
@@ -208,8 +319,11 @@ let parse (_file: string, sql: string) =
           | View v -> { acc with views = v :: acc.views }
           | Table t -> { acc with tables = t :: acc.tables }
           | Index i -> { acc with indexes = i :: acc.indexes }
-          | Trigger t -> { acc with triggers = t :: acc.triggers })
+          | Trigger t ->
+            { acc with
+                triggers = t :: acc.triggers })
         emptyFile
+
     parsed |> prostProcViews sql |> Ok
-  with
-  | ex -> Error ex.Message
+  with ex ->
+    Error ex.Message
