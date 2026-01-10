@@ -51,7 +51,7 @@ let parseCreateTable text =
 
   // Extract columns section from parentheses
   let columnText =
-    match Regex.Match(text, @"\((.*)\)(?:\s*;)?$", RegexOptions.IgnoreCase) with
+    match Regex.Match(text, @"\((.*)\)", RegexOptions.IgnoreCase ||| RegexOptions.Singleline) with
     | m when m.Success -> m.Groups.[1].Value
     | _ -> ""
 
