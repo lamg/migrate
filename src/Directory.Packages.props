@@ -7,7 +7,7 @@
     <PackageVersion Include="dotenv.net" Version="3.2.1" />
     <PackageVersion Include="Fabulous.AST" Version="1.2.0" />
     <PackageVersion Include="FParsec" Version="1.1.1" />
-    <PackageVersion Include="FSharp.Core" Version="9.0.100" />
+    <PackageVersion Include="FSharp.Core" Version="10.0.100" />
     <PackageVersion Include="FsToolkit.ErrorHandling" Version="4.18.0" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="9.0.0" />
     <PackageVersion Include="ObjectDumper.NET" Version="4.3.2" />

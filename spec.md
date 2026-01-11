@@ -609,7 +609,7 @@ Complete F# Source Files
 ## Dependencies
 
 **NuGet Packages:**
-- `FSharp.Core` 9.0.100 - F# runtime
+- `FSharp.Core` 10.0.100 - F# runtime
 - `FsToolkit.ErrorHandling` 4.18.0 - Monadic error handling
 - `Microsoft.Data.Sqlite` 9.0.0 - SQLite database driver
 - `SqlPrettify` 1.0.3 - SQL formatting and syntax highlighting

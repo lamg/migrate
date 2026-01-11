@@ -23,7 +23,7 @@ let generateProjectFile (projectName: string) (sourceFiles: string list) : strin
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="FSharp.Core" Version="9.0.100" />
+    <PackageReference Include="FSharp.Core" Version="10.0.100" />
     <PackageReference Include="FsToolkit.ErrorHandling" Version="4.18.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
   </ItemGroup>

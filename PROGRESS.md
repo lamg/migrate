@@ -99,7 +99,7 @@ type Student with
 - `generateProjectFile`: Generates .fsproj XML content with:
   - Target framework: net10.0
   - Documentation generation enabled
-  - Package references: FSharp.Core 9.0.100, FsToolkit.ErrorHandling 4.18.0, Microsoft.Data.Sqlite 9.0.0
+  - Package references: FSharp.Core 10.0.100, FsToolkit.ErrorHandling 4.18.0, Microsoft.Data.Sqlite 9.0.0
 - `writeProjectFile`: Writes .fsproj to disk
 
 #### **CodeGen.fs**
