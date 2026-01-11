@@ -9,6 +9,12 @@ let ws1 = spaces1
 let str s = pstringCI s // Case-insensitive
 let str_ws s = pstringCI s .>> ws // Case-insensitive
 let str_ws1 s = pstringCI s .>> ws1 // Case-insensitive
+let keyword s = str_ws1 s >>% ()
+let terminal s = str_ws s >>% ()
+let opar = terminal "("
+let cpar = terminal ")"
+let comma = str_ws ","
+let semi = str_ws ";"
 
 let keywords =
   [ "CREATE"
@@ -72,6 +78,9 @@ let identifier: Parser<string, unit> =
       unquotedId ]
   .>> ws
 
+// Optional identifier list in parentheses
+let optIdentifierList = opt (between opar cpar (sepBy1 identifier comma))
+
 // SQL type parsing
 let sqlType: Parser<SqlType, unit> =
   let typeParser name sqlType = str_ws name >>% sqlType // Use str_ws instead of str_ws1 to allow no whitespace before comma
@@ -113,24 +122,24 @@ let columnConstraint: Parser<ColumnConstraint, unit> =
 
   let defaultValue =
     parse {
-      do! str_ws1 "DEFAULT" >>% ()
+      do! keyword "DEFAULT"
       let! expr = expression
       return Default expr
     }
 
   let check =
     parse {
-      do! str_ws1 "CHECK" >>% ()
-      do! str_ws "(" >>% ()
-      let! tokens = manyTill anyChar (str_ws ")")
+      do! keyword "CHECK"
+      do! opar
+      let! tokens = manyTill anyChar cpar
       return Check(tokens |> List.map string)
     }
 
   let foreignKey =
     parse {
-      do! str_ws1 "REFERENCES" >>% ()
+      do! keyword "REFERENCES"
       let! refTable = identifier
-      let! refCols = opt (between (str_ws "(") (str_ws ")") (sepBy1 identifier (str_ws ",")))
+      let! refCols = optIdentifierList
 
       return
         ForeignKey
@@ -165,9 +174,9 @@ let tableConstraint: Parser<ColumnConstraint, unit> =
   let primaryKey =
     parse {
       do! str_ws1 "PRIMARY" >>. str_ws "KEY" >>% ()
-      do! str_ws "(" >>% ()
-      let! cols = sepBy1 identifier (str_ws ",")
-      do! str_ws ")" >>% ()
+      do! opar
+      let! cols = sepBy1 identifier comma
+      do! cpar
 
       return
         PrimaryKey
@@ -179,12 +188,12 @@ let tableConstraint: Parser<ColumnConstraint, unit> =
   let foreignKey =
     parse {
       do! str_ws1 "FOREIGN" >>. str_ws "KEY" >>% ()
-      do! str_ws "(" >>% ()
-      let! cols = sepBy1 identifier (str_ws ",")
-      do! str_ws ")" >>% ()
-      do! str_ws1 "REFERENCES" >>% ()
+      do! opar
+      let! cols = sepBy1 identifier comma
+      do! cpar
+      do! keyword "REFERENCES"
       let! refTable = identifier
-      let! refCols = opt (between (str_ws "(") (str_ws ")") (sepBy1 identifier (str_ws ",")))
+      let! refCols = optIdentifierList
 
       return
         ForeignKey
@@ -195,10 +204,10 @@ let tableConstraint: Parser<ColumnConstraint, unit> =
 
   let unique =
     parse {
-      do! str_ws "UNIQUE" >>% ()
-      do! str_ws "(" >>% ()
-      let! cols = sepBy1 identifier (str_ws ",")
-      do! str_ws ")" >>% ()
+      do! terminal "UNIQUE"
+      do! opar
+      let! cols = sepBy1 identifier comma
+      do! cpar
       return Unique cols
     }
 
@@ -210,10 +219,10 @@ let createTable: Parser<CreateTable, unit> =
   >>. str_ws1 "TABLE"
   >>. opt (str_ws1 "IF" >>. str_ws1 "NOT" >>. str_ws1 "EXISTS")
   >>. identifier
-  .>>. (str_ws "("
-        >>. sepBy1 (choice [ attempt (tableConstraint |>> Choice2Of2); columnDef |>> Choice1Of2 ]) (str_ws ",")
-        .>> str_ws ")"
-        .>> opt (str_ws ";"))
+  .>>. (opar
+        >>. sepBy1 (choice [ attempt (tableConstraint |>> Choice2Of2); columnDef |>> Choice1Of2 ]) comma
+        .>> cpar
+        .>> opt semi)
   |>> fun (tableName, items) ->
     let columns =
       items
@@ -238,7 +247,7 @@ let createView: Parser<CreateView, unit> =
   >>. str_ws1 "VIEW"
   >>. opt (str_ws1 "IF" >>. str_ws1 "NOT" >>. str_ws1 "EXISTS")
   >>. identifier
-  .>>. (str_ws1 "AS" >>. many1Satisfy (fun c -> c <> ';') .>> opt (str_ws ";"))
+  .>>. (str_ws1 "AS" >>. many1Satisfy (fun c -> c <> ';') .>> opt semi)
   |>> fun (viewName, sql) ->
     { name = viewName
       sqlTokens = [ sql.Trim() ]
@@ -252,9 +261,9 @@ let createIndex: Parser<CreateIndex, unit> =
   >>. opt (str_ws1 "IF" >>. str_ws1 "NOT" >>. str_ws1 "EXISTS")
   >>. identifier
   .>>. (str_ws1 "ON" >>. identifier
-        .>>. (str_ws "(" >>. sepBy1 identifier (str_ws ",")
-              .>> str_ws ")"
-              .>> opt (str_ws ";")))
+        .>>. (opar >>. sepBy1 identifier comma
+              .>> cpar
+              .>> opt semi))
   |>> fun (indexName, (tableName, cols)) ->
     { name = indexName
       table = tableName
@@ -267,7 +276,7 @@ let createTrigger: Parser<CreateTrigger, unit> =
   >>. str_ws1 "TRIGGER"
   >>. opt (str_ws1 "IF" >>. str_ws1 "NOT" >>. str_ws1 "EXISTS")
   >>. identifier
-  .>>. (many1Satisfy (fun c -> c <> ';') .>> opt (str_ws ";"))
+  .>>. (many1Satisfy (fun c -> c <> ';') .>> opt semi)
   |>> fun (triggerName, sql) ->
     // Extract table name from ON clause
     let onMatch =
