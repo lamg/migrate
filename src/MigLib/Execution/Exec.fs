@@ -61,7 +61,7 @@ let internal dbSchema (dbFile: string) =
     let! schema =
       sql
       |> FormatSql.join
-      |> fun sql -> SqlParser.parse (conn.Database, sql)
+      |> fun sql -> FParsecSqlParser.parseSqlFile (conn.Database, sql)
       |> Result.mapError Types.ParsingFailed
 
     return schema
@@ -77,7 +77,7 @@ type SqlSource = { name: string; content: string }
 
 let internal parseSqlFiles (sources: SqlSource list) =
   sources
-  |> List.map (fun s -> SqlParser.parse (s.name, s.content))
+  |> List.map (fun s -> FParsecSqlParser.parseSqlFile (s.name, s.content))
   |> Solve.splitResult
   |> function
     | xs, [] ->

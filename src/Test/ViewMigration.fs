@@ -51,8 +51,8 @@ let cases =
 
 let testViewMigration (case: int) (left: string, right: string, r: Result<string list, string>) =
   result {
-    let! leftFile = SqlParser.parse ("left", left)
-    let! rightFile = SqlParser.parse ("right", right)
+    let! leftFile = FParsecSqlParser.parseSqlFile ("left", left)
+    let! rightFile = FParsecSqlParser.parseSqlFile ("right", right)
     let sortedLeft, _ = Solve.sortFile leftFile
     let sortedRight, _ = Solve.sortFile rightFile
     let statements = Solve.viewMigrationsSql sortedLeft sortedRight

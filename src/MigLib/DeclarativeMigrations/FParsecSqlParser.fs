@@ -242,16 +242,28 @@ let createTable: Parser<CreateTable, unit> =
 
 // CREATE VIEW parsing
 let createView: Parser<CreateView, unit> =
-  str_ws1 "CREATE"
-  >>. opt (str_ws1 "TEMPORARY" <|> str_ws1 "TEMP")
-  >>. str_ws1 "VIEW"
-  >>. opt (str_ws1 "IF" >>. str_ws1 "NOT" >>. str_ws1 "EXISTS")
-  >>. identifier
-  .>>. (str_ws1 "AS" >>. many1Satisfy (fun c -> c <> ';') .>> opt semi)
-  |>> fun (viewName, sql) ->
+  let createPart = str_ws1 "CREATE" >>. opt (str_ws1 "TEMPORARY" <|> str_ws1 "TEMP") >>. str_ws1 "VIEW" >>. opt (str_ws1 "IF" >>. str_ws1 "NOT" >>. str_ws1 "EXISTS")
+  createPart >>. identifier .>>. (str_ws1 "AS" >>. many1Satisfy (fun c -> c <> ';') .>> opt semi)
+  |>> fun (viewName, selectPart) ->
+    // Build the full CREATE VIEW statement
+    let fullStatement = $"CREATE VIEW {viewName} AS {selectPart.Trim()}"
+
+    // Extract table names from FROM and JOIN clauses
+    let fromMatches =
+      System.Text.RegularExpressions.Regex.Matches(
+        selectPart,
+        @"(?:FROM|JOIN)\s+(\w+)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase
+      )
+
+    let dependencies =
+      [ for m in fromMatches do
+          yield m.Groups.[1].Value ]
+      |> List.distinct
+
     { name = viewName
-      sqlTokens = [ sql.Trim() ]
-      dependencies = [] }
+      sqlTokens = [ fullStatement ]
+      dependencies = dependencies }
 
 // CREATE INDEX parsing
 let createIndex: Parser<CreateIndex, unit> =

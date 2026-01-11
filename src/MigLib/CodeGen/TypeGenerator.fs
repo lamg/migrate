@@ -34,7 +34,8 @@ let generateField (column: ColumnDef) =
       (string column.name.[0]).ToUpper() + column.name.[1..]
     else
       column.name
-  (fieldName, fsharpType)
+
+  fieldName, fsharpType
 
 /// Generate an F# record type from a table definition
 let generateRecordType (table: CreateTable) : string =
