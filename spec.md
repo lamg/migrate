@@ -125,7 +125,9 @@ Generates type-safe F# code from SQL schema definitions:
   - `Get` - Returns `Result<T option, SqliteException>`
   - `GetAll` - Returns `Result<T list, SqliteException>`
 - **Foreign Key Queries:** Automatic generation of methods to query related entities via JOINs
-- **Transaction Support:** `WithTransaction` helper methods for atomic operations
+- **Transaction Support:**
+  - `WithTransaction` helper method for atomic operations with automatic commit/rollback
+  - Transaction-aware overloads for Insert, Update, Delete methods
 - **Error Handling:** All operations return `Result<T, SqliteException>`
 
 **Implementation:**
@@ -177,17 +179,28 @@ type Student with
     }
 
   static member WithTransaction(conn: SqliteConnection, action: SqliteTransaction -> Result<'T, SqliteException>) : Result<'T, SqliteException> =
-    result {
-      use transaction = conn.BeginTransaction()
-      try
-        let! result = action transaction
+    let transaction = conn.BeginTransaction()
+    try
+      match action transaction with
+      | Ok result ->
         transaction.Commit()
-        return result
-      with
-      | :? SqliteException as ex ->
+        Ok result
+      | Error ex ->
         transaction.Rollback()
-        return! Error ex
-    }
+        Error ex
+    with
+    | :? SqliteException as ex ->
+      transaction.Rollback()
+      Error ex
+
+  // Transaction-aware overloads
+  static member Insert(conn: SqliteConnection, transaction: SqliteTransaction, student: Student) : Result<int64, SqliteException> =
+    try
+      use cmd = new SqliteCommand("INSERT INTO students ...", conn, transaction)
+      // ... parameter binding ...
+      Ok lastId
+    with
+    | :? SqliteException as ex -> Error ex
 ```
 
 **CLI Integration:**
@@ -345,7 +358,7 @@ type Student with
 **Output:** Fabulous.AST record type definitions
 
 #### QueryGenerator.fs
-**Purpose:** Generate CRUD methods and JOIN queries
+**Purpose:** Generate CRUD methods, transaction helpers, and JOIN queries
 
 **Key Functions:**
 - `getPrimaryKey(table)` - Extract primary key columns (supports both column-level and table-level PKs)
@@ -354,8 +367,11 @@ type Student with
 - `generateDelete(table)` - Create DELETE method (supports composite PKs)
 - `generateGet(table)` - Create SELECT by primary key method (supports composite PKs)
 - `generateGetAll(table)` - Create SELECT all method
-- `generateJoinQueries(table, foreignKeys)` - Create JOIN methods for related entities
-- `generateTransactionHelper()` - Create WithTransaction method
+- `generateWithTransaction(table)` - Create generic WithTransaction helper method
+- `generateInsertWithTransaction(table)` - Create transaction-aware Insert overload
+- `generateUpdateWithTransaction(table)` - Create transaction-aware Update overload
+- `generateDeleteWithTransaction(table)` - Create transaction-aware Delete overload
+- `generateJoinQueries(table, foreignKeys)` - Create JOIN methods for related entities (planned)
 
 **Features:**
 - Parameterized queries (SQL injection protection)
@@ -363,6 +379,7 @@ type Student with
 - Proper resource disposal (use statements)
 - Option type handling for nullable values
 - Composite primary key support (e.g., `PRIMARY KEY(col1, col2)`)
+- Transaction support with automatic commit/rollback
 
 **Output:** Fabulous.AST method definitions
 

@@ -290,17 +290,187 @@ let generateDelete (table: CreateTable) : string option =
     with
     | :? SqliteException as ex -> Error ex"""
 
+/// Generate WithTransaction helper method
+let generateWithTransaction (table: CreateTable) : string =
+  let typeName = capitalize table.name
+
+  $"""  static member WithTransaction(conn: SqliteConnection, action: SqliteTransaction -> Result<'T, SqliteException>) : Result<'T, SqliteException> =
+    let transaction = conn.BeginTransaction()
+    try
+      match action transaction with
+      | Ok result ->
+        transaction.Commit()
+        Ok result
+      | Error ex ->
+        transaction.Rollback()
+        Error ex
+    with
+    | :? SqliteException as ex ->
+      transaction.Rollback()
+      Error ex"""
+
+/// Generate INSERT method with transaction support
+let generateInsertWithTransaction (table: CreateTable) : string =
+  let typeName = capitalize table.name
+  let pkCols = getPrimaryKey table
+
+  // Exclude auto-increment primary keys from insert
+  let insertCols =
+    table.columns
+    |> List.filter (fun col ->
+      not (
+        pkCols
+        |> List.exists (fun pk ->
+          pk.name = col.name
+          && pk.constraints
+             |> List.exists (fun c ->
+               match c with
+               | PrimaryKey pk -> pk.isAutoincrement
+               | _ -> false))))
+
+  let columnNames = insertCols |> List.map (fun c -> c.name) |> String.concat ", "
+
+  let paramNames =
+    insertCols |> List.map (fun c -> $"@{c.name}") |> String.concat ", "
+
+  let insertSql = $"INSERT INTO {table.name} ({columnNames}) VALUES ({paramNames})"
+
+  $"""  static member Insert(conn: SqliteConnection, transaction: SqliteTransaction, item: {typeName}) : Result<int64, SqliteException> =
+    try
+      use cmd = new SqliteCommand("{insertSql}", conn, transaction)
+{insertCols
+ |> List.map (fun col ->
+   let fieldName = capitalize col.name
+   let isNullable = TypeGenerator.isColumnNullable col
+
+   if isNullable then
+     $"      cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+   else
+     $"      cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
+ |> String.concat "\n"}
+      cmd.ExecuteNonQuery() |> ignore
+      use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn, transaction)
+      let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
+      Ok lastId
+    with
+    | :? SqliteException as ex -> Error ex"""
+
+/// Generate UPDATE method with transaction support
+let generateUpdateWithTransaction (table: CreateTable) : string option =
+  let typeName = capitalize table.name
+  let pkCols = getPrimaryKey table
+
+  match pkCols with
+  | [] -> None
+  | pks ->
+    let pkNames = pks |> List.map (fun pk -> pk.name) |> Set.ofList
+
+    // Exclude all primary key columns from SET clause
+    let updateCols =
+      table.columns
+      |> List.filter (fun col -> not (Set.contains col.name pkNames))
+
+    let setClauses =
+      updateCols
+      |> List.map (fun c -> $"{c.name} = @{c.name}")
+      |> String.concat ", "
+
+    // Generate WHERE clause for all PK columns
+    let whereClause =
+      pks
+      |> List.map (fun pk -> $"{pk.name} = @{pk.name}")
+      |> String.concat " AND "
+
+    let updateSql = $"UPDATE {table.name} SET {setClauses} WHERE {whereClause}"
+
+    let paramBindings =
+      table.columns
+      |> List.map (fun col ->
+        let fieldName = capitalize col.name
+        let isNullable = TypeGenerator.isColumnNullable col
+
+        if isNullable then
+          $"      cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        else
+          $"      cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
+      |> String.concat "\n"
+
+    Some
+      $"""  static member Update(conn: SqliteConnection, transaction: SqliteTransaction, item: {typeName}) : Result<unit, SqliteException> =
+    try
+      use cmd = new SqliteCommand("{updateSql}", conn, transaction)
+{paramBindings}
+      cmd.ExecuteNonQuery() |> ignore
+      Ok()
+    with
+    | :? SqliteException as ex -> Error ex"""
+
+/// Generate DELETE method with transaction support
+let generateDeleteWithTransaction (table: CreateTable) : string option =
+  let pkCols = getPrimaryKey table
+
+  match pkCols with
+  | [] -> None
+  | pks ->
+    // Generate WHERE clause for all PK columns
+    let whereClause =
+      pks
+      |> List.map (fun pk -> $"{pk.name} = @{pk.name}")
+      |> String.concat " AND "
+
+    let deleteSql = $"DELETE FROM {table.name} WHERE {whereClause}"
+
+    // Generate parameter list for function signature
+    let paramList =
+      pks
+      |> List.map (fun pk ->
+        let pkType = TypeGenerator.mapSqlType pk.columnType false
+        $"{pk.name}: {pkType}")
+      |> String.concat ", "
+
+    // Generate parameter bindings
+    let paramBindings =
+      pks
+      |> List.map (fun pk -> $"      cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+      |> String.concat "\n"
+
+    Some
+      $"""  static member Delete(conn: SqliteConnection, transaction: SqliteTransaction, {paramList}) : Result<unit, SqliteException> =
+    try
+      use cmd = new SqliteCommand("{deleteSql}", conn, transaction)
+{paramBindings}
+      cmd.ExecuteNonQuery() |> ignore
+      Ok()
+    with
+    | :? SqliteException as ex -> Error ex"""
+
 /// Generate code for a table
 let generateTableCode (table: CreateTable) : string =
   let typeName = capitalize table.name
+
+  // Standard CRUD methods
   let insertMethod = generateInsert table
   let getMethod = generateGet table
   let getAllMethod = generateGetAll table
   let updateMethod = generateUpdate table
   let deleteMethod = generateDelete table
 
+  // Transaction support methods
+  let withTransactionMethod = generateWithTransaction table
+  let insertWithTxMethod = generateInsertWithTransaction table
+  let updateWithTxMethod = generateUpdateWithTransaction table
+  let deleteWithTxMethod = generateDeleteWithTransaction table
+
   let methods =
-    [ Some insertMethod; getMethod; Some getAllMethod; updateMethod; deleteMethod ]
+    [ Some insertMethod
+      getMethod
+      Some getAllMethod
+      updateMethod
+      deleteMethod
+      Some withTransactionMethod
+      Some insertWithTxMethod
+      updateWithTxMethod
+      deleteWithTxMethod ]
     |> List.choose id
     |> String.concat "\n\n"
 

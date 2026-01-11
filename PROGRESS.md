@@ -239,7 +239,7 @@ All 3 existing tests pass.
 - Removed debug test file and backup file
 
 **Test Results:**
-- ✅ All 7 tests pass (TableMigration, ViewMigration, UseAsLib, CompositePKTest x4)
+- ✅ All 12 tests pass (TableMigration, ViewMigration, UseAsLib, CompositePKTest x4, TransactionTest x5)
 - ✅ Manual testing with real SQL files successful
 - ✅ Code generation works with FParsec parser
 
@@ -270,6 +270,49 @@ All 3 existing tests pass.
 - Delete method generation with composite PK
 - Update method exclusion of all PK columns from SET
 
+### 9. Transaction Support
+
+**File:** `src/MigLib/CodeGen/QueryGenerator.fs`
+
+**New Functions:**
+1. **`generateWithTransaction`** - Generates a generic transaction helper method
+   - Signature: `WithTransaction(conn, action: SqliteTransaction -> Result<'T, SqliteException>)`
+   - Handles `BeginTransaction()`, `Commit()`, and `Rollback()`
+   - Catches exceptions and rolls back on error
+
+2. **`generateInsertWithTransaction`** - Insert overload accepting transaction
+   - Signature: `Insert(conn, transaction, item)`
+   - Uses `SqliteCommand(sql, conn, transaction)` constructor
+
+3. **`generateUpdateWithTransaction`** - Update overload accepting transaction
+   - Signature: `Update(conn, transaction, item)`
+
+4. **`generateDeleteWithTransaction`** - Delete overload accepting transaction
+   - Signature: `Delete(conn, transaction, pkParams...)`
+
+**Usage Example:**
+```fsharp
+// Using WithTransaction helper
+Student.WithTransaction(conn, fun tx ->
+  result {
+    let! id1 = Student.Insert(conn, tx, student1)
+    let! id2 = Student.Insert(conn, tx, student2)
+    return (id1, id2)
+  })
+
+// Direct transaction usage
+let tx = conn.BeginTransaction()
+Student.Insert(conn, tx, student) |> ignore
+tx.Commit()
+```
+
+**New Tests:** `src/Test/TransactionTest.fs`
+- WithTransaction method generation
+- Insert with transaction overload
+- Update with transaction overload
+- Delete with transaction overload
+- Full table code includes all transaction methods
+
 ## ⏭️ Next Steps (Priority Order)
 
 ### 1. Add More CRUD Methods (High Priority) ✅ COMPLETED
@@ -284,10 +327,10 @@ All 3 existing tests pass.
 - [ ] Handle one-to-many relationships
 - [ ] Test JOIN queries
 
-### 3. Add Transaction Support (Medium Priority)
-- [ ] Generate `WithTransaction` helper method
-- [ ] Add transaction examples to generated code
-- [ ] Test transaction rollback scenarios
+### 3. Add Transaction Support (Medium Priority) ✅ COMPLETED
+- [x] Generate `WithTransaction` helper method
+- [x] Add transaction-aware CRUD method overloads (Insert, Update, Delete)
+- [x] Test transaction method generation
 
 ### 4. Update mig commit Integration (High Priority)
 - [ ] Add call to `CodeGen.generateCode` after successful migration in `commit` command
@@ -316,9 +359,6 @@ All 3 existing tests pass.
    - Foreign keys detected but not used for query generation
    - Planned for future
 
-2. **No Transaction Helpers**
-   - Planned for future
-
 ## 📁 File Structure
 
 ```
@@ -341,7 +381,8 @@ src/
     ├── TableMigration.fs           (✅ Passing)
     ├── ViewMigration.fs            (✅ Passing)
     ├── UseAsLib.fs                 (✅ Passing)
-    └── CompositePKTest.fs          (✅ Passing - 4 tests)
+    ├── CompositePKTest.fs          (✅ Passing - 4 tests)
+    └── TransactionTest.fs          (✅ Passing - 5 tests)
 ```
 
 ## 🔧 Technical Details
@@ -402,11 +443,12 @@ let getPrimaryKey (table: CreateTable) : ColumnDef list =
 ## 🧪 Testing
 
 ### Current Test Status
-All 7 tests passing:
+All 12 tests passing:
 - ✅ TableMigration (6 cases)
 - ✅ ViewMigration
 - ✅ UseAsLib
 - ✅ CompositePKTest (4 tests for composite primary key support)
+- ✅ TransactionTest (5 tests for transaction support)
 
 ### Manual Testing
 ```bash
@@ -546,9 +588,9 @@ When resuming:
    - ✅ Record type generation (working)
    - ✅ All CRUD methods implemented (Insert, GetById, GetAll, Update, Delete)
    - ✅ Composite primary key support (complete - both column-level and table-level)
+   - ✅ Transaction support (WithTransaction helper + transaction-aware CRUD overloads)
    - ⏳ JOIN query generation (planned)
-   - ⏳ Transaction support (planned)
-   - ⏳ Code generation tests (partial - composite PK tests added)
+   - ⏳ Code generation tests (partial - composite PK and transaction tests added)
    - ⏳ Integration with `mig commit` command (not yet implemented)
 
 3. Next priorities (in order):
@@ -558,6 +600,6 @@ When resuming:
    - Add transaction support
 
 4. Testing:
-   - Check migration tests: `cd src && dotnet test` (should show all 7 passing)
+   - Check migration tests: `cd src && dotnet test` (should show all 12 passing)
    - Check build: `cd src && dotnet build`
    - Manual codegen test: `mkdir /tmp/test && cd /tmp/test && echo "CREATE TABLE test(id INTEGER PRIMARY KEY);" > test.sql && dotnet /path/to/mig codegen`
