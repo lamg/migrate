@@ -51,6 +51,7 @@ let migrationStatements () =
     let expectedWithMigTables =
       { expectedSchema with
           tables = expectedSchema.tables @ [ migrationLog; migrationSteps ] }
+
     let dbFile = Exec.getDbFile dir
     let! dbSchema = Exec.dbSchema dbFile
     return! Migration.migration (dbSchema, expectedWithMigTables)

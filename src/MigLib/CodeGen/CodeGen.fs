@@ -26,6 +26,7 @@ let generateCodeForSqlFile (sqlFilePath: string) : Result<string, string> =
         "open System"
         "open Microsoft.Data.Sqlite"
         "open FsToolkit.ErrorHandling"
+        "open migrate.Db"
         ""
         // Generate record types
         yield!
@@ -71,7 +72,9 @@ let generateCode (schemaDirectory: string) : Result<string list, string> =
 
     // Generate project file
     let projectName = Path.GetFileName(Path.GetFullPath schemaDirectory)
-    let projectPath = ProjectGenerator.writeProjectFile schemaDirectory projectName generatedFiles
+
+    let projectPath =
+      ProjectGenerator.writeProjectFile schemaDirectory projectName generatedFiles
 
     return projectPath :: generatedFiles
   }

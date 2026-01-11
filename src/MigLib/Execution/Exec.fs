@@ -150,7 +150,7 @@ let executeMigration (statements: string list) =
             cmd.Transaction <- txn
             cmd.CommandText <- sql
             cmd.ExecuteNonQuery() |> ignore
-            (false, i + 1, $"✅ {i}\n{step}\n" :: xs)
+            false, i + 1, $"✅ {i}\n{step}\n" :: xs
           with e ->
             let msg =
               match e with
@@ -158,9 +158,9 @@ let executeMigration (statements: string list) =
               | _ -> e.Message
 
             txn.Rollback()
-            (true, i + 1, $"❌ {i}\n{step}\n{msg}" :: xs)
+            true, i + 1, $"❌ {i}\n{step}\n{msg}" :: xs
         else
-          (true, i + 1, $"⚫ {i}\n{step}" :: xs))
+          true, i + 1, $"⚫ {i}\n{step}" :: xs)
       (false, 0, [])
     |> function
       | hasError, _, xs ->

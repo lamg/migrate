@@ -5,10 +5,10 @@ open migrate.Execution.Exec
 open FsToolkit.ErrorHandling
 
 [<Fact>]
-let useAsLib() =
-  let sources = [
-    { name = "schema0.sql"; content="CREATE TABLE table0(id INTEGER NOT NULL)" }
-  ] 
+let useAsLib () =
+  let sources =
+    [ { name = "schema0.sql"
+        content = "CREATE TABLE table0(id INTEGER NOT NULL)" } ]
 
   result {
     let! statements = migrationStatementsForDb ("/path/to/db.sqlite", sources)

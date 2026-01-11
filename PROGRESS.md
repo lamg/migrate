@@ -21,7 +21,22 @@ Implementing F# code generation feature to transform Migrate from a pure migrati
 - Removed Import command and related args from mig/Program.fs
 - Cleaned up CLI to remove all Goose-related functionality
 
-### 3. Created CodeGen Module Structure
+### 3. Created Db Module for Transaction Management
+Created `src/MigLib/Db.fs` - Shared transaction management utilities used by all generated code:
+
+#### **Db.fs**
+- `WithTransaction(conn, action)`: Function for explicit transaction management with automatic commit/rollback
+- `TxnBuilder`: Computation expression builder that combines transactions with Result monad
+- `txn conn { ... }`: Computation expression for clean transaction syntax
+- Packaged with MigLib 2.0 for use by generated code
+
+**Benefits:**
+- Single implementation (no duplication in generated code)
+- Clean computation expression syntax
+- Supports partial application patterns
+- Explicit error handling with Result types
+
+### 4. Created CodeGen Module Structure
 Created 6 new modules in `src/MigLib/CodeGen/`:
 
 #### **FabulousAstHelpers.fs**
@@ -52,43 +67,60 @@ SqlFlexible → obj
 - `getPrimaryKey`: Extracts primary key column(s) from table (supports both column-level and table-level PKs)
 - `getForeignKeys`: Extracts foreign key relationships
 - `capitalize`: Helper for F# naming conventions
-- `generateInsert`: Generates INSERT method, returns `Result<int64, SqliteException>`
+- `generateInsert`: Generates INSERT method with curried signature `(item) (tx)`
   - Excludes auto-increment primary keys
   - Returns `last_insert_rowid`
-  - Handles nullable columns with `Option.toObj` and `DBNull.Value`
-- `generateGet`: Generates GetById method, returns `Result<T option, SqliteException>`
+  - Uses `tx.Connection` internally
+- `generateGet`: Generates GetById method with curried signature `(pkParams...) (tx)`
   - Supports single and composite primary keys
   - Handles nullable column reads with `IsDBNull` checks
-- `generateUpdate`: Generates Update method with composite PK support
-- `generateDelete`: Generates Delete method with composite PK support
-- `generateGetAll`: Generates GetAll method
+- `generateGetAll`: Generates GetAll method with curried signature `(tx)`
+- `generateUpdate`: Generates Update method with curried signature `(item) (tx)` (composite PK support)
+- `generateDelete`: Generates Delete method with curried signature `(pkParams...) (tx)` (composite PK support)
 - `generateTableCode`: Orchestrates generation of all methods for a table
+
+**Note:** All CRUD methods use curried signatures with `SqliteTransaction` as last parameter for clean computation expression syntax.
 
 **Generated Method Pattern:**
 ```fsharp
-type Student with
-  static member Insert(conn: SqliteConnection, item: Student) : Result<int64, SqliteException> =
+// Db module (part of MigLib 2.0, shared across all generated code)
+module Db =
+  let WithTransaction (conn: SqliteConnection) (action: SqliteTransaction -> Result<'T, SqliteException>) =
+    let tx = conn.BeginTransaction()
     try
-      use cmd = new SqliteCommand("INSERT INTO students (...) VALUES (...)", conn)
+      match action tx with
+      | Ok result -> tx.Commit(); Ok result
+      | Error ex -> tx.Rollback(); Error ex
+    with :? SqliteException as ex -> tx.Rollback(); Error ex
+
+  type TxnBuilder(conn: SqliteConnection) =
+    member _.Bind(m, f) = fun (tx: SqliteTransaction) -> match m tx with | Ok v -> f v tx | Error ex -> Error ex
+    member _.Return(x) = fun _ -> Ok x
+    member _.ReturnFrom(m) = m
+    member _.Run(action) = WithTransaction conn action
+
+  let txn (conn: SqliteConnection) = TxnBuilder(conn)
+
+// Generated code (uses curried signatures)
+type Student with
+  static member Insert (item: Student) (tx: SqliteTransaction) : Result<int64, SqliteException> =
+    try
+      use cmd = new SqliteCommand("INSERT INTO students (...) VALUES (...)", tx.Connection, tx)
       cmd.Parameters.AddWithValue("@name", item.Name) |> ignore
       cmd.ExecuteNonQuery() |> ignore
-      use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn)
+      use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
       let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
       Ok lastId
-    with
-    | :? SqliteException as ex -> Error ex
+    with :? SqliteException as ex -> Error ex
 
-  static member GetById(conn: SqliteConnection, id: int64) : Result<Student option, SqliteException> =
+  static member GetById (id: int64) (tx: SqliteTransaction) : Result<Student option, SqliteException> =
     try
-      use cmd = new SqliteCommand("SELECT ... FROM students WHERE id = @id", conn)
+      use cmd = new SqliteCommand("SELECT ... FROM students WHERE id = @id", tx.Connection, tx)
       cmd.Parameters.AddWithValue("@id", id) |> ignore
       use reader = cmd.ExecuteReader()
-      if reader.Read() then
-        Ok(Some { Id = reader.GetInt64(0); ... })
-      else
-        Ok None
-    with
-    | :? SqliteException as ex -> Error ex
+      if reader.Read() then Ok(Some { Id = reader.GetInt64(0); ... })
+      else Ok None
+    with :? SqliteException as ex -> Error ex
 ```
 
 #### **FileMapper.fs**
@@ -126,6 +158,7 @@ module Students
 open System
 open Microsoft.Data.Sqlite
 open FsToolkit.ErrorHandling
+open migrate.Db
 
 type Students = {
     Id: int64 option
@@ -135,10 +168,10 @@ type Students = {
 }
 
 type Students with
-    [Insert and GetById methods...]
+    [Insert, GetById, GetAll, Update, Delete methods with curried signatures...]
 ```
 
-### 4. Added CLI Command
+### 5. Added CLI Command
 **New command:** `mig codegen`
 
 **Args:**
@@ -164,7 +197,7 @@ Generated files:
 - Implemented `codegen` function that calls `CodeGen.generateCode`
 - Added case in main match expression
 
-### 5. Fixed SQL Parser
+### 6. Fixed SQL Parser
 **Issue:** Regex parser failing to extract columns from multiline CREATE TABLE statements
 
 **Root Cause:** Pattern `@"\((.*)\)(?:\s*;)?$"` with default regex options doesn't match across newlines (`.` doesn't match `\n`)
@@ -186,7 +219,7 @@ CREATE TABLE students (
 
 All 3 existing tests pass.
 
-### 6. Updated Documentation
+### 7. Updated Documentation
 **spec.md changes:**
 - Updated title to "Database Migration Tool & F# Type Generator"
 - Added comprehensive F# Type Generation section (§7) with:
@@ -208,7 +241,7 @@ All 3 existing tests pass.
 - Added performance considerations for code generation
 - Removed Goose import documentation
 
-### 7. Completed FParsec-based SQL Parser
+### 8. Completed FParsec-based SQL Parser
 
 **File:** `src/MigLib/DeclarativeMigrations/FParsecSqlParser.fs` (now active)
 
@@ -243,7 +276,7 @@ All 3 existing tests pass.
 - ✅ Manual testing with real SQL files successful
 - ✅ Code generation works with FParsec parser
 
-### 8. Composite Primary Key Support
+### 9. Composite Primary Key Support
 
 **File:** `src/MigLib/CodeGen/QueryGenerator.fs`
 
@@ -270,48 +303,68 @@ All 3 existing tests pass.
 - Delete method generation with composite PK
 - Update method exclusion of all PK columns from SET
 
-### 9. Transaction Support
+### 10. Transaction-Only API with Curried Signatures
 
-**File:** `src/MigLib/CodeGen/QueryGenerator.fs`
+**Files:**
+- `src/MigLib/Db.fs` - Shared transaction management module
+- `src/MigLib/CodeGen/QueryGenerator.fs` - Code generation with curried signatures
 
-**New Functions:**
-1. **`generateWithTransaction`** - Generates a generic transaction helper method
-   - Signature: `WithTransaction(conn, action: SqliteTransaction -> Result<'T, SqliteException>)`
-   - Handles `BeginTransaction()`, `Commit()`, and `Rollback()`
-   - Catches exceptions and rolls back on error
+**Design Decision:**
+- Transaction management moved to shared `Db` module (no longer generated per-type)
+- All CRUD methods use curried signatures with `SqliteTransaction` as last parameter
+- This enables clean computation expression syntax and partial application
 
-2. **`generateInsertWithTransaction`** - Insert overload accepting transaction
-   - Signature: `Insert(conn, transaction, item)`
-   - Uses `SqliteCommand(sql, conn, transaction)` constructor
+**Benefits:**
+- Clean syntax: `Db.txn conn { let! id = Student.Insert student }` (no tx parameter needed)
+- Partial application: `let insertFunc = Student.Insert student` (applies tx later)
+- Enforces transactional thinking and atomic operations
+- Consistent API across all methods
+- Reduces generated code duplication
 
-3. **`generateUpdateWithTransaction`** - Update overload accepting transaction
-   - Signature: `Update(conn, transaction, item)`
+**Db Module (in MigLib 2.0):**
+1. **`Db.WithTransaction(conn, action)`** - Explicit transaction function
+2. **`Db.txn conn { ... }`** - Computation expression for clean syntax
 
-4. **`generateDeleteWithTransaction`** - Delete overload accepting transaction
-   - Signature: `Delete(conn, transaction, pkParams...)`
+**Generated Methods (curried signatures):**
+1. **`Insert (item) (tx)`** - Insert using `tx.Connection` internally
+2. **`GetById (pkParams...) (tx)`** - Get by primary key
+3. **`GetAll (tx)`** - Get all records
+4. **`Update (item) (tx)`** - Update record
+5. **`Delete (pkParams...) (tx)`** - Delete record
 
-**Usage Example:**
+**Usage Examples:**
 ```fsharp
-// Using WithTransaction helper
-Student.WithTransaction(conn, fun tx ->
+// Option 1: Db.txn computation expression (recommended)
+Db.txn conn {
+  let! id1 = Student.Insert student1
+  let! id2 = Student.Insert student2
+  let! all = Student.GetAll
+  return (id1, id2, all)
+}
+
+// Option 2: Explicit Db.WithTransaction
+Db.WithTransaction conn (fun tx ->
   result {
-    let! id1 = Student.Insert(conn, tx, student1)
-    let! id2 = Student.Insert(conn, tx, student2)
-    return (id1, id2)
+    let! id = Student.Insert student tx
+    return id
   })
 
-// Direct transaction usage
-let tx = conn.BeginTransaction()
-Student.Insert(conn, tx, student) |> ignore
-tx.Commit()
+// Option 3: Partial application
+let insertStudent = Student.Insert student
+Db.txn conn {
+  let! id = insertStudent
+  return id
+}
 ```
 
-**New Tests:** `src/Test/TransactionTest.fs`
-- WithTransaction method generation
-- Insert with transaction overload
-- Update with transaction overload
-- Delete with transaction overload
-- Full table code includes all transaction methods
+**New Tests:** `src/Test/TransactionTest.fs` (7 tests)
+- Insert method uses curried signature with tx last
+- GetById method uses curried signature with tx last
+- GetAll method uses curried signature
+- Update method uses curried signature with tx last
+- Delete method uses curried signature with tx last
+- Generated table code uses curried signatures for all methods
+- WithTransaction is NOT generated on types (verified)
 
 ## ⏭️ Next Steps (Priority Order)
 
@@ -364,12 +417,13 @@ tx.Commit()
 ```
 src/
 ├── MigLib/
+│   ├── Db.fs                       (✅ Transaction management for generated code)
 │   ├── CodeGen/
 │   │   ├── CodeGen.fs              (Main orchestration)
 │   │   ├── FabulousAstHelpers.fs   (Placeholder)
 │   │   ├── FileMapper.fs           (SQL → F# mapping)
 │   │   ├── ProjectGenerator.fs     (.fsproj generation)
-│   │   ├── QueryGenerator.fs       (CRUD method generation)
+│   │   ├── QueryGenerator.fs       (CRUD method generation with curried signatures)
 │   │   └── TypeGenerator.fs        (Record type generation)
 │   ├── DeclarativeMigrations/
 │   │   ├── FParsecSqlParser.fs     (✅ Active FParsec parser)
@@ -382,7 +436,7 @@ src/
     ├── ViewMigration.fs            (✅ Passing)
     ├── UseAsLib.fs                 (✅ Passing)
     ├── CompositePKTest.fs          (✅ Passing - 4 tests)
-    └── TransactionTest.fs          (✅ Passing - 5 tests)
+    └── TransactionTest.fs          (✅ Passing - 6 tests)
 ```
 
 ## 🔧 Technical Details
@@ -443,12 +497,12 @@ let getPrimaryKey (table: CreateTable) : ColumnDef list =
 ## 🧪 Testing
 
 ### Current Test Status
-All 12 tests passing:
+All 13 tests passing:
 - ✅ TableMigration (6 cases)
 - ✅ ViewMigration
 - ✅ UseAsLib
 - ✅ CompositePKTest (4 tests for composite primary key support)
-- ✅ TransactionTest (5 tests for transaction support)
+- ✅ TransactionTest (6 tests for curried signatures and Db module)
 
 ### Manual Testing
 ```bash
@@ -479,6 +533,7 @@ module Students
 open System
 open Microsoft.Data.Sqlite
 open FsToolkit.ErrorHandling
+open migrate.Db
 
 type Students = {
     Id: int64 option
@@ -488,22 +543,21 @@ type Students = {
 }
 
 type Students with
-  static member Insert(conn: SqliteConnection, item: Students) : Result<int64, SqliteException> =
+  static member Insert (item: Students) (tx: SqliteTransaction) : Result<int64, SqliteException> =
     try
-      use cmd = new SqliteCommand("INSERT INTO students (name, email, enrollment_date) VALUES (@name, @email, @enrollment_date)", conn)
+      use cmd = new SqliteCommand("INSERT INTO students (name, email, enrollment_date) VALUES (@name, @email, @enrollment_date)", tx.Connection, tx)
       cmd.Parameters.AddWithValue("@name", item.Name) |> ignore
       cmd.Parameters.AddWithValue("@email", match item.Email with Some v -> box v | None -> box DBNull.Value) |> ignore
       cmd.Parameters.AddWithValue("@enrollment_date", item.Enrollment_date) |> ignore
       cmd.ExecuteNonQuery() |> ignore
-      use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn)
+      use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
       let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
       Ok lastId
-    with
-    | :? SqliteException as ex -> Error ex
+    with :? SqliteException as ex -> Error ex
 
-  static member GetById(conn: SqliteConnection, id: int64) : Result<Students option, SqliteException> =
+  static member GetById (id: int64) (tx: SqliteTransaction) : Result<Students option, SqliteException> =
     try
-      use cmd = new SqliteCommand("SELECT id, name, email, enrollment_date FROM students WHERE id = @id", conn)
+      use cmd = new SqliteCommand("SELECT id, name, email, enrollment_date FROM students WHERE id = @id", tx.Connection, tx)
       cmd.Parameters.AddWithValue("@id", id) |> ignore
       use reader = cmd.ExecuteReader()
       if reader.Read() then
@@ -513,14 +567,12 @@ type Students with
           Email = if reader.IsDBNull(2) then None else Some(reader.GetString(2))
           Enrollment_date = reader.GetDateTime(3)
         })
-      else
-        Ok None
-    with
-    | :? SqliteException as ex -> Error ex
+      else Ok None
+    with :? SqliteException as ex -> Error ex
 
-  static member GetAll(conn: SqliteConnection) : Result<Students list, SqliteException> =
+  static member GetAll (tx: SqliteTransaction) : Result<Students list, SqliteException> =
     try
-      use cmd = new SqliteCommand("SELECT id, name, email, enrollment_date FROM students", conn)
+      use cmd = new SqliteCommand("SELECT id, name, email, enrollment_date FROM students", tx.Connection, tx)
       use reader = cmd.ExecuteReader()
       let results = ResizeArray<Students>()
       while reader.Read() do
@@ -531,29 +583,37 @@ type Students with
           Enrollment_date = reader.GetDateTime(3)
         })
       Ok(results |> Seq.toList)
-    with
-    | :? SqliteException as ex -> Error ex
+    with :? SqliteException as ex -> Error ex
 
-  static member Update(conn: SqliteConnection, item: Students) : Result<unit, SqliteException> =
+  static member Update (item: Students) (tx: SqliteTransaction) : Result<unit, SqliteException> =
     try
-      use cmd = new SqliteCommand("UPDATE students SET name = @name, email = @email, enrollment_date = @enrollment_date WHERE id = @id", conn)
+      use cmd = new SqliteCommand("UPDATE students SET name = @name, email = @email, enrollment_date = @enrollment_date WHERE id = @id", tx.Connection, tx)
       cmd.Parameters.AddWithValue("@id", match item.Id with Some v -> box v | None -> box DBNull.Value) |> ignore
       cmd.Parameters.AddWithValue("@name", item.Name) |> ignore
       cmd.Parameters.AddWithValue("@email", match item.Email with Some v -> box v | None -> box DBNull.Value) |> ignore
       cmd.Parameters.AddWithValue("@enrollment_date", item.Enrollment_date) |> ignore
       cmd.ExecuteNonQuery() |> ignore
       Ok()
-    with
-    | :? SqliteException as ex -> Error ex
+    with :? SqliteException as ex -> Error ex
 
-  static member Delete(conn: SqliteConnection, id: int64) : Result<unit, SqliteException> =
+  static member Delete (id: int64) (tx: SqliteTransaction) : Result<unit, SqliteException> =
     try
-      use cmd = new SqliteCommand("DELETE FROM students WHERE id = @id", conn)
+      use cmd = new SqliteCommand("DELETE FROM students WHERE id = @id", tx.Connection, tx)
       cmd.Parameters.AddWithValue("@id", id) |> ignore
       cmd.ExecuteNonQuery() |> ignore
       Ok()
-    with
-    | :? SqliteException as ex -> Error ex
+    with :? SqliteException as ex -> Error ex
+```
+
+**Usage with Db.txn:**
+```fsharp
+open migrate.Db
+
+Db.txn conn {
+  let! id = Students.Insert { Id = None; Name = "Alice"; Email = Some "alice@example.com"; Enrollment_date = DateTime.Now }
+  let! student = Students.GetById id
+  return student
+}
 ```
 
 ## 📝 Git History
@@ -572,6 +632,15 @@ ff92a05 Fix SQL parser to handle multiline CREATE TABLE statements
 4. **File Colocation** - SQL and F# files together for discoverability
 5. **Raw ADO.NET** - No ORM overhead, full control, minimal dependencies
 6. **Option Types for Nullables** - Type-safe null handling
+7. **Shared Db Module** - Transaction management extracted to MigLib (not generated per-type)
+   - Single implementation shared across all generated code
+   - Reduces code duplication
+   - Provides both `Db.WithTransaction` and `Db.txn` computation expression
+8. **Curried Signatures with Transaction Last** - All CRUD methods use curried signatures
+   - SqliteTransaction as last parameter enables clean computation expression syntax
+   - Allows partial application patterns
+   - Works seamlessly with `Db.txn` (transaction parameter automatically supplied)
+   - Consistent API across all methods
 
 ## 🔗 Related Files
 
@@ -588,7 +657,8 @@ When resuming:
    - ✅ Record type generation (working)
    - ✅ All CRUD methods implemented (Insert, GetById, GetAll, Update, Delete)
    - ✅ Composite primary key support (complete - both column-level and table-level)
-   - ✅ Transaction support (WithTransaction helper + transaction-aware CRUD overloads)
+   - ✅ Transaction support with Db module (curried signatures + computation expression)
+   - ✅ Db module (shared transaction management in MigLib)
    - ⏳ JOIN query generation (planned)
    - ⏳ Code generation tests (partial - composite PK and transaction tests added)
    - ⏳ Integration with `mig commit` command (not yet implemented)
@@ -597,9 +667,8 @@ When resuming:
    - Write comprehensive code generation tests
    - Integrate code generation into `mig commit` command
    - Add JOIN query generation for foreign key relationships
-   - Add transaction support
 
 4. Testing:
-   - Check migration tests: `cd src && dotnet test` (should show all 12 passing)
+   - Check migration tests: `cd src && dotnet test` (should show all 13 passing)
    - Check build: `cd src && dotnet build`
    - Manual codegen test: `mkdir /tmp/test && cd /tmp/test && echo "CREATE TABLE test(id INTEGER PRIMARY KEY);" > test.sql && dotnet /path/to/mig codegen`

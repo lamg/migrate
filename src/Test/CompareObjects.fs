@@ -59,6 +59,7 @@ let diffObjects (actual: 'a) (expected: 'b) =
 
 let runTest case r x =
   let failed = x <> r
+
   if failed then
     redPrefix "[FAILED]" case
 
@@ -69,5 +70,3 @@ let runTest case r x =
     greenPrefix "[OK]" case
 
   failed |> not
-
-

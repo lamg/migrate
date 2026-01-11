@@ -242,8 +242,14 @@ let createTable: Parser<CreateTable, unit> =
 
 // CREATE VIEW parsing
 let createView: Parser<CreateView, unit> =
-  let createPart = str_ws1 "CREATE" >>. opt (str_ws1 "TEMPORARY" <|> str_ws1 "TEMP") >>. str_ws1 "VIEW" >>. opt (str_ws1 "IF" >>. str_ws1 "NOT" >>. str_ws1 "EXISTS")
-  createPart >>. identifier .>>. (str_ws1 "AS" >>. many1Satisfy (fun c -> c <> ';') .>> opt semi)
+  let createPart =
+    str_ws1 "CREATE"
+    >>. opt (str_ws1 "TEMPORARY" <|> str_ws1 "TEMP")
+    >>. str_ws1 "VIEW"
+    >>. opt (str_ws1 "IF" >>. str_ws1 "NOT" >>. str_ws1 "EXISTS")
+
+  createPart >>. identifier
+  .>>. (str_ws1 "AS" >>. many1Satisfy (fun c -> c <> ';') .>> opt semi)
   |>> fun (viewName, selectPart) ->
     // Build the full CREATE VIEW statement
     let fullStatement = $"CREATE VIEW {viewName} AS {selectPart.Trim()}"
@@ -273,9 +279,7 @@ let createIndex: Parser<CreateIndex, unit> =
   >>. opt (str_ws1 "IF" >>. str_ws1 "NOT" >>. str_ws1 "EXISTS")
   >>. identifier
   .>>. (str_ws1 "ON" >>. identifier
-        .>>. (opar >>. sepBy1 identifier comma
-              .>> cpar
-              .>> opt semi))
+        .>>. (opar >>. sepBy1 identifier comma .>> cpar .>> opt semi))
   |>> fun (indexName, (tableName, cols)) ->
     { name = indexName
       table = tableName

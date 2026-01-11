@@ -31,21 +31,53 @@ This applies to all single-argument method calls and improves readability and fo
 - `.ToLower`
 - Any other single-argument method or function
 
-## Project Architecture
+### Module Declaration Style - Module Per File
 
-### Parser Implementation
-- The project uses a **pure F# regex-based parser** (SqlParser.fs) instead of ANTLR4
-- FParsec dependency is available but not currently used for full SQL parsing
-- Regex patterns handle SQL parsing with proper constraint and dependency extraction
+When creating a file with a single module, use module-per-file syntax instead of namespace with nested module:
 
-### Key Files
-- `src/MigLib/DeclarativeMigrations/SqlParser.fs` - SQL parsing implementation
-- `src/Directory.Packages.props` - Central package management (no ANTLR4 references)
+**Preferred:**
+```fsharp
+/// Documentation comment for the module
+module migrate.Db
+
+open System
+open Microsoft.Data.Sqlite
+
+let someFunction x = x + 1
+```
+
+**Avoid:**
+```fsharp
+namespace migrate
+
+open System
+open Microsoft.Data.Sqlite
+
+module Db =
+  let someFunction x = x + 1
+```
+
+This applies to all single-module files in the project and follows modern F# conventions for cleaner, less-indented code.
+
+### Code Formatting
+
+All F# code must be formatted using [Fantomas](https://fsprojects.github.io/fantomas/) before committing.
+
+**Format all files in the project:**
+```bash
+cd src
+dotnet fantomas .
+```
+
+**Format specific files:**
+```bash
+dotnet fantomas src/MigLib/Db.fs
+```
+
+This ensures consistent code style across the entire codebase and prevents formatting-related diffs in commits.
 
 ## Testing
 All changes should pass the existing test suite:
 ```bash
 cd src && dotnet test
 ```
-
-Ensure all 3 tests pass (TableMigration, UseAsLib, ViewMigration)

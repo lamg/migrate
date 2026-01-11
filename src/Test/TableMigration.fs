@@ -56,4 +56,4 @@ let testTableMigration (case: int) (left: string, right: string, r: Result<strin
 
 [<Fact>]
 let ``My test`` () =
-    cases |> List.mapi testTableMigration |> List.forall id |> Assert.True
+  cases |> List.mapi testTableMigration |> List.forall id |> Assert.True

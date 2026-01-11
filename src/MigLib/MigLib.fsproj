@@ -25,6 +25,7 @@
   
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
+    <Compile Include="Db.fs" />
     <Compile Include="DeclarativeMigrations\Types.fs" />
     <Compile Include="DeclarativeMigrations\FParsecSqlParser.fs" />
     <Compile Include="DeclarativeMigrations\GenerateSql.fs" />

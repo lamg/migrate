@@ -118,17 +118,26 @@ Generates type-safe F# code from SQL schema definitions:
 **Code Generation Features:**
 - **Type Mapping:** SQL types → F# types (INTEGER → int64, TEXT → string, etc.)
 - **Null Handling:** NOT NULL columns → direct types, nullable columns → option types
-- **CRUD Operations:**
-  - `Insert` - Returns `Result<int64, SqliteException>` with last_insert_rowid
-  - `Update` - Returns `Result<unit, SqliteException>`
-  - `Delete` - Returns `Result<unit, SqliteException>`
-  - `Get` - Returns `Result<T option, SqliteException>`
-  - `GetAll` - Returns `Result<T list, SqliteException>`
-- **Foreign Key Queries:** Automatic generation of methods to query related entities via JOINs
-- **Transaction Support:**
-  - `WithTransaction` helper method for atomic operations with automatic commit/rollback
-  - Transaction-aware overloads for Insert, Update, Delete methods
+- **CRUD Operations** (all use curried signatures with `SqliteTransaction` last):
+  - `Insert (item) (tx)` - Returns `Result<int64, SqliteException>` with last_insert_rowid
+  - `Update (item) (tx)` - Returns `Result<unit, SqliteException>`
+  - `Delete (pkParams...) (tx)` - Returns `Result<unit, SqliteException>`
+  - `GetById (pkParams...) (tx)` - Returns `Result<T option, SqliteException>`
+  - `GetAll (tx)` - Returns `Result<T list, SqliteException>`
+- **Transaction Management:**
+  - `Db.WithTransaction(conn, action)` - Shared function for atomic operations with automatic commit/rollback
+  - `Db.txn` - Computation expression combining transactions with Result monad for clean syntax
+- **Foreign Key Queries:** Automatic generation of methods to query related entities via JOINs (planned)
 - **Error Handling:** All operations return `Result<T, SqliteException>`
+
+**Design Decision - Curried Signatures with Transaction Last:**
+All CRUD methods use curried signatures with `SqliteTransaction` as the last parameter. This design:
+- Enables clean computation expression syntax without mentioning the transaction parameter
+- Allows partial application (e.g., `Student.Insert student` creates a function waiting for tx)
+- Enforces transactional thinking and atomic operations
+- Provides a consistent API (all methods follow same pattern)
+- Works seamlessly with `Db.txn` computation expression
+- Aligns with SQLite reality (without explicit transactions, each statement auto-commits anyway)
 
 **Implementation:**
 - Uses [Fabulous.AST](https://github.com/edgarfgp/Fabulous.AST) for type-safe F# code generation
@@ -139,8 +148,10 @@ Generates type-safe F# code from SQL schema definitions:
 ```fsharp
 module Students
 
+open System
 open Microsoft.Data.Sqlite
 open FsToolkit.ErrorHandling
+open migrate.Db
 
 type Student = {
     Id: int64
@@ -150,57 +161,100 @@ type Student = {
 }
 
 type Student with
-  static member Insert(conn: SqliteConnection, student: Student) : Result<int64, SqliteException> =
-    result {
-      use cmd = new SqliteCommand("INSERT INTO students (name, email, enrollment_date) VALUES (@name, @email, @enrollment_date)", conn)
+  static member Insert (student: Student) (tx: SqliteTransaction) : Result<int64, SqliteException> =
+    try
+      use cmd = new SqliteCommand("INSERT INTO students (name, email, enrollment_date) VALUES (@name, @email, @enrollment_date)", tx.Connection, tx)
       cmd.Parameters.AddWithValue("@name", student.Name) |> ignore
-      cmd.Parameters.AddWithValue("@email", Option.toObj student.Email) |> ignore
+      cmd.Parameters.AddWithValue("@email", match student.Email with Some v -> box v | None -> box DBNull.Value) |> ignore
       cmd.Parameters.AddWithValue("@enrollment_date", student.EnrollmentDate) |> ignore
-      do! cmd.ExecuteNonQuery() |> ignore
-      use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn)
+      cmd.ExecuteNonQuery() |> ignore
+      use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
       let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
-      return lastId
-    }
-
-  static member GetById(conn: SqliteConnection, id: int64) : Result<Student option, SqliteException> =
-    result {
-      use cmd = new SqliteCommand("SELECT id, name, email, enrollment_date FROM students WHERE id = @id", conn)
-      cmd.Parameters.AddWithValue("@id", id) |> ignore
-      use reader = cmd.ExecuteReader()
-      if reader.Read() then
-        return Some {
-          Id = reader.GetInt64(0)
-          Name = reader.GetString(1)
-          Email = if reader.IsDBNull(2) then None else Some (reader.GetString(2))
-          EnrollmentDate = reader.GetDateTime(3)
-        }
-      else
-        return None
-    }
-
-  static member WithTransaction(conn: SqliteConnection, action: SqliteTransaction -> Result<'T, SqliteException>) : Result<'T, SqliteException> =
-    let transaction = conn.BeginTransaction()
-    try
-      match action transaction with
-      | Ok result ->
-        transaction.Commit()
-        Ok result
-      | Error ex ->
-        transaction.Rollback()
-        Error ex
-    with
-    | :? SqliteException as ex ->
-      transaction.Rollback()
-      Error ex
-
-  // Transaction-aware overloads
-  static member Insert(conn: SqliteConnection, transaction: SqliteTransaction, student: Student) : Result<int64, SqliteException> =
-    try
-      use cmd = new SqliteCommand("INSERT INTO students ...", conn, transaction)
-      // ... parameter binding ...
       Ok lastId
     with
     | :? SqliteException as ex -> Error ex
+
+  static member GetById (id: int64) (tx: SqliteTransaction) : Result<Student option, SqliteException> =
+    try
+      use cmd = new SqliteCommand("SELECT id, name, email, enrollment_date FROM students WHERE id = @id", tx.Connection, tx)
+      cmd.Parameters.AddWithValue("@id", id) |> ignore
+      use reader = cmd.ExecuteReader()
+      if reader.Read() then
+        Ok(Some {
+          Id = reader.GetInt64(0)
+          Name = reader.GetString(1)
+          Email = if reader.IsDBNull(2) then None else Some(reader.GetString(2))
+          EnrollmentDate = reader.GetDateTime(3)
+        })
+      else
+        Ok None
+    with
+    | :? SqliteException as ex -> Error ex
+
+  static member GetAll (tx: SqliteTransaction) : Result<Student list, SqliteException> =
+    try
+      use cmd = new SqliteCommand("SELECT id, name, email, enrollment_date FROM students", tx.Connection, tx)
+      use reader = cmd.ExecuteReader()
+      let results = ResizeArray<Student>()
+      while reader.Read() do
+        results.Add({
+          Id = reader.GetInt64(0)
+          Name = reader.GetString(1)
+          Email = if reader.IsDBNull(2) then None else Some(reader.GetString(2))
+          EnrollmentDate = reader.GetDateTime(3)
+        })
+      Ok(results |> Seq.toList)
+    with
+    | :? SqliteException as ex -> Error ex
+
+  static member Update (student: Student) (tx: SqliteTransaction) : Result<unit, SqliteException> =
+    try
+      use cmd = new SqliteCommand("UPDATE students SET name = @name, email = @email, enrollment_date = @enrollment_date WHERE id = @id", tx.Connection, tx)
+      cmd.Parameters.AddWithValue("@id", student.Id) |> ignore
+      cmd.Parameters.AddWithValue("@name", student.Name) |> ignore
+      cmd.Parameters.AddWithValue("@email", match student.Email with Some v -> box v | None -> box DBNull.Value) |> ignore
+      cmd.Parameters.AddWithValue("@enrollment_date", student.EnrollmentDate) |> ignore
+      cmd.ExecuteNonQuery() |> ignore
+      Ok()
+    with
+    | :? SqliteException as ex -> Error ex
+
+  static member Delete (id: int64) (tx: SqliteTransaction) : Result<unit, SqliteException> =
+    try
+      use cmd = new SqliteCommand("DELETE FROM students WHERE id = @id", tx.Connection, tx)
+      cmd.Parameters.AddWithValue("@id", id) |> ignore
+      cmd.ExecuteNonQuery() |> ignore
+      Ok()
+    with
+    | :? SqliteException as ex -> Error ex
+```
+
+**Usage Example:**
+```fsharp
+open migrate.Db
+
+// Option 1: Using Db.txn computation expression (recommended)
+Db.txn conn {
+  let! id1 = Student.Insert { Id = 0L; Name = "Alice"; Email = Some "alice@example.com"; EnrollmentDate = DateTime.Now }
+  let! id2 = Student.Insert { Id = 0L; Name = "Bob"; Email = None; EnrollmentDate = DateTime.Now }
+  let! students = Student.GetAll
+  return (id1, id2, students)
+}
+
+// Option 2: Using Db.WithTransaction explicitly
+Db.WithTransaction conn (fun tx ->
+  result {
+    let! id = Student.Insert { Id = 0L; Name = "Alice"; Email = Some "alice@example.com"; EnrollmentDate = DateTime.Now } tx
+    let! student = Student.GetById id tx
+    return student
+  })
+
+// Option 3: Partial application
+let insertAlice = Student.Insert { Id = 0L; Name = "Alice"; Email = Some "alice@example.com"; EnrollmentDate = DateTime.Now }
+Db.txn conn {
+  let! id = insertAlice  // Transaction automatically applied
+  return id
+}
 ```
 
 **CLI Integration:**
@@ -358,30 +412,29 @@ type Student with
 **Output:** Fabulous.AST record type definitions
 
 #### QueryGenerator.fs
-**Purpose:** Generate CRUD methods, transaction helpers, and JOIN queries
+**Purpose:** Generate transaction-based CRUD methods and JOIN queries
 
 **Key Functions:**
 - `getPrimaryKey(table)` - Extract primary key columns (supports both column-level and table-level PKs)
-- `generateInsert(table)` - Create INSERT method returning Result<int64, SqliteException>
-- `generateUpdate(table)` - Create UPDATE method (supports composite PKs)
-- `generateDelete(table)` - Create DELETE method (supports composite PKs)
-- `generateGet(table)` - Create SELECT by primary key method (supports composite PKs)
-- `generateGetAll(table)` - Create SELECT all method
-- `generateWithTransaction(table)` - Create generic WithTransaction helper method
-- `generateInsertWithTransaction(table)` - Create transaction-aware Insert overload
-- `generateUpdateWithTransaction(table)` - Create transaction-aware Update overload
-- `generateDeleteWithTransaction(table)` - Create transaction-aware Delete overload
+- `generateWithTransaction(table)` - Create generic WithTransaction helper (entry point)
+- `generateInsert(table)` - Create INSERT method taking `SqliteTransaction`
+- `generateUpdate(table)` - Create UPDATE method taking `SqliteTransaction` (supports composite PKs)
+- `generateDelete(table)` - Create DELETE method taking `SqliteTransaction` (supports composite PKs)
+- `generateGet(table)` - Create SELECT by primary key method taking `SqliteTransaction` (supports composite PKs)
+- `generateGetAll(table)` - Create SELECT all method taking `SqliteTransaction`
 - `generateJoinQueries(table, foreignKeys)` - Create JOIN methods for related entities (planned)
 
+**Design:** All CRUD methods require `SqliteTransaction` parameter, using `tx.Connection` internally. This enforces transactional operations and provides a consistent API.
+
 **Features:**
+- Transaction-only API (all methods require `SqliteTransaction`)
 - Parameterized queries (SQL injection protection)
 - Result type error handling
 - Proper resource disposal (use statements)
 - Option type handling for nullable values
 - Composite primary key support (e.g., `PRIMARY KEY(col1, col2)`)
-- Transaction support with automatic commit/rollback
 
-**Output:** Fabulous.AST method definitions
+**Output:** F# method definitions as strings
 
 #### ProjectGenerator.fs
 **Purpose:** Generate .fsproj file for generated code
