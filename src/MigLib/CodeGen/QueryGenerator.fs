@@ -69,25 +69,25 @@ let generateInsert (table: CreateTable) : string =
 
   let insertSql = $"INSERT INTO {table.name} ({columnNames}) VALUES ({paramNames})"
 
-  $"""    static member Insert(conn: SqliteConnection, item: {typeName}) : Result<int64, SqliteException> =
-        try
-            use cmd = new SqliteCommand("{insertSql}", conn)
+  $"""  static member Insert(conn: SqliteConnection, item: {typeName}) : Result<int64, SqliteException> =
+    try
+      use cmd = new SqliteCommand("{insertSql}", conn)
 {insertCols
  |> List.map (fun col ->
    let fieldName = capitalize col.name
    let isNullable = TypeGenerator.isColumnNullable col
 
    if isNullable then
-     $"            cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+     $"      cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
    else
-     $"            cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
+     $"      cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
  |> String.concat "\n"}
-            cmd.ExecuteNonQuery() |> ignore
-            use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn)
-            let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
-            Ok lastId
-        with
-        | :? SqliteException as ex -> Error ex"""
+      cmd.ExecuteNonQuery() |> ignore
+      use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn)
+      let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
+      Ok lastId
+    with
+    | :? SqliteException as ex -> Error ex"""
 
 /// Generate GET by ID method
 let generateGet (table: CreateTable) : string option =
@@ -111,25 +111,25 @@ let generateGet (table: CreateTable) : string option =
         let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
 
         if isNullable then
-          $"                    {fieldName} = if reader.IsDBNull({i}) then None else Some(reader.Get{method}({i}))"
+          $"        {fieldName} = if reader.IsDBNull({i}) then None else Some(reader.Get{method}({i}))"
         else
-          $"                    {fieldName} = reader.Get{method}({i})")
+          $"        {fieldName} = reader.Get{method}({i})")
       |> String.concat "\n"
 
     Some
-      $"""    static member GetById(conn: SqliteConnection, id: {pkType}) : Result<{typeName} option, SqliteException> =
-        try
-            use cmd = new SqliteCommand("{getSql}", conn)
-            cmd.Parameters.AddWithValue("@id", id) |> ignore
-            use reader = cmd.ExecuteReader()
-            if reader.Read() then
-                Ok(Some {{
+      $"""  static member GetById(conn: SqliteConnection, id: {pkType}) : Result<{typeName} option, SqliteException> =
+    try
+      use cmd = new SqliteCommand("{getSql}", conn)
+      cmd.Parameters.AddWithValue("@id", id) |> ignore
+      use reader = cmd.ExecuteReader()
+      if reader.Read() then
+        Ok(Some {{
 {fieldMappings}
-                }})
-            else
-                Ok None
-        with
-        | :? SqliteException as ex -> Error ex"""
+        }})
+      else
+        Ok None
+    with
+    | :? SqliteException as ex -> Error ex"""
   | _ -> None // Skip composite primary keys for now
 
 /// Generate code for a table

@@ -64,28 +64,28 @@ SqlFlexible → obj
 **Generated Method Pattern:**
 ```fsharp
 type Student with
-    static member Insert(conn: SqliteConnection, item: Student) : Result<int64, SqliteException> =
-        try
-            use cmd = new SqliteCommand("INSERT INTO students (...) VALUES (...)", conn)
-            cmd.Parameters.AddWithValue("@name", item.Name) |> ignore
-            cmd.ExecuteNonQuery() |> ignore
-            use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn)
-            let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
-            Ok lastId
-        with
-        | :? SqliteException as ex -> Error ex
+  static member Insert(conn: SqliteConnection, item: Student) : Result<int64, SqliteException> =
+    try
+      use cmd = new SqliteCommand("INSERT INTO students (...) VALUES (...)", conn)
+      cmd.Parameters.AddWithValue("@name", item.Name) |> ignore
+      cmd.ExecuteNonQuery() |> ignore
+      use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn)
+      let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
+      Ok lastId
+    with
+    | :? SqliteException as ex -> Error ex
 
-    static member GetById(conn: SqliteConnection, id: int64) : Result<Student option, SqliteException> =
-        try
-            use cmd = new SqliteCommand("SELECT ... FROM students WHERE id = @id", conn)
-            cmd.Parameters.AddWithValue("@id", id) |> ignore
-            use reader = cmd.ExecuteReader()
-            if reader.Read() then
-                Ok(Some { Id = reader.GetInt64(0); ... })
-            else
-                Ok None
-        with
-        | :? SqliteException as ex -> Error ex
+  static member GetById(conn: SqliteConnection, id: int64) : Result<Student option, SqliteException> =
+    try
+      use cmd = new SqliteCommand("SELECT ... FROM students WHERE id = @id", conn)
+      cmd.Parameters.AddWithValue("@id", id) |> ignore
+      use reader = cmd.ExecuteReader()
+      if reader.Read() then
+        Ok(Some { Id = reader.GetInt64(0); ... })
+      else
+        Ok None
+    with
+    | :? SqliteException as ex -> Error ex
 ```
 
 #### **FileMapper.fs**
@@ -406,35 +406,35 @@ type Students = {
 }
 
 type Students with
-    static member Insert(conn: SqliteConnection, item: Students) : Result<int64, SqliteException> =
-        try
-            use cmd = new SqliteCommand("INSERT INTO students (name, email, enrollment_date) VALUES (@name, @email, @enrollment_date)", conn)
-            cmd.Parameters.AddWithValue("@name", item.Name) |> ignore
-            cmd.Parameters.AddWithValue("@email", match item.Email with Some v -> box v | None -> box DBNull.Value) |> ignore
-            cmd.Parameters.AddWithValue("@enrollment_date", item.Enrollment_date) |> ignore
-            cmd.ExecuteNonQuery() |> ignore
-            use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn)
-            let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
-            Ok lastId
-        with
-        | :? SqliteException as ex -> Error ex
+  static member Insert(conn: SqliteConnection, item: Students) : Result<int64, SqliteException> =
+    try
+      use cmd = new SqliteCommand("INSERT INTO students (name, email, enrollment_date) VALUES (@name, @email, @enrollment_date)", conn)
+      cmd.Parameters.AddWithValue("@name", item.Name) |> ignore
+      cmd.Parameters.AddWithValue("@email", match item.Email with Some v -> box v | None -> box DBNull.Value) |> ignore
+      cmd.Parameters.AddWithValue("@enrollment_date", item.Enrollment_date) |> ignore
+      cmd.ExecuteNonQuery() |> ignore
+      use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn)
+      let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
+      Ok lastId
+    with
+    | :? SqliteException as ex -> Error ex
 
-    static member GetById(conn: SqliteConnection, id: int64) : Result<Students option, SqliteException> =
-        try
-            use cmd = new SqliteCommand("SELECT id, name, email, enrollment_date FROM students WHERE id = @id", conn)
-            cmd.Parameters.AddWithValue("@id", id) |> ignore
-            use reader = cmd.ExecuteReader()
-            if reader.Read() then
-                Ok(Some {
-                    Id = if reader.IsDBNull(0) then None else Some(reader.GetInt64(0))
-                    Name = reader.GetString(1)
-                    Email = if reader.IsDBNull(2) then None else Some(reader.GetString(2))
-                    Enrollment_date = reader.GetDateTime(3)
-                })
-            else
-                Ok None
-        with
-        | :? SqliteException as ex -> Error ex
+  static member GetById(conn: SqliteConnection, id: int64) : Result<Students option, SqliteException> =
+    try
+      use cmd = new SqliteCommand("SELECT id, name, email, enrollment_date FROM students WHERE id = @id", conn)
+      cmd.Parameters.AddWithValue("@id", id) |> ignore
+      use reader = cmd.ExecuteReader()
+      if reader.Read() then
+        Ok(Some {
+          Id = if reader.IsDBNull(0) then None else Some(reader.GetInt64(0))
+          Name = reader.GetString(1)
+          Email = if reader.IsDBNull(2) then None else Some(reader.GetString(2))
+          Enrollment_date = reader.GetDateTime(3)
+        })
+      else
+        Ok None
+    with
+    | :? SqliteException as ex -> Error ex
 ```
 
 ## 📝 Git History

@@ -150,46 +150,46 @@ type Student = {
 }
 
 type Student with
-    static member Insert(conn: SqliteConnection, student: Student) : Result<int64, SqliteException> =
-        result {
-            use cmd = new SqliteCommand("INSERT INTO students (name, email, enrollment_date) VALUES (@name, @email, @enrollment_date)", conn)
-            cmd.Parameters.AddWithValue("@name", student.Name) |> ignore
-            cmd.Parameters.AddWithValue("@email", Option.toObj student.Email) |> ignore
-            cmd.Parameters.AddWithValue("@enrollment_date", student.EnrollmentDate) |> ignore
-            do! cmd.ExecuteNonQuery() |> ignore
-            use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn)
-            let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
-            return lastId
-        }
+  static member Insert(conn: SqliteConnection, student: Student) : Result<int64, SqliteException> =
+    result {
+      use cmd = new SqliteCommand("INSERT INTO students (name, email, enrollment_date) VALUES (@name, @email, @enrollment_date)", conn)
+      cmd.Parameters.AddWithValue("@name", student.Name) |> ignore
+      cmd.Parameters.AddWithValue("@email", Option.toObj student.Email) |> ignore
+      cmd.Parameters.AddWithValue("@enrollment_date", student.EnrollmentDate) |> ignore
+      do! cmd.ExecuteNonQuery() |> ignore
+      use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn)
+      let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
+      return lastId
+    }
 
-    static member GetById(conn: SqliteConnection, id: int64) : Result<Student option, SqliteException> =
-        result {
-            use cmd = new SqliteCommand("SELECT id, name, email, enrollment_date FROM students WHERE id = @id", conn)
-            cmd.Parameters.AddWithValue("@id", id) |> ignore
-            use reader = cmd.ExecuteReader()
-            if reader.Read() then
-                return Some {
-                    Id = reader.GetInt64(0)
-                    Name = reader.GetString(1)
-                    Email = if reader.IsDBNull(2) then None else Some (reader.GetString(2))
-                    EnrollmentDate = reader.GetDateTime(3)
-                }
-            else
-                return None
+  static member GetById(conn: SqliteConnection, id: int64) : Result<Student option, SqliteException> =
+    result {
+      use cmd = new SqliteCommand("SELECT id, name, email, enrollment_date FROM students WHERE id = @id", conn)
+      cmd.Parameters.AddWithValue("@id", id) |> ignore
+      use reader = cmd.ExecuteReader()
+      if reader.Read() then
+        return Some {
+          Id = reader.GetInt64(0)
+          Name = reader.GetString(1)
+          Email = if reader.IsDBNull(2) then None else Some (reader.GetString(2))
+          EnrollmentDate = reader.GetDateTime(3)
         }
+      else
+        return None
+    }
 
-    static member WithTransaction(conn: SqliteConnection, action: SqliteTransaction -> Result<'T, SqliteException>) : Result<'T, SqliteException> =
-        result {
-            use transaction = conn.BeginTransaction()
-            try
-                let! result = action transaction
-                transaction.Commit()
-                return result
-            with
-            | :? SqliteException as ex ->
-                transaction.Rollback()
-                return! Error ex
-        }
+  static member WithTransaction(conn: SqliteConnection, action: SqliteTransaction -> Result<'T, SqliteException>) : Result<'T, SqliteException> =
+    result {
+      use transaction = conn.BeginTransaction()
+      try
+        let! result = action transaction
+        transaction.Commit()
+        return result
+      with
+      | :? SqliteException as ex ->
+        transaction.Rollback()
+        return! Error ex
+    }
 ```
 
 **CLI Integration:**

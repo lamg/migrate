@@ -39,7 +39,7 @@ let generateCodeForSqlFile (sqlFilePath: string) : Result<string, string> =
                 let fieldName = QueryGenerator.capitalize col.name
                 let isNullable = TypeGenerator.isColumnNullable col
                 let fsharpType = TypeGenerator.mapSqlType col.columnType isNullable
-                $"    {fieldName}: {fsharpType}")
+                $"  {fieldName}: {fsharpType}")
               |> String.concat "\n"
 
             $"type {typeName} = {{\n{fields}\n}}")
