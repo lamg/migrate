@@ -157,7 +157,8 @@ type Student with
             cmd.Parameters.AddWithValue("@email", Option.toObj student.Email) |> ignore
             cmd.Parameters.AddWithValue("@enrollment_date", student.EnrollmentDate) |> ignore
             do! cmd.ExecuteNonQuery() |> ignore
-            let lastId = conn.LastInsertRowId
+            use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn)
+            let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
             return lastId
         }
 

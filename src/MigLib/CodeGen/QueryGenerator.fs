@@ -83,7 +83,9 @@ let generateInsert (table: CreateTable) : string =
      $"            cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
  |> String.concat "\n"}
             cmd.ExecuteNonQuery() |> ignore
-            Ok(conn.LastInsertRowId)
+            use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn)
+            let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
+            Ok lastId
         with
         | :? SqliteException as ex -> Error ex"""
 

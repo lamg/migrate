@@ -69,7 +69,9 @@ type Student with
             use cmd = new SqliteCommand("INSERT INTO students (...) VALUES (...)", conn)
             cmd.Parameters.AddWithValue("@name", item.Name) |> ignore
             cmd.ExecuteNonQuery() |> ignore
-            Ok(conn.LastInsertRowId)
+            use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn)
+            let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
+            Ok lastId
         with
         | :? SqliteException as ex -> Error ex
 
@@ -411,7 +413,9 @@ type Students with
             cmd.Parameters.AddWithValue("@email", match item.Email with Some v -> box v | None -> box DBNull.Value) |> ignore
             cmd.Parameters.AddWithValue("@enrollment_date", item.Enrollment_date) |> ignore
             cmd.ExecuteNonQuery() |> ignore
-            Ok(conn.LastInsertRowId)
+            use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", conn)
+            let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
+            Ok lastId
         with
         | :? SqliteException as ex -> Error ex
 
