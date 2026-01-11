@@ -28,7 +28,7 @@ Instead of writing imperative migration scripts, users define the expected datab
 - Constraints (PRIMARY KEY, FOREIGN KEY, UNIQUE, NOT NULL, CHECK, DEFAULT)
 
 ### 2. SQL Parsing
-**Implementation:** Pure F# regex-based parser (no external parser generators)
+**Implementation:** FParsec-based parser combinators (pure F# implementation, no external parser generators like ANTLR)
 
 **Parser Capabilities:**
 - Parses CREATE TABLE statements with column definitions and constraints
@@ -88,10 +88,8 @@ Provides both CLI and library interfaces for executing migrations:
 
 **CLI Commands:**
 - `mig init` - Initialize migration project with example files
-- `mig gen` - Generate migration SQL (dry-run)
-- `mig status` - Show migration status
-- `mig exec` - Execute generated migration and auto-regenerate F# types
-- `mig commit` - Commit migration to database
+- `mig status` - Generate migration SQL (dry-run)
+- `mig commit` - Execute generated migration with auto-regeneration
 - `mig log` - Display migration history and metadata
 - `mig schema` - Show current database schema
 - `mig codegen` - Generate F# types from SQL schema files
@@ -194,7 +192,7 @@ type Student with
 
 **CLI Integration:**
 - `mig codegen` - Generate F# types from SQL schema files
-- `mig exec` - Execute migration and auto-regenerate types
+- `mig commit` - Execute migration and auto-regenerate types (when `-m` message flag is used)
 
 ## Architecture
 
@@ -488,17 +486,18 @@ Complete F# Source Files
 
 ## Design Decisions
 
-### 1. Pure F# Parser Instead of ANTLR4
-**Decision:** Implement a regex-based parser in F# instead of using ANTLR4 with generated C# code
+### 1. FParsec Parser Instead of ANTLR4
+**Decision:** Implement an FParsec-based parser in F# instead of using ANTLR4 with generated C# code
 
 **Rationale:**
 - Reduces dependency chain (no ANTLR code generation required)
 - Keeps entire codebase in F# for consistency
-- Regex patterns are sufficient for SQLite dialect
-- Easier to maintain and extend
+- Parser combinators provide robust error recovery and proper backtracking
+- FParsec is idiomatic F# with excellent composability
+- Easier to maintain and extend with typed AST builders
 - No build-time code generation complexity
 
-**Trade-off:** Less robust error recovery compared to full parser generator, but adequate for controlled SQL input from schema files
+**Trade-off:** Additional dependency (FParsec) adds ~200KB to binary, but provides superior error recovery and maintainability compared to regex-based approach
 
 ### 2. Declarative vs. Imperative Migrations
 **Decision:** Use declarative approach where users define target schema, not individual migration steps

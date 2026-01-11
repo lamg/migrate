@@ -1,8 +1,8 @@
 # F# Code Generation Implementation Progress
 
 **Branch:** `fsharp-generation`
-**Last Updated:** 2026-01-10
-**Status:** Code generation working, FParsec parser complete and active
+**Last Updated:** 2026-01-11
+**Status:** ✅ FParsec parser complete and active, code generation working, all tests passing
 
 ## Overview
 
@@ -259,8 +259,8 @@ All 3 existing tests pass.
 - [ ] Add transaction examples to generated code
 - [ ] Test transaction rollback scenarios
 
-### 4. Update mig exec (High Priority)
-- [ ] Add call to `CodeGen.generateCode` after successful migration
+### 4. Update mig commit Integration (High Priority)
+- [ ] Add call to `CodeGen.generateCode` after successful migration in `commit` command
 - [ ] Handle errors gracefully
 - [ ] Add flag to disable auto-generation if needed
 - [ ] Test integration
@@ -463,11 +463,24 @@ ff92a05 Fix SQL parser to handle multiline CREATE TABLE statements
 ## 📞 Contact Points
 
 When resuming:
-1. **FParsec parser is COMPLETE** - Now focus on expanding functionality
-2. Next priorities:
-   - Add more CRUD methods (Update, Delete, GetAll)
-   - Add code generation tests
-   - Integrate with `mig exec` for automatic code generation
-3. Check current test status: `cd src && dotnet test` (all 3 tests passing)
-4. Check current build: `cd src && dotnet build`
-5. Test codegen: `mkdir /tmp/test && cd /tmp/test && echo "CREATE TABLE test(id INTEGER PRIMARY KEY);" > test.sql && dotnet /path/to/mig codegen`
+1. **FParsec parser is COMPLETE** ✅ - Robust SQL parsing with proper error recovery
+2. **Current implementation status:**
+   - ✅ SQL parsing with FParsec (complete, active)
+   - ✅ Record type generation (working)
+   - ✅ Insert and GetById CRUD methods (implemented)
+   - ⏳ Additional CRUD methods (Update, Delete, GetAll - not yet implemented)
+   - ⏳ JOIN query generation (planned)
+   - ⏳ Transaction support (planned)
+   - ⏳ Code generation tests (not yet written)
+   - ⏳ Integration with `mig commit` command (not yet implemented)
+
+3. Next priorities (in order):
+   - Add Update, Delete, GetAll CRUD methods
+   - Write comprehensive code generation tests
+   - Integrate code generation into `mig commit` command
+   - Add JOIN query generation for foreign key relationships
+
+4. Testing:
+   - Check migration tests: `cd src && dotnet test` (should show all 3 passing)
+   - Check build: `cd src && dotnet build`
+   - Manual codegen test: `mkdir /tmp/test && cd /tmp/test && echo "CREATE TABLE test(id INTEGER PRIMARY KEY);" > test.sql && dotnet /path/to/mig codegen`
