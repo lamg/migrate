@@ -11,6 +11,7 @@
     <Compile Include="CompareObjects.fs" />
     <Compile Include="TableMigration.fs" />
     <Compile Include="ViewMigration.fs" />
+    <Compile Include="CompositePKTest.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

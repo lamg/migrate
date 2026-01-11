@@ -85,7 +85,7 @@ let dependentRelations (file: SqlFile) =
       | _, Some b -> Ok b
       | _ -> Error r)
     |> splitResult
-    |> fun (xs, ys) -> (xs |> List.map (fun x -> element, x)), ys
+    |> fun (xs, ys) -> xs |> List.map (fun x -> element, x), ys
 
   let viewDependencies (v: CreateView) = v.dependencies |> dependencies v.name
 

@@ -348,10 +348,11 @@ type Student with
 **Purpose:** Generate CRUD methods and JOIN queries
 
 **Key Functions:**
+- `getPrimaryKey(table)` - Extract primary key columns (supports both column-level and table-level PKs)
 - `generateInsert(table)` - Create INSERT method returning Result<int64, SqliteException>
-- `generateUpdate(table)` - Create UPDATE method
-- `generateDelete(table)` - Create DELETE method
-- `generateGet(table)` - Create SELECT by primary key method
+- `generateUpdate(table)` - Create UPDATE method (supports composite PKs)
+- `generateDelete(table)` - Create DELETE method (supports composite PKs)
+- `generateGet(table)` - Create SELECT by primary key method (supports composite PKs)
 - `generateGetAll(table)` - Create SELECT all method
 - `generateJoinQueries(table, foreignKeys)` - Create JOIN methods for related entities
 - `generateTransactionHelper()` - Create WithTransaction method
@@ -361,6 +362,7 @@ type Student with
 - Result type error handling
 - Proper resource disposal (use statements)
 - Option type handling for nullable values
+- Composite primary key support (e.g., `PRIMARY KEY(col1, col2)`)
 
 **Output:** Fabulous.AST method definitions
 
@@ -631,8 +633,7 @@ Complete F# Source Files
 3. **Complex expressions** - Stored as token sequences rather than fully analyzed
 4. **Single RDBMS** - Only SQLite supported (though architecture allows extension)
 5. **Manual data migrations** - Cannot automatically transform data during schema changes
-6. **Composite Primary Keys** - Code generation deferred for future implementation
-7. **Many-to-Many Relationships** - JOIN queries only for direct foreign keys currently
+6. **Many-to-Many Relationships** - JOIN queries only for direct foreign keys currently
 
 ### Not Supported (SQLite Limitations)
 - Stored procedures (SQLite doesn't support)
@@ -644,11 +645,10 @@ Complete F# Source Files
 ## Future Enhancements
 
 ### Planned Features (Code Generation)
-1. **Composite Primary Keys** - Support tables with multi-column primary keys
-2. **Many-to-Many Relationships** - Generate bridge table query helpers
-3. **Custom Query Generation** - Allow users to define additional queries in annotations
-4. **Async Database Operations** - Generate async/Task-based methods alongside synchronous ones
-5. **Connection String Management** - Helper functions for connection lifecycle
+1. **Many-to-Many Relationships** - Generate bridge table query helpers
+2. **Custom Query Generation** - Allow users to define additional queries in annotations
+3. **Async Database Operations** - Generate async/Task-based methods alongside synchronous ones
+4. **Connection String Management** - Helper functions for connection lifecycle
 
 ### Planned Features (Migration)
 1. Support for PostgreSQL, MySQL/MariaDB

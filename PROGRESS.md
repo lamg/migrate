@@ -49,7 +49,7 @@ SqlFlexible → obj
 - Nullable columns → option types (e.g., `string option`)
 
 #### **QueryGenerator.fs**
-- `getPrimaryKey`: Extracts primary key column(s) from table
+- `getPrimaryKey`: Extracts primary key column(s) from table (supports both column-level and table-level PKs)
 - `getForeignKeys`: Extracts foreign key relationships
 - `capitalize`: Helper for F# naming conventions
 - `generateInsert`: Generates INSERT method, returns `Result<int64, SqliteException>`
@@ -57,8 +57,11 @@ SqlFlexible → obj
   - Returns `last_insert_rowid`
   - Handles nullable columns with `Option.toObj` and `DBNull.Value`
 - `generateGet`: Generates GetById method, returns `Result<T option, SqliteException>`
-  - Only for tables with single-column primary keys
+  - Supports single and composite primary keys
   - Handles nullable column reads with `IsDBNull` checks
+- `generateUpdate`: Generates Update method with composite PK support
+- `generateDelete`: Generates Delete method with composite PK support
+- `generateGetAll`: Generates GetAll method
 - `generateTableCode`: Orchestrates generation of all methods for a table
 
 **Generated Method Pattern:**
@@ -236,16 +239,43 @@ All 3 existing tests pass.
 - Removed debug test file and backup file
 
 **Test Results:**
-- ✅ All 3 existing tests pass (TableMigration, ViewMigration, UseAsLib)
+- ✅ All 7 tests pass (TableMigration, ViewMigration, UseAsLib, CompositePKTest x4)
 - ✅ Manual testing with real SQL files successful
 - ✅ Code generation works with FParsec parser
 
+### 8. Composite Primary Key Support
+
+**File:** `src/MigLib/CodeGen/QueryGenerator.fs`
+
+**Changes:**
+1. **Updated `getPrimaryKey`** - Now checks both column-level and table-level constraints
+   - Table-level `PRIMARY KEY(col1, col2)` syntax properly recognized
+   - Returns all columns that are part of the primary key
+
+2. **Updated `generateGet`** - Supports composite PKs
+   - Generates multiple parameters: `GetById(conn, student_id: int64, course_id: int64)`
+   - WHERE clause uses `AND` for all PK columns
+
+3. **Updated `generateUpdate`** - Supports composite PKs
+   - Excludes all PK columns from SET clause
+   - WHERE clause uses all PK columns
+
+4. **Updated `generateDelete`** - Supports composite PKs
+   - Generates multiple parameters for all key columns
+   - WHERE clause matches all PK columns
+
+**New Tests:** `src/Test/CompositePKTest.fs`
+- Composite PK parsing and recognition
+- GetById method generation with composite PK
+- Delete method generation with composite PK
+- Update method exclusion of all PK columns from SET
+
 ## ⏭️ Next Steps (Priority Order)
 
-### 1. Add More CRUD Methods (High Priority)
-- [ ] Implement `Update` method
-- [ ] Implement `Delete` method
-- [ ] Implement `GetAll` method
+### 1. Add More CRUD Methods (High Priority) ✅ COMPLETED
+- [x] Implement `Update` method
+- [x] Implement `Delete` method
+- [x] Implement `GetAll` method
 - [ ] Test generated CRUD methods
 
 ### 2. Add JOIN Query Generation (Medium Priority)
@@ -275,26 +305,18 @@ All 3 existing tests pass.
 - [ ] Test project file generation
 
 ### 6. Handle Complex Scenarios (Low Priority)
-- [ ] Composite primary keys (currently skipped)
+- [x] Composite primary keys ✅ COMPLETED
 - [ ] Many-to-many relationships via bridge tables
 - [ ] Views (should they generate read-only types?)
 - [ ] Custom query generation
 
 ## 🐛 Known Issues
 
-1. **Composite Primary Keys Not Supported**
-   - `generateGet` returns None for tables with multi-column PKs
-   - Need to implement later
-
-2. **Limited CRUD Methods**
-   - Only Insert and GetById implemented
-   - Need Update, Delete, GetAll
-
-3. **No JOIN Generation**
+1. **No JOIN Generation**
    - Foreign keys detected but not used for query generation
    - Planned for future
 
-4. **No Transaction Helpers**
+2. **No Transaction Helpers**
    - Planned for future
 
 ## 📁 File Structure
@@ -318,7 +340,8 @@ src/
 └── Test/
     ├── TableMigration.fs           (✅ Passing)
     ├── ViewMigration.fs            (✅ Passing)
-    └── UseAsLib.fs                 (✅ Passing)
+    ├── UseAsLib.fs                 (✅ Passing)
+    └── CompositePKTest.fs          (✅ Passing - 4 tests)
 ```
 
 ## 🔧 Technical Details
@@ -351,22 +374,39 @@ let isColumnNullable (column: ColumnDef) : bool =
 ### Primary Key Detection
 ```fsharp
 let getPrimaryKey (table: CreateTable) : ColumnDef list =
-  table.columns
-  |> List.filter (fun col ->
-    col.constraints
-    |> List.exists (fun c ->
+  // First check for column-level primary keys
+  let columnLevelPks =
+    table.columns
+    |> List.filter (fun col ->
+      col.constraints
+      |> List.exists (fun c ->
+        match c with
+        | PrimaryKey _ -> true
+        | _ -> false))
+
+  // Then check for table-level primary keys (composite PKs)
+  let tableLevelPkCols =
+    table.constraints
+    |> List.tryPick (fun c ->
       match c with
-      | PrimaryKey _ -> true
-      | _ -> false))
+      | PrimaryKey pk when pk.columns.Length > 0 -> Some pk.columns
+      | _ -> None)
+    |> Option.defaultValue []
+    |> List.choose (fun colName ->
+      table.columns |> List.tryFind (fun col -> col.name = colName))
+
+  // Prefer table-level if present, otherwise use column-level
+  if tableLevelPkCols.Length > 0 then tableLevelPkCols else columnLevelPks
 ```
 
 ## 🧪 Testing
 
 ### Current Test Status
-All 3 tests passing with regex parser:
+All 7 tests passing:
 - ✅ TableMigration (6 cases)
 - ✅ ViewMigration
 - ✅ UseAsLib
+- ✅ CompositePKTest (4 tests for composite primary key support)
 
 ### Manual Testing
 ```bash
@@ -435,6 +475,43 @@ type Students with
         Ok None
     with
     | :? SqliteException as ex -> Error ex
+
+  static member GetAll(conn: SqliteConnection) : Result<Students list, SqliteException> =
+    try
+      use cmd = new SqliteCommand("SELECT id, name, email, enrollment_date FROM students", conn)
+      use reader = cmd.ExecuteReader()
+      let results = ResizeArray<Students>()
+      while reader.Read() do
+        results.Add({
+          Id = if reader.IsDBNull(0) then None else Some(reader.GetInt64(0))
+          Name = reader.GetString(1)
+          Email = if reader.IsDBNull(2) then None else Some(reader.GetString(2))
+          Enrollment_date = reader.GetDateTime(3)
+        })
+      Ok(results |> Seq.toList)
+    with
+    | :? SqliteException as ex -> Error ex
+
+  static member Update(conn: SqliteConnection, item: Students) : Result<unit, SqliteException> =
+    try
+      use cmd = new SqliteCommand("UPDATE students SET name = @name, email = @email, enrollment_date = @enrollment_date WHERE id = @id", conn)
+      cmd.Parameters.AddWithValue("@id", match item.Id with Some v -> box v | None -> box DBNull.Value) |> ignore
+      cmd.Parameters.AddWithValue("@name", item.Name) |> ignore
+      cmd.Parameters.AddWithValue("@email", match item.Email with Some v -> box v | None -> box DBNull.Value) |> ignore
+      cmd.Parameters.AddWithValue("@enrollment_date", item.Enrollment_date) |> ignore
+      cmd.ExecuteNonQuery() |> ignore
+      Ok()
+    with
+    | :? SqliteException as ex -> Error ex
+
+  static member Delete(conn: SqliteConnection, id: int64) : Result<unit, SqliteException> =
+    try
+      use cmd = new SqliteCommand("DELETE FROM students WHERE id = @id", conn)
+      cmd.Parameters.AddWithValue("@id", id) |> ignore
+      cmd.ExecuteNonQuery() |> ignore
+      Ok()
+    with
+    | :? SqliteException as ex -> Error ex
 ```
 
 ## 📝 Git History
@@ -467,20 +544,20 @@ When resuming:
 2. **Current implementation status:**
    - ✅ SQL parsing with FParsec (complete, active)
    - ✅ Record type generation (working)
-   - ✅ Insert and GetById CRUD methods (implemented)
-   - ⏳ Additional CRUD methods (Update, Delete, GetAll - not yet implemented)
+   - ✅ All CRUD methods implemented (Insert, GetById, GetAll, Update, Delete)
+   - ✅ Composite primary key support (complete - both column-level and table-level)
    - ⏳ JOIN query generation (planned)
    - ⏳ Transaction support (planned)
-   - ⏳ Code generation tests (not yet written)
+   - ⏳ Code generation tests (partial - composite PK tests added)
    - ⏳ Integration with `mig commit` command (not yet implemented)
 
 3. Next priorities (in order):
-   - Add Update, Delete, GetAll CRUD methods
    - Write comprehensive code generation tests
    - Integrate code generation into `mig commit` command
    - Add JOIN query generation for foreign key relationships
+   - Add transaction support
 
 4. Testing:
-   - Check migration tests: `cd src && dotnet test` (should show all 3 passing)
+   - Check migration tests: `cd src && dotnet test` (should show all 7 passing)
    - Check build: `cd src && dotnet build`
    - Manual codegen test: `mkdir /tmp/test && cd /tmp/test && echo "CREATE TABLE test(id INTEGER PRIMARY KEY);" > test.sql && dotnet /path/to/mig codegen`
