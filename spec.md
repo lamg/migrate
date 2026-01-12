@@ -261,6 +261,320 @@ Db.txn conn {
 - `mig codegen` - Generate F# types from SQL schema files
 - `mig commit` - Execute migration and auto-regenerate types (when `-m` message flag is used)
 
+### 8. Normalized Schema Representation with Discriminated Unions
+
+For normalized database schemas (2NF) that eliminate NULLs by splitting optional fields into separate tables, Migrate generates F# discriminated unions instead of option types. This approach leverages F#'s type system to represent optional data through table relationships rather than nullable columns.
+
+**Rationale:**
+
+In normalized schemas, the absence of information is represented by the absence of a row in an extension table, not by NULL values. For example:
+- A student without a known address: no row in `student_address` table
+- A student with a known address: one row in `student_address` table with FK to `student`
+
+This 1:1 optional relationship maps naturally to F# discriminated unions, providing:
+- **Type Safety**: Exhaustive pattern matching forces handling of both cases
+- **Domain Modeling**: Business semantics are explicit (with/without address)
+- **No Option Hell**: Clean pattern matching instead of nested option types
+- **Database Design**: Encourages proper normalization and NULL elimination
+
+**Detection Pattern:**
+
+Extension tables are automatically detected by:
+1. **Naming Convention**: `{base_table}_{aspect1}_{aspect2}_...`
+   - Examples: `student_address`, `student_email_phone`, `user_preferences`
+2. **Foreign Key Constraint**: Extension table has FK to base table
+3. **1:1 Relationship**: FK column is also the PK of extension table (enforces at most one extension per base record)
+4. **No NULLs**: All columns in both base and extension tables must be NOT NULL
+
+**Schema Example:**
+
+```sql
+-- Base table
+CREATE TABLE student (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL
+);
+
+-- Extension table (detected by naming convention)
+CREATE TABLE student_address (
+  student_id INTEGER PRIMARY KEY REFERENCES student(id),
+  address TEXT NOT NULL
+);
+
+-- Multiple aspects extension
+CREATE TABLE student_email_phone (
+  student_id INTEGER PRIMARY KEY REFERENCES student(id),
+  email TEXT NOT NULL,
+  phone TEXT NOT NULL
+);
+```
+
+**Generated Code:**
+
+```fsharp
+module Students
+
+open System
+open Microsoft.Data.Sqlite
+open FsToolkit.ErrorHandling
+open migrate.Db
+
+// Two discriminated unions: one for inserting (New*), one for querying (*)
+[<RequireQualifiedAccess>]
+type NewStudent =
+  | Base of {| Name: string |}
+  | WithAddress of {| Name: string; Address: string |}
+  | WithEmailPhone of {| Name: string; Email: string; Phone: string |}
+
+[<RequireQualifiedAccess>]
+type Student =
+  | Base of {| Id: int64; Name: string |}
+  | WithAddress of {| Id: int64; Name: string; Address: string |}
+  | WithEmailPhone of {| Id: int64; Name: string; Email: string; Phone: string |}
+
+type Student with
+  // Insert with pattern matching on NewStudent
+  static member Insert (student: NewStudent) (tx: SqliteTransaction)
+    : Result<int64, SqliteException> =
+    try
+      match student with
+      | NewStudent.Base data ->
+        // Single INSERT into base table
+        use cmd = new SqliteCommand(
+          "INSERT INTO student (name) VALUES (@name)",
+          tx.Connection, tx)
+        cmd.Parameters.AddWithValue("@name", data.Name) |> ignore
+        cmd.ExecuteNonQuery() |> ignore
+        use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+        let studentId = lastIdCmd.ExecuteScalar() |> unbox<int64>
+        Ok studentId
+
+      | NewStudent.WithAddress data ->
+        // Two inserts in same transaction (atomic)
+        use cmd1 = new SqliteCommand(
+          "INSERT INTO student (name) VALUES (@name)",
+          tx.Connection, tx)
+        cmd1.Parameters.AddWithValue("@name", data.Name) |> ignore
+        cmd1.ExecuteNonQuery() |> ignore
+
+        use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+        let studentId = lastIdCmd.ExecuteScalar() |> unbox<int64>
+
+        use cmd2 = new SqliteCommand(
+          "INSERT INTO student_address (student_id, address) VALUES (@student_id, @address)",
+          tx.Connection, tx)
+        cmd2.Parameters.AddWithValue("@student_id", studentId) |> ignore
+        cmd2.Parameters.AddWithValue("@address", data.Address) |> ignore
+        cmd2.ExecuteNonQuery() |> ignore
+        Ok studentId
+
+      | NewStudent.WithEmailPhone data ->
+        // Similar pattern for email_phone extension
+        // ...
+        Ok 0L
+    with
+    | :? SqliteException as ex -> Error ex
+
+  // GetAll with LEFT JOINs
+  static member GetAll (tx: SqliteTransaction)
+    : Result<Student list, SqliteException> =
+    try
+      use cmd = new SqliteCommand(
+        "SELECT s.id, s.name, sa.address, sep.email, sep.phone
+         FROM student s
+         LEFT JOIN student_address sa ON s.id = sa.student_id
+         LEFT JOIN student_email_phone sep ON s.id = sep.student_id",
+        tx.Connection, tx)
+      use reader = cmd.ExecuteReader()
+      let results = ResizeArray<Student>()
+      while reader.Read() do
+        let student =
+          let id = reader.GetInt64 0
+          let name = reader.GetString 1
+          let hasAddress = not (reader.IsDBNull 2)
+          let hasEmailPhone = not (reader.IsDBNull 3)
+
+          match hasAddress, hasEmailPhone with
+          | true, false ->
+            Student.WithAddress {| Id = id; Name = name; Address = reader.GetString 2 |}
+          | false, true ->
+            Student.WithEmailPhone {| Id = id; Name = name; Email = reader.GetString 3; Phone = reader.GetString 4 |}
+          | false, false ->
+            Student.Base {| Id = id; Name = name |}
+          | true, true ->
+            // Cannot have multiple extensions simultaneously in current implementation
+            Student.Base {| Id = id; Name = name |}
+        results.Add student
+      Ok(results |> Seq.toList)
+    with
+    | :? SqliteException as ex -> Error ex
+
+  // Update with pattern matching
+  static member Update (student: Student) (tx: SqliteTransaction)
+    : Result<unit, SqliteException> =
+    try
+      match student with
+      | Student.Base data ->
+        // Update base table, delete any extensions
+        use cmd1 = new SqliteCommand(
+          "UPDATE student SET name = @name WHERE id = @id",
+          tx.Connection, tx)
+        cmd1.Parameters.AddWithValue("@id", data.Id) |> ignore
+        cmd1.Parameters.AddWithValue("@name", data.Name) |> ignore
+        cmd1.ExecuteNonQuery() |> ignore
+
+        use cmd2 = new SqliteCommand(
+          "DELETE FROM student_address WHERE student_id = @id",
+          tx.Connection, tx)
+        cmd2.Parameters.AddWithValue("@id", data.Id) |> ignore
+        cmd2.ExecuteNonQuery() |> ignore
+
+        use cmd3 = new SqliteCommand(
+          "DELETE FROM student_email_phone WHERE student_id = @id",
+          tx.Connection, tx)
+        cmd3.Parameters.AddWithValue("@id", data.Id) |> ignore
+        cmd3.ExecuteNonQuery() |> ignore
+        Ok()
+
+      | Student.WithAddress data ->
+        // Update base, INSERT OR REPLACE extension
+        use cmd1 = new SqliteCommand(
+          "UPDATE student SET name = @name WHERE id = @id",
+          tx.Connection, tx)
+        cmd1.Parameters.AddWithValue("@id", data.Id) |> ignore
+        cmd1.Parameters.AddWithValue("@name", data.Name) |> ignore
+        cmd1.ExecuteNonQuery() |> ignore
+
+        use cmd2 = new SqliteCommand(
+          "INSERT OR REPLACE INTO student_address (student_id, address) VALUES (@student_id, @address)",
+          tx.Connection, tx)
+        cmd2.Parameters.AddWithValue("@student_id", data.Id) |> ignore
+        cmd2.Parameters.AddWithValue("@address", data.Address) |> ignore
+        cmd2.ExecuteNonQuery() |> ignore
+        Ok()
+
+      | Student.WithEmailPhone data ->
+        // Similar pattern
+        // ...
+        Ok()
+    with
+    | :? SqliteException as ex -> Error ex
+
+  // Delete (cascades to extensions via FK)
+  static member Delete (id: int64) (tx: SqliteTransaction)
+    : Result<unit, SqliteException> =
+    try
+      use cmd = new SqliteCommand(
+        "DELETE FROM student WHERE id = @id",
+        tx.Connection, tx)
+      cmd.Parameters.AddWithValue("@id", id) |> ignore
+      cmd.ExecuteNonQuery() |> ignore
+      Ok()
+    with
+    | :? SqliteException as ex -> Error ex
+```
+
+**Usage Example:**
+
+```fsharp
+open Students
+open migrate.Db
+
+// Insert students with different variants
+Db.txn conn {
+  // Student without additional info
+  let! id1 = Student.Insert (NewStudent.Base {| Name = "Alice" |})
+
+  // Student with address
+  let! id2 = Student.Insert (
+    NewStudent.WithAddress {| Name = "Bob"; Address = "123 Main St" |})
+
+  // Student with contact info
+  let! id3 = Student.Insert (
+    NewStudent.WithEmailPhone {| Name = "Carol"; Email = "carol@example.com"; Phone = "555-1234" |})
+
+  // Query all students
+  let! students = Student.GetAll
+
+  // Pattern match on results
+  for student in students do
+    match student with
+    | Student.Base data ->
+      printfn "Student %d: %s (no additional info)" data.Id data.Name
+    | Student.WithAddress data ->
+      printfn "Student %d: %s at %s" data.Id data.Name data.Address
+    | Student.WithEmailPhone data ->
+      printfn "Student %d: %s - %s, %s" data.Id data.Name data.Email data.Phone
+
+  return students
+}
+```
+
+**Key Design Decisions:**
+
+1. **Two Discriminated Unions**:
+   - `NewStudent` for insertion (no ID)
+   - `Student` for queries (with ID)
+   - This reflects auto-increment PK semantics
+
+2. **Anonymous Records**:
+   - Uses F# anonymous records for DU cases
+   - Avoids polluting namespace with extra type definitions
+   - Clean syntax with structural typing
+
+3. **RequireQualifiedAccess**:
+   - Forces qualified access: `Student.Base`, `NewStudent.WithAddress`
+   - Prevents name collision between union cases
+   - Makes code more explicit
+
+4. **Union Case Naming**:
+   - Base case: `Base`
+   - Extension case: `With{Aspect}` where aspect is PascalCase from table suffix
+   - Example: `student_email_phone` → `WithEmailPhone`
+
+5. **Transaction Atomicity**:
+   - Multi-table inserts happen in single transaction
+   - FK constraints enforce referential integrity
+   - Rollback on any failure
+
+6. **Multiple Extensions**:
+   - Each extension table generates one union case
+   - Multiple extensions create multiple cases (not combinatorial)
+   - Example: `Base | WithAddress | WithEmailPhone` (3 cases, not 4)
+
+7. **Error on NULLs**:
+   - If ANY column in base or extension tables is nullable, code generation fails with error
+   - Enforces normalization discipline
+   - Clear error message guides user to fix schema
+
+**Detection Algorithm:**
+
+```
+For each table T in schema:
+  1. Check if T has any nullable columns
+     - If yes: Skip DU generation for this table (use option types instead)
+
+  2. Find potential extension tables E:
+     - E.name matches pattern "{T.name}_{aspect1}_{aspect2}_..."
+     - E has single-column PK that is also FK to T.pk
+     - E has no nullable columns
+
+  3. If extension tables found:
+     - Generate NewT discriminated union (for insert)
+     - Generate T discriminated union (for query)
+     - Generate case for base table: Base
+     - Generate case for each extension: With{AspectName}
+
+  4. Generate CRUD methods with pattern matching
+```
+
+**Limitations:**
+
+- Only supports one active extension per student at a time (no combinatorial cases)
+- Extension tables must follow exact naming convention
+- All columns must be NOT NULL (nullable columns cause generation error)
+- Manual schema migration if changing from option-based to DU-based representation
+
 ## Architecture
 
 ### High-Level Components
