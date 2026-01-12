@@ -82,3 +82,21 @@ let ``Generated Update method excludes all PK columns from SET with transaction`
       Assert.Contains("tx.Connection, tx", code)
     | Ok None -> Assert.Fail "Update method should be generated for composite PK"
     | Error e -> Assert.Fail $"Parsing failed: {e}"
+
+[<Fact>]
+let ``GetOne method is generated for tables`` () =
+  let sql = "CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL, age integer)"
+
+  result {
+    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let table = parsed.tables |> List.head
+    let code = QueryGenerator.generateGetOne table
+    return code
+  }
+  |> function
+    | Ok code ->
+      Assert.Contains("static member GetOne (tx: SqliteTransaction)", code)
+      Assert.Contains("SELECT id, name, age FROM student LIMIT 1", code)
+      Assert.Contains("Result<Student option, SqliteException>", code)
+      Assert.Contains("tx.Connection, tx", code)
+    | Error e -> Assert.Fail $"Parsing failed: {e}"

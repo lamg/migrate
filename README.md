@@ -12,7 +12,7 @@ If you just want to test the tool without installing [.Net][dotnet],
 then you can use a Docker image:
 
 ```sh
-docker run -it 'mcr.microsoft.com/dotnet/nightly/sdk:10.0' bash
+podman run -it 'mcr.microsoft.com/dotnet/sdk:10.0' bash
 ```
 
 Inside the container run:

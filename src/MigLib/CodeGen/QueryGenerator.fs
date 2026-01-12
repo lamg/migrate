@@ -209,6 +209,38 @@ let generateGetAll (table: CreateTable) : string =
     with
     | :? SqliteException as ex -> Error ex"""
 
+/// Generate GET ONE method (transaction-only)
+let generateGetOne (table: CreateTable) : string =
+  let typeName = capitalize table.name
+  let columnNames = table.columns |> List.map (fun c -> c.name) |> String.concat ", "
+  let getSql = $"SELECT {columnNames} FROM {table.name} LIMIT 1"
+
+  let fieldMappings =
+    table.columns
+    |> List.mapi (fun i col ->
+      let fieldName = capitalize col.name
+      let isNullable = TypeGenerator.isColumnNullable col
+      let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+
+      if isNullable then
+        $"        {fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
+      else
+        $"        {fieldName} = reader.Get{method} {i}")
+    |> String.concat "\n"
+
+  $"""  static member GetOne (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
+    try
+      use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
+      use reader = cmd.ExecuteReader()
+      if reader.Read() then
+        Ok(Some {{
+{fieldMappings}
+        }})
+      else
+        Ok None
+    with
+    | :? SqliteException as ex -> Error ex"""
+
 /// Generate UPDATE method (transaction-only)
 let generateUpdate (table: CreateTable) : string option =
   let typeName = capitalize table.name
@@ -299,11 +331,17 @@ let generateTableCode (table: CreateTable) : string =
   let insertMethod = generateInsert table
   let getMethod = generateGet table
   let getAllMethod = generateGetAll table
+  let getOneMethod = generateGetOne table
   let updateMethod = generateUpdate table
   let deleteMethod = generateDelete table
 
   let methods =
-    [ Some insertMethod; getMethod; Some getAllMethod; updateMethod; deleteMethod ]
+    [ Some insertMethod
+      getMethod
+      Some getAllMethod
+      Some getOneMethod
+      updateMethod
+      deleteMethod ]
     |> List.choose id
     |> String.concat "\n\n"
 
@@ -341,10 +379,44 @@ let generateViewGetAll (viewName: string) (columns: ViewColumn list) : string =
     with
     | :? SqliteException as ex -> Error ex"""
 
+/// Generate GET ONE method for a view (read-only)
+let generateViewGetOne (viewName: string) (columns: ViewColumn list) : string =
+  let typeName = capitalize viewName
+  let columnNames = columns |> List.map (fun c -> c.name) |> String.concat ", "
+  let getSql = $"SELECT {columnNames} FROM {viewName} LIMIT 1"
+
+  let fieldMappings =
+    columns
+    |> List.mapi (fun i col ->
+      let fieldName = capitalize col.name
+      let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+
+      if col.isNullable then
+        $"        {fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
+      else
+        $"        {fieldName} = reader.Get{method} {i}")
+    |> String.concat "\n"
+
+  $"""  static member GetOne (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
+    try
+      use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
+      use reader = cmd.ExecuteReader()
+      if reader.Read() then
+        Ok(Some {{
+{fieldMappings}
+        }})
+      else
+        Ok None
+    with
+    | :? SqliteException as ex -> Error ex"""
+
 /// Generate code for a view (read-only queries)
 let generateViewCode (viewName: string) (columns: ViewColumn list) : string =
   let typeName = capitalize viewName
   let getAllMethod = generateViewGetAll viewName columns
+  let getOneMethod = generateViewGetOne viewName columns
 
   $"""type {typeName} with
-{getAllMethod}"""
+{getAllMethod}
+
+{getOneMethod}"""

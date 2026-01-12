@@ -1,7 +1,7 @@
 # F# Code Generation Implementation Progress
 
 **Branch:** `fsharp-generation`
-**Last Updated:** 2026-01-11
+**Last Updated:** 2026-01-12
 **Status:** ✅ FParsec parser complete and active, code generation working, all tests passing
 
 ## Overview
@@ -329,8 +329,9 @@ All 3 existing tests pass.
 1. **`Insert (item) (tx)`** - Insert using `tx.Connection` internally
 2. **`GetById (pkParams...) (tx)`** - Get by primary key
 3. **`GetAll (tx)`** - Get all records
-4. **`Update (item) (tx)`** - Update record
-5. **`Delete (pkParams...) (tx)`** - Delete record
+4. **`GetOne (tx)`** - Get first record using LIMIT 1
+5. **`Update (item) (tx)`** - Update record
+6. **`Delete (pkParams...) (tx)`** - Delete record
 
 **Usage Examples:**
 ```fsharp
@@ -375,7 +376,7 @@ Db.txn conn {
 - `src/MigLib/CodeGen/CodeGen.fs` - Updated to process views alongside tables
 
 **Design Decision:**
-Views are read-only, so only `GetAll` method is generated (no Insert/Update/Delete). Column information is extracted using SQLite introspection by:
+Views are read-only, so only `GetAll` and `GetOne` methods are generated (no Insert/Update/Delete). Column information is extracted using SQLite introspection by:
 1. Creating temporary in-memory database
 2. Creating all tables (views depend on them)
 3. Creating the view
@@ -417,11 +418,70 @@ Db.txn conn {
 }
 ```
 
-**New Tests:** `src/Test/ViewCodeGenTest.fs` (4 tests)
+**New Tests:** `src/Test/ViewCodeGenTest.fs` (5 tests)
 - View type generation includes columns
 - View GetAll method is generated
 - View with nullable columns generates option types
 - Complex view with JOIN is supported
+- View GetOne method is generated
+
+### 12. GetOne Method Generation
+
+**Files:**
+- `src/MigLib/CodeGen/QueryGenerator.fs` - Added `generateGetOne` and `generateViewGetOne` functions
+- Updated `generateTableCode` and `generateViewCode` to include GetOne methods
+
+**Design Decision:**
+GetOne provides a convenient way to fetch the first record from a table or view using `LIMIT 1`. This is useful for scenarios where you only need one record and don't care which one (e.g., checking if any records exist, getting a sample record).
+
+**Benefits:**
+- Simpler than GetAll when you only need one record
+- More efficient than GetAll (stops after first record)
+- Returns `Result<T option, SqliteException>` for consistent null handling
+- Works with both tables and views
+
+**Generated Code for Tables:**
+```fsharp
+static member GetOne (tx: SqliteTransaction) : Result<Student option, SqliteException> =
+  try
+    use cmd = new SqliteCommand("SELECT id, name, age FROM student LIMIT 1", tx.Connection, tx)
+    use reader = cmd.ExecuteReader()
+    if reader.Read() then
+      Ok(Some { Id = reader.GetInt64(0); Name = reader.GetString(1); Age = reader.GetInt64(2) })
+    else
+      Ok None
+  with
+  | :? SqliteException as ex -> Error ex
+```
+
+**Generated Code for Views:**
+```fsharp
+static member GetOne (tx: SqliteTransaction) : Result<AdultStudents option, SqliteException> =
+  try
+    use cmd = new SqliteCommand("SELECT id, name FROM adult_students LIMIT 1", tx.Connection, tx)
+    use reader = cmd.ExecuteReader()
+    if reader.Read() then
+      Ok(Some { Id = reader.GetInt64(0); Name = reader.GetString(1) })
+    else
+      Ok None
+  with
+  | :? SqliteException as ex -> Error ex
+```
+
+**Usage Example:**
+```fsharp
+Db.txn conn {
+  let! maybeStudent = Student.GetOne
+  match maybeStudent with
+  | Some student -> printfn "Found: %s" student.Name
+  | None -> printfn "No students found"
+  return ()
+}
+```
+
+**New Tests:**
+- `src/Test/CompositePKTest.fs` - GetOne method is generated for tables
+- `src/Test/ViewCodeGenTest.fs` - View GetOne method is generated
 
 ## ⏭️ Next Steps (Priority Order)
 
@@ -493,9 +553,9 @@ src/
     ├── TableMigration.fs           (✅ Passing)
     ├── ViewMigration.fs            (✅ Passing)
     ├── UseAsLib.fs                 (✅ Passing)
-    ├── CompositePKTest.fs          (✅ Passing - 4 tests)
+    ├── CompositePKTest.fs          (✅ Passing - 5 tests)
     ├── TransactionTest.fs          (✅ Passing - 6 tests)
-    └── ViewCodeGenTest.fs          (✅ Passing - 4 tests)
+    └── ViewCodeGenTest.fs          (✅ Passing - 5 tests)
 ```
 
 ## 🔧 Technical Details
@@ -556,13 +616,13 @@ let getPrimaryKey (table: CreateTable) : ColumnDef list =
 ## 🧪 Testing
 
 ### Current Test Status
-All 17 tests passing:
+All 19 tests passing:
 - ✅ TableMigration (6 cases)
 - ✅ ViewMigration
 - ✅ UseAsLib
-- ✅ CompositePKTest (4 tests for composite primary key support)
+- ✅ CompositePKTest (5 tests for composite primary key support and GetOne)
 - ✅ TransactionTest (6 tests for curried signatures and Db module)
-- ✅ ViewCodeGenTest (4 tests for view code generation)
+- ✅ ViewCodeGenTest (5 tests for view code generation including GetOne)
 
 ### Manual Testing
 ```bash
@@ -676,14 +736,6 @@ Db.txn conn {
 }
 ```
 
-## 📝 Git History
-
-```
-acd9847 Add F# code generation feature and remove Goose import support
-ff92a05 Fix SQL parser to handle multiline CREATE TABLE statements
-4f05659 Work in progress: FParsec-based SQL parser
-```
-
 ## 💡 Design Decisions Made
 
 1. **String Templates over Fabulous.AST** - Simpler, more direct for now
@@ -715,13 +767,13 @@ When resuming:
 2. **Current implementation status:**
    - ✅ SQL parsing with FParsec (complete, active)
    - ✅ Record type generation for tables and views (working)
-   - ✅ All CRUD methods implemented (Insert, GetById, GetAll, Update, Delete)
+   - ✅ All CRUD methods implemented (Insert, GetById, GetAll, GetOne, Update, Delete)
    - ✅ Composite primary key support (complete - both column-level and table-level)
    - ✅ Transaction support with Db module (curried signatures + computation expression)
    - ✅ Db module (shared transaction management in MigLib)
-   - ✅ View code generation (read-only GetAll method with SQLite introspection)
+   - ✅ View code generation (read-only GetAll and GetOne methods with SQLite introspection)
    - ⏳ JOIN query generation (planned)
-   - ⏳ Code generation tests (partial - composite PK, transaction, and view tests added)
+   - ⏳ Code generation tests (partial - composite PK, transaction, view, and GetOne tests added)
    - ⏳ Integration with `mig commit` command (not yet implemented)
 
 3. Next priorities (in order):
@@ -730,6 +782,6 @@ When resuming:
    - Write more comprehensive code generation tests
 
 4. Testing:
-   - Check migration tests: `cd src && dotnet test` (should show all 17 passing)
+   - Check migration tests: `cd src && dotnet test` (should show all 19 passing)
    - Check build: `cd src && dotnet build`
    - Manual codegen test with views: `mkdir /tmp/test && cd /tmp/test && echo "CREATE TABLE test(id INTEGER PRIMARY KEY); CREATE VIEW test_view AS SELECT * FROM test;" > test.sql && dotnet /path/to/mig codegen`

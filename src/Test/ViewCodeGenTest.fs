@@ -99,3 +99,25 @@ let ``Complex view with JOIN is supported`` () =
     | Ok count ->
       Assert.Equal(2, count) // name and title columns
     | Error e -> Assert.Fail $"View introspection failed: {e}"
+
+[<Fact>]
+let ``View GetOne method is generated`` () =
+  let sql =
+    """
+    CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL);
+    CREATE VIEW all_students AS SELECT id, name FROM student;
+    """
+
+  result {
+    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let view = parsed.views |> List.head
+    let! columns = ViewIntrospection.getViewColumns parsed.tables view
+    let code = QueryGenerator.generateViewCode view.name columns
+    return code
+  }
+  |> function
+    | Ok code ->
+      Assert.Contains("static member GetOne (tx: SqliteTransaction)", code)
+      Assert.Contains("SELECT id, name FROM all_students LIMIT 1", code)
+      Assert.Contains("Result<AllStudents option, SqliteException>", code)
+    | Error e -> Assert.Fail $"Code generation failed: {e}"
