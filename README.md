@@ -4,7 +4,7 @@
 [![NuGet Downloads][nuget-downloads]][migtool]
 ![Tests][tests]
 
-Migrate is a tool for performing declarative migrations by finding differences between an expected database schema, and the existing one, currently in a SQLite database.
+Migrate is a tool for performing declarative migrations by finding differences between an expected database schema and the existing one, currently in a SQLite database. It also generates type-safe F# code with CRUD operations for your database schema.
 
 ## Installation
 
@@ -34,12 +34,14 @@ mkdir test_db
 cd test_db
 mig init
 # generated project files with example definitions
-mig gen
+mig status
 # output shows migration for existing definitions
-mig exec
-# executes migration
+mig commit
+# generates and executes migration
 mig log
 # output shows migration metadata and a summary of executed steps
+mig codegen
+# generates type-safe F# code with CRUD operations
 ```
 
 ## Features
@@ -47,18 +49,19 @@ mig log
 - [Declarative migrations](./src/MigLib/DeclarativeMigrations/README.md)
 - [Migration execution](./src/MigLib/Execution/README.md)
 - [Migration execution as library](./src/MigLib/Execution/README.md#migration-execution-using-miglib)
-- [Import Goose migrations](./src/MigLib/ImportGoose/README.md)
+- [F# code generation with type-safe CRUD operations](./src/MigLib/CodeGen/README.md)
 - [Migration log](./src/MigLib/MigrationLog/README.md)
 
+## Commands
+
+- `mig init` - Initialize a new migration project with example schema files
+- `mig status` - Generate migration SQL by comparing expected schema with current database
+- `mig commit [-m <message>]` - Generate and execute migrations step by step
+- `mig schema` - Show the current database schema
+- `mig log [-s <steps-id>]` - Show migration history and execution metadata
+- `mig codegen [-d <directory>]` - Generate type-safe F# code with CRUD operations from SQL schema files
+
 ## Contributing
-
-Areas where contributions are welcomed:
-
-- Support for other RDBMS like PostgresSQL
-- SQL generation
-- SQL parsing
-- bug fixes
-- installation, packaging and release process
 
 How to contribute:
 
@@ -66,8 +69,6 @@ How to contribute:
 - Add relevant tests
 - Create a pull request mentioning the issue and also including a summary of the problem and approach to solve it
 - Wait for the review
-
-See [contributing_guideline](doc/contributing_guideline.md)
 
 ## License
 
