@@ -55,12 +55,18 @@ let getForeignKeys (table: CreateTable) : (string * string) list =
 
   columnFks @ tableFks |> List.distinct
 
-/// Capitalize first letter for F# naming conventions
+/// Convert snake_case to PascalCase for F# naming conventions
 let capitalize (s: string) =
-  if String.length s > 0 then
-    (string s.[0]).ToUpper() + s.[1..]
-  else
+  if System.String.IsNullOrWhiteSpace s then
     s
+  else
+    s.Split('_')
+    |> Array.map (fun part ->
+      if part.Length > 0 then
+        (string part.[0]).ToUpper() + part.[1..].ToLower()
+      else
+        part)
+    |> System.String.Concat
 
 /// Helper to get reader method name from F# type
 let readerMethod (t: string) =

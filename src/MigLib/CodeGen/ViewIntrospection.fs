@@ -15,7 +15,7 @@ type ViewColumn =
 /// Extract column information from a view by creating it in a temporary database
 let getViewColumns (tables: CreateTable list) (view: CreateView) : Result<ViewColumn list, string> =
   result {
-    use conn = new SqliteConnection("Data Source=:memory:")
+    use conn = new SqliteConnection "Data Source=:memory:"
     conn.Open()
 
     // Create all tables first (views depend on them)

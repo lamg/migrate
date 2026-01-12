@@ -1,7 +1,21 @@
 module internal migrate.CodeGen.TypeGenerator
 
+open System
 open migrate.DeclarativeMigrations.Types
 open migrate.CodeGen.ViewIntrospection
+
+/// Convert snake_case to PascalCase for F# naming conventions
+let toPascalCase (s: string) =
+  if String.IsNullOrWhiteSpace s then
+    s
+  else
+    s.Split('_')
+    |> Array.map (fun part ->
+      if String.length part > 0 then
+        (string part.[0]).ToUpper() + part.[1..].ToLower()
+      else
+        part)
+    |> String.concat ""
 
 /// Map SQL types to F# types
 let mapSqlType (sqlType: SqlType) (isNullable: bool) : string =
@@ -29,22 +43,12 @@ let isColumnNullable (column: ColumnDef) : bool =
 let generateField (column: ColumnDef) =
   let isNullable = isColumnNullable column
   let fsharpType = mapSqlType column.columnType isNullable
-  // Capitalize first letter of column name for F# convention
-  let fieldName =
-    if String.length column.name > 0 then
-      (string column.name.[0]).ToUpper() + column.name.[1..]
-    else
-      column.name
-
+  let fieldName = toPascalCase column.name
   fieldName, fsharpType
 
 /// Generate an F# record type from a table definition
 let generateRecordType (table: CreateTable) : string =
-  let typeName =
-    if String.length table.name > 0 then
-      (string table.name.[0]).ToUpper() + table.name.[1..]
-    else
-      table.name
+  let typeName = toPascalCase table.name
 
   let fields =
     table.columns
@@ -56,22 +60,13 @@ let generateRecordType (table: CreateTable) : string =
 
 /// Generate an F# record type from a view definition
 let generateViewRecordType (viewName: string) (columns: ViewColumn list) : string =
-  let typeName =
-    if String.length viewName > 0 then
-      (string viewName.[0]).ToUpper() + viewName.[1..]
-    else
-      viewName
+  let typeName = toPascalCase viewName
 
   let fields =
     columns
     |> List.map (fun col ->
       let fsharpType = mapSqlType col.columnType col.isNullable
-      let fieldName =
-        if String.length col.name > 0 then
-          (string col.name.[0]).ToUpper() + col.name.[1..]
-        else
-          col.name
-
+      let fieldName = toPascalCase col.name
       fieldName, fsharpType)
     |> List.map (fun (name, typ) -> $"    {name}: {typ}")
     |> String.concat "\n"

@@ -30,44 +30,36 @@ let generateCodeForSqlFile (sqlFilePath: string) : Result<string, string> =
 
     // Generate module content
     let moduleContent =
-      [ $"module {moduleName}"
-        ""
-        "open System"
-        "open Microsoft.Data.Sqlite"
-        "open FsToolkit.ErrorHandling"
-        "open migrate.Db"
-        ""
+      [ yield $"module {moduleName}"
+        yield ""
+        yield "open System"
+        yield "open Microsoft.Data.Sqlite"
+        yield "open FsToolkit.ErrorHandling"
+        yield "open migrate.Db"
+        yield ""
         // Generate record types for tables
         yield!
           sqlFile.tables
-          |> List.map (fun table ->
-            let typeName = QueryGenerator.capitalize table.name
-
-            let fields =
-              table.columns
-              |> List.map (fun col ->
-                let fieldName = QueryGenerator.capitalize col.name
-                let isNullable = TypeGenerator.isColumnNullable col
-                let fsharpType = TypeGenerator.mapSqlType col.columnType isNullable
-                $"  {fieldName}: {fsharpType}")
-              |> String.concat "\n"
-
-            $"type {typeName} = {{\n{fields}\n}}")
+          |> List.collect (fun table -> [ TypeGenerator.generateRecordType table; "" ])
 
         // Generate record types for views
         yield!
           viewsWithColumns
-          |> List.map (fun (view, columns) -> TypeGenerator.generateViewRecordType view.name columns)
+          |> List.collect (fun (view, columns) ->
+            [ TypeGenerator.generateViewRecordType view.name columns; "" ])
 
-        ""
         // Generate query methods for tables
-        yield! sqlFile.tables |> List.map QueryGenerator.generateTableCode
+        yield!
+          sqlFile.tables
+          |> List.collect (fun table -> [ QueryGenerator.generateTableCode table; "" ])
 
         // Generate query methods for views (read-only)
         yield!
           viewsWithColumns
-          |> List.map (fun (view, columns) -> QueryGenerator.generateViewCode view.name columns) ]
+          |> List.collect (fun (view, columns) ->
+            [ QueryGenerator.generateViewCode view.name columns; "" ]) ]
       |> String.concat "\n"
+      |> fun s -> s.TrimEnd() // Remove trailing newlines
 
     FileMapper.ensureDirectory fsharpFilePath
     File.WriteAllText(fsharpFilePath, moduleContent)

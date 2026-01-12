@@ -23,7 +23,7 @@ let ``View type generation includes columns`` () =
   }
   |> function
     | Ok code ->
-      Assert.Contains("type Adult_students =", code)
+      Assert.Contains("type AdultStudents =", code)
       Assert.Contains("Id:", code)
       Assert.Contains("Name:", code)
       Assert.DoesNotContain("Age:", code) // Age is not in the view
@@ -46,7 +46,7 @@ let ``View GetAll method is generated`` () =
   }
   |> function
     | Ok code ->
-      Assert.Contains("type All_students with", code)
+      Assert.Contains("type AllStudents with", code)
       Assert.Contains("static member GetAll (tx: SqliteTransaction)", code)
       Assert.Contains("SELECT id, name FROM all_students", code)
       Assert.DoesNotContain("Insert", code) // Views are read-only
