@@ -1,6 +1,7 @@
 module internal migrate.CodeGen.TypeGenerator
 
 open migrate.DeclarativeMigrations.Types
+open migrate.CodeGen.ViewIntrospection
 
 /// Map SQL types to F# types
 let mapSqlType (sqlType: SqlType) (isNullable: bool) : string =
@@ -48,6 +49,30 @@ let generateRecordType (table: CreateTable) : string =
   let fields =
     table.columns
     |> List.map generateField
+    |> List.map (fun (name, typ) -> $"    {name}: {typ}")
+    |> String.concat "\n"
+
+  $"type {typeName} = {{\n{fields}\n}}"
+
+/// Generate an F# record type from a view definition
+let generateViewRecordType (viewName: string) (columns: ViewColumn list) : string =
+  let typeName =
+    if String.length viewName > 0 then
+      (string viewName.[0]).ToUpper() + viewName.[1..]
+    else
+      viewName
+
+  let fields =
+    columns
+    |> List.map (fun col ->
+      let fsharpType = mapSqlType col.columnType col.isNullable
+      let fieldName =
+        if String.length col.name > 0 then
+          (string col.name.[0]).ToUpper() + col.name.[1..]
+        else
+          col.name
+
+      fieldName, fsharpType)
     |> List.map (fun (name, typ) -> $"    {name}: {typ}")
     |> String.concat "\n"
 

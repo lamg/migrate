@@ -366,6 +366,63 @@ Db.txn conn {
 - Generated table code uses curried signatures for all methods
 - WithTransaction is NOT generated on types (verified)
 
+### 11. View Code Generation Support
+
+**Files:**
+- `src/MigLib/CodeGen/ViewIntrospection.fs` - SQLite introspection for view columns
+- `src/MigLib/CodeGen/TypeGenerator.fs` - Added `generateViewRecordType` function
+- `src/MigLib/CodeGen/QueryGenerator.fs` - Added `generateViewCode` and `generateViewGetAll` functions
+- `src/MigLib/CodeGen/CodeGen.fs` - Updated to process views alongside tables
+
+**Design Decision:**
+Views are read-only, so only `GetAll` method is generated (no Insert/Update/Delete). Column information is extracted using SQLite introspection by:
+1. Creating temporary in-memory database
+2. Creating all tables (views depend on them)
+3. Creating the view
+4. Using `PRAGMA table_info(view_name)` to extract columns
+
+**Benefits:**
+- Leverages SQLite's own type inference for views
+- No need to parse complex SELECT statements
+- Works with any valid SQL view including JOINs, CTEs, UNION, etc.
+- Consistent API with table types
+
+**Generated Code for Views:**
+```fsharp
+// View record type
+type Adult_students = {
+  Id: int64
+  Name: string
+}
+
+// View query method (read-only)
+type Adult_students with
+  static member GetAll (tx: SqliteTransaction) : Result<Adult_students list, SqliteException> =
+    try
+      use cmd = new SqliteCommand("SELECT id, name FROM adult_students", tx.Connection, tx)
+      use reader = cmd.ExecuteReader()
+      let results = ResizeArray<Adult_students>()
+      while reader.Read() do
+        results.Add({ Id = reader.GetInt64(0); Name = reader.GetString(1) })
+      Ok(results |> Seq.toList)
+    with
+    | :? SqliteException as ex -> Error ex
+```
+
+**Usage Example:**
+```fsharp
+Db.txn conn {
+  let! adults = Adult_students.GetAll
+  return adults
+}
+```
+
+**New Tests:** `src/Test/ViewCodeGenTest.fs` (4 tests)
+- View type generation includes columns
+- View GetAll method is generated
+- View with nullable columns generates option types
+- Complex view with JOIN is supported
+
 ## ⏭️ Next Steps (Priority Order)
 
 ### 1. Add More CRUD Methods (High Priority) ✅ COMPLETED
@@ -419,12 +476,13 @@ src/
 ├── MigLib/
 │   ├── Db.fs                       (✅ Transaction management for generated code)
 │   ├── CodeGen/
-│   │   ├── CodeGen.fs              (Main orchestration)
+│   │   ├── CodeGen.fs              (Main orchestration, processes tables and views)
 │   │   ├── FabulousAstHelpers.fs   (Placeholder)
 │   │   ├── FileMapper.fs           (SQL → F# mapping)
 │   │   ├── ProjectGenerator.fs     (.fsproj generation)
 │   │   ├── QueryGenerator.fs       (CRUD method generation with curried signatures)
-│   │   └── TypeGenerator.fs        (Record type generation)
+│   │   ├── TypeGenerator.fs        (Record type generation for tables and views)
+│   │   └── ViewIntrospection.fs    (✅ SQLite introspection for view columns)
 │   ├── DeclarativeMigrations/
 │   │   ├── FParsecSqlParser.fs     (✅ Active FParsec parser)
 │   │   └── SqlParser.fs            (✅ Uses FParsec parser, view post-processing)
@@ -436,7 +494,8 @@ src/
     ├── ViewMigration.fs            (✅ Passing)
     ├── UseAsLib.fs                 (✅ Passing)
     ├── CompositePKTest.fs          (✅ Passing - 4 tests)
-    └── TransactionTest.fs          (✅ Passing - 6 tests)
+    ├── TransactionTest.fs          (✅ Passing - 6 tests)
+    └── ViewCodeGenTest.fs          (✅ Passing - 4 tests)
 ```
 
 ## 🔧 Technical Details
@@ -497,12 +556,13 @@ let getPrimaryKey (table: CreateTable) : ColumnDef list =
 ## 🧪 Testing
 
 ### Current Test Status
-All 13 tests passing:
+All 17 tests passing:
 - ✅ TableMigration (6 cases)
 - ✅ ViewMigration
 - ✅ UseAsLib
 - ✅ CompositePKTest (4 tests for composite primary key support)
 - ✅ TransactionTest (6 tests for curried signatures and Db module)
+- ✅ ViewCodeGenTest (4 tests for view code generation)
 
 ### Manual Testing
 ```bash
@@ -654,21 +714,22 @@ When resuming:
 1. **FParsec parser is COMPLETE** ✅ - Robust SQL parsing with proper error recovery
 2. **Current implementation status:**
    - ✅ SQL parsing with FParsec (complete, active)
-   - ✅ Record type generation (working)
+   - ✅ Record type generation for tables and views (working)
    - ✅ All CRUD methods implemented (Insert, GetById, GetAll, Update, Delete)
    - ✅ Composite primary key support (complete - both column-level and table-level)
    - ✅ Transaction support with Db module (curried signatures + computation expression)
    - ✅ Db module (shared transaction management in MigLib)
+   - ✅ View code generation (read-only GetAll method with SQLite introspection)
    - ⏳ JOIN query generation (planned)
-   - ⏳ Code generation tests (partial - composite PK and transaction tests added)
+   - ⏳ Code generation tests (partial - composite PK, transaction, and view tests added)
    - ⏳ Integration with `mig commit` command (not yet implemented)
 
 3. Next priorities (in order):
-   - Write comprehensive code generation tests
    - Integrate code generation into `mig commit` command
    - Add JOIN query generation for foreign key relationships
+   - Write more comprehensive code generation tests
 
 4. Testing:
-   - Check migration tests: `cd src && dotnet test` (should show all 13 passing)
+   - Check migration tests: `cd src && dotnet test` (should show all 17 passing)
    - Check build: `cd src && dotnet build`
-   - Manual codegen test: `mkdir /tmp/test && cd /tmp/test && echo "CREATE TABLE test(id INTEGER PRIMARY KEY);" > test.sql && dotnet /path/to/mig codegen`
+   - Manual codegen test with views: `mkdir /tmp/test && cd /tmp/test && echo "CREATE TABLE test(id INTEGER PRIMARY KEY); CREATE VIEW test_view AS SELECT * FROM test;" > test.sql && dotnet /path/to/mig codegen`

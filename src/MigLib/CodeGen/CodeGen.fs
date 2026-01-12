@@ -19,6 +19,15 @@ let generateCodeForSqlFile (sqlFilePath: string) : Result<string, string> =
     let moduleName = FileMapper.sqlFileToModuleName sqlFilePath
     let fsharpFilePath = FileMapper.sqlFileToFSharpFile sqlFilePath
 
+    // Extract view columns using SQLite introspection
+    let! viewsWithColumns =
+      sqlFile.views
+      |> List.traverseResultM (fun view ->
+        result {
+          let! columns = ViewIntrospection.getViewColumns sqlFile.tables view
+          return (view, columns)
+        })
+
     // Generate module content
     let moduleContent =
       [ $"module {moduleName}"
@@ -28,7 +37,7 @@ let generateCodeForSqlFile (sqlFilePath: string) : Result<string, string> =
         "open FsToolkit.ErrorHandling"
         "open migrate.Db"
         ""
-        // Generate record types
+        // Generate record types for tables
         yield!
           sqlFile.tables
           |> List.map (fun table ->
@@ -45,9 +54,19 @@ let generateCodeForSqlFile (sqlFilePath: string) : Result<string, string> =
 
             $"type {typeName} = {{\n{fields}\n}}")
 
+        // Generate record types for views
+        yield!
+          viewsWithColumns
+          |> List.map (fun (view, columns) -> TypeGenerator.generateViewRecordType view.name columns)
+
         ""
-        // Generate query methods
-        yield! sqlFile.tables |> List.map QueryGenerator.generateTableCode ]
+        // Generate query methods for tables
+        yield! sqlFile.tables |> List.map QueryGenerator.generateTableCode
+
+        // Generate query methods for views (read-only)
+        yield!
+          viewsWithColumns
+          |> List.map (fun (view, columns) -> QueryGenerator.generateViewCode view.name columns) ]
       |> String.concat "\n"
 
     FileMapper.ensureDirectory fsharpFilePath

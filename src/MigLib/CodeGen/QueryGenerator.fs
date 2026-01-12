@@ -1,6 +1,7 @@
 module internal migrate.CodeGen.QueryGenerator
 
 open migrate.DeclarativeMigrations.Types
+open migrate.CodeGen.ViewIntrospection
 open Fabulous.AST
 open type Fabulous.AST.Ast
 
@@ -302,3 +303,42 @@ let generateTableCode (table: CreateTable) : string =
 
   $"""type {typeName} with
 {methods}"""
+
+/// Generate GetAll method for a view (read-only)
+let generateViewGetAll (viewName: string) (columns: ViewColumn list) : string =
+  let typeName = capitalize viewName
+  let columnNames = columns |> List.map (fun c -> c.name) |> String.concat ", "
+  let getSql = $"SELECT {columnNames} FROM {viewName}"
+
+  let fieldMappings =
+    columns
+    |> List.mapi (fun i col ->
+      let fieldName = capitalize col.name
+      let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+
+      if col.isNullable then
+        $"          {fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
+      else
+        $"          {fieldName} = reader.Get{method} {i}")
+    |> String.concat "\n"
+
+  $"""  static member GetAll (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
+    try
+      use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
+      use reader = cmd.ExecuteReader()
+      let results = ResizeArray<{typeName}>()
+      while reader.Read() do
+        results.Add({{
+{fieldMappings}
+        }})
+      Ok(results |> Seq.toList)
+    with
+    | :? SqliteException as ex -> Error ex"""
+
+/// Generate code for a view (read-only queries)
+let generateViewCode (viewName: string) (columns: ViewColumn list) : string =
+  let typeName = capitalize viewName
+  let getAllMethod = generateViewGetAll viewName columns
+
+  $"""type {typeName} with
+{getAllMethod}"""
