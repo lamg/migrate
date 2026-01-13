@@ -51,6 +51,7 @@ mig codegen
 - [Migration execution as library](./src/MigLib/Execution/README.md#migration-execution-using-miglib)
 - [F# code generation with type-safe CRUD operations](./src/MigLib/CodeGen/README.md)
 - [Migration log](./src/MigLib/MigrationLog/README.md)
+- [Seed data management with idempotent upserts](./spec.md#9-seed-data-management-with-idempotent-upserts)
 
 ## Commands
 
@@ -60,6 +61,7 @@ mig codegen
 - `mig schema` - Show the current database schema
 - `mig log [-s <steps-id>]` - Show migration history and execution metadata
 - `mig codegen [-d <directory>]` - Generate type-safe F# code with CRUD operations from SQL schema files
+- `mig seed` - Execute seed statements (INSERT OR REPLACE) from SQL files
 
 ## Contributing
 
