@@ -13,6 +13,7 @@ type Args =
   | [<CliPrefix(CliPrefix.None)>] Codegen of ParseResults<CodegenArgs>
   | [<CliPrefix(CliPrefix.None)>] Log of ParseResults<LogArgs>
   | [<CliPrefix(CliPrefix.None)>] Init of ParseResults<InitArgs>
+  | [<CliPrefix(CliPrefix.None)>] Seed of ParseResults<SeedArgs>
   | [<AltCommandLine("-nc")>] NoColors
   | [<AltCommandLine("-nl")>] NoLog
   | [<AltCommandLine("-v")>] Version
@@ -24,6 +25,7 @@ type Args =
       | Commit _ -> "generates and executes step by step a migration script"
       | Schema _ -> "show the database schema"
       | Codegen _ -> "generate F# types and queries from SQL schema files"
+      | Seed _ -> "execute seed statements (INSERT OR REPLACE) from SQL files"
       | NoColors -> "when present deactivates the SQL syntax highlighting"
       | Log _ -> "print the migration log"
       | NoLog -> "do not log the migration"
@@ -69,6 +71,12 @@ and LogArgs =
     member s.Usage =
       match s with
       | StepsId _ -> "Show migration steps by ID (a date shown by `mig log`)"
+
+and SeedArgs =
+  | [<NoCommandLine>] Dummy
+
+  interface IArgParserTemplate with
+    member s.Usage = ""
 
 let generate withColors =
   withColors
@@ -166,6 +174,25 @@ let init () =
   File.WriteAllText("schema.sql", sql)
   0
 
+let seed () =
+  match Exec.seedStatements () with
+  | Ok statements ->
+    if statements.IsEmpty then
+      printfn "No seed statements found (only tables with primary keys are seeded)"
+      0
+    else
+      match Exec.executeSeed statements with
+      | Ok results ->
+        results |> List.iter (printfn "%s")
+        printfn $"\n✅ Successfully seeded {statements.Length} table(s)"
+        0
+      | Error e ->
+        eprintfn $"Seed execution failed: {e}"
+        1
+  | Error e ->
+    eprintfn $"Seed generation failed: {e}"
+    1
+
 let version () =
   let asm = System.Reflection.Assembly.GetExecutingAssembly()
 
@@ -203,6 +230,7 @@ let main args =
     | Some(Codegen flags) -> codegen flags
     | Some(Log flags) -> log flags
     | Some(Init _) -> init ()
+    | Some(Seed _) -> seed ()
     | _ ->
       eprintfn $"{parser.PrintUsage()}"
       1

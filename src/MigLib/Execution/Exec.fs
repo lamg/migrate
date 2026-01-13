@@ -175,6 +175,113 @@ let executeMigration (statements: string list) =
   | Error e -> Error e
 
 
+let internal validatePrimaryKeys (file: Types.SqlFile) : Types.InsertInto list =
+  file.inserts
+  |> List.filter (fun insert ->
+    let table = file.tables |> List.tryFind (fun t -> t.name = insert.table)
+
+    match table with
+    | None ->
+      eprintfn $"⚠️  Skipping INSERT for table '{insert.table}': table not found"
+      false
+    | Some t ->
+      let hasPk =
+        t.columns
+        |> List.exists (fun c ->
+          c.constraints
+          |> List.exists (function
+            | Types.PrimaryKey _ -> true
+            | _ -> false))
+        || t.constraints
+           |> List.exists (function
+             | Types.PrimaryKey _ -> true
+             | _ -> false)
+
+      if not hasPk then
+        eprintfn $"⚠️  Skipping INSERT for table '{insert.table}': no primary key"
+
+      hasPk)
+
+let seedStatements () =
+  result {
+    let dir = Environment.CurrentDirectory |> DirectoryInfo
+    let sources = readDirSql dir
+
+    let! file =
+      if sources.IsEmpty then
+        Error(Types.ReadSchemaFailed "No SQL files found")
+      else
+        parseSqlFiles sources
+
+    // Validate primary keys and filter
+    let validInserts = validatePrimaryKeys file
+
+    // Sort by dependencies
+    let sorted, _ = Solve.sortFile file
+
+    // Create a map of table name to sorted position for ordering
+    let sortedIndex =
+      sorted.sortedRelations
+      |> List.indexed
+      |> List.map (fun (i, name) -> name, i)
+      |> Map.ofList
+
+    // Generate SQL in dependency order, including all inserts
+    let statements =
+      validInserts
+      |> List.sortBy (fun insert ->
+        sortedIndex |> Map.tryFind insert.table |> Option.defaultValue Int32.MaxValue)
+      |> List.map GenerateSql.Seed.upsertSql
+
+    return statements
+  }
+
+let executeSeed (statements: string list) =
+  let dir = Environment.CurrentDirectory |> DirectoryInfo
+  let dbFile = getDbFile dir
+
+  match connect dbFile with
+  | Ok conn ->
+    use conn = conn
+    conn.Open()
+    use txn = conn.BeginTransaction()
+
+    statements
+    |> List.fold
+      (fun (hasError, i, xs) sql ->
+        let step = sql |> FormatSql.format true
+
+        if not hasError then
+          try
+            use cmd = conn.CreateCommand()
+            cmd.Transaction <- txn
+            cmd.CommandText <- sql
+            cmd.ExecuteNonQuery() |> ignore
+            false, i + 1, $"✅ {i}\n{step}\n" :: xs
+          with e ->
+            let msg =
+              match e with
+              | :? SqliteException as x -> x.Message
+              | _ -> e.Message
+
+            txn.Rollback()
+            true, i + 1, $"❌ {i}\n{step}\n{msg}" :: xs
+        else
+          true, i + 1, $"⚫ {i}\n{step}" :: xs)
+      (false, 0, [])
+    |> function
+      | hasError, _, xs ->
+        let xs = List.rev xs
+
+        if not hasError then
+          txn.Commit()
+          Ok xs
+        else
+          Error(Types.FailedSteps xs)
+
+  | Error e -> Error e
+
+
 let getDbSql withColors =
   let dir = Environment.CurrentDirectory |> DirectoryInfo
   let dbFile = getDbFile dir

@@ -100,6 +100,20 @@ let dependentRelations (file: SqlFile) =
 
     [ (i.name, i.table) ], missing
 
+  let insertDependencies (i: InsertInto) =
+    let table = file.tables |> List.tryFind (fun t -> t.name = i.table)
+
+    match table with
+    | Some t ->
+      let fkRefs =
+        t.constraints
+        |> List.choose (function
+          | ForeignKey fk -> Some(fk.refTable, i.table)
+          | _ -> None)
+
+      fkRefs, []
+    | None -> [], [ i.table ]
+
   let unzipConcat = List.unzip >> fun (a, b) -> List.concat a, List.concat b
   let tables, missingT = file.tables |> List.map dependentTables |> unzipConcat
   let rs, missingR = file.views |> List.map viewDependencies |> unzipConcat
@@ -110,12 +124,19 @@ let dependentRelations (file: SqlFile) =
   let triggerTables, missingTT =
     file.triggers |> List.map triggerDependencies |> unzipConcat
 
+  let insertTables, missingIns =
+    file.inserts |> List.map insertDependencies |> unzipConcat
+
   let graph = Graph<string>()
   file.tables |> List.iter (_.name >> graph.addVertex)
   file.views |> List.iter (_.name >> graph.addVertex)
   file.indexes |> List.iter (_.name >> graph.addVertex)
-  tables @ rs @ indexedTables @ triggerTables |> List.iter graph.addEdge
-  graph, missingT @ missingR @ missingIT @ missingTT
+  file.inserts |> List.iter (_.table >> graph.addVertex)
+
+  tables @ rs @ indexedTables @ triggerTables @ insertTables
+  |> List.iter graph.addEdge
+
+  graph, missingT @ missingR @ missingIT @ missingTT @ missingIns
 
 let tableDifferences (left: SqlFile) (right: SqlFile) =
   // appears on left and not on right -> table removed

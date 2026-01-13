@@ -131,3 +131,21 @@ module Column =
       Table.recreateSql views table |> Some
     else
       None
+
+module Seed =
+  let private formatValue (expr: Expr) =
+    match expr with
+    | String s -> $"'{s}'"
+    | Integer i -> string i
+    | Real r -> string r
+    | Value v -> v
+
+  let upsertSql (insert: InsertInto) =
+    let cols = insert.columns |> sepComma id
+
+    let valueRows =
+      insert.values
+      |> List.map (fun vals -> vals |> List.map formatValue |> String.concat ", " |> sprintf "(%s)")
+      |> String.concat ", "
+
+    $"INSERT OR REPLACE INTO {insert.table}({cols}) VALUES {valueRows}"

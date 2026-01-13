@@ -683,6 +683,131 @@ Generated files:
   ...
 ```
 
+### 9. Seed Data Management with Idempotent Upserts
+
+**Purpose:** Execute SQL INSERT statements as idempotent upserts using primary keys, enabling safe and repeatable database seeding.
+
+**Command:** `mig seed`
+
+#### Overview
+
+The seed feature allows you to define initial data for your database using INSERT statements placed directly in your SQL schema files. These seeds are executed as `INSERT OR REPLACE` operations, making them idempotent—they can be run multiple times without errors.
+
+#### How It Works
+
+1. **INSERT Statement Parsing**: The SQL parser extracts INSERT statements from your `.sql` files alongside CREATE TABLE and other schema definitions.
+
+2. **Primary Key Validation**: Only tables with primary keys are seeded. Tables without PKs are skipped with warning messages. This requirement ensures `INSERT OR REPLACE` can properly detect and update existing rows.
+
+3. **Dependency Ordering**: INSERT statements are automatically ordered based on foreign key relationships. Child tables (those with foreign key constraints) are seeded after their parent tables, preventing constraint violations.
+
+4. **Atomic Transaction**: All seed operations execute within a single database transaction. If any INSERT fails, the entire seed operation is rolled back, maintaining database consistency.
+
+5. **Upsert Semantics**: `INSERT OR REPLACE` allows seed operations to be idempotent. Running `mig seed` multiple times produces the same result without errors—new rows are inserted, and existing rows are updated.
+
+#### Schema File Example
+
+```sql
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE posts (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- Seed data (executed with mig seed, ignored during migrations)
+INSERT INTO users(id, email, name) VALUES (1, 'alice@example.com', 'Alice');
+INSERT INTO users(id, email, name) VALUES (2, 'bob@example.com', 'Bob');
+
+INSERT INTO posts(id, user_id, title, body)
+  VALUES (1, 1, 'Hello World', 'My first post');
+INSERT INTO posts(id, user_id, title, body)
+  VALUES (2, 1, 'Second Post', 'Another post from Alice');
+INSERT INTO posts(id, user_id, title, body)
+  VALUES (3, 2, 'Bob''s Post', 'A post from Bob');
+```
+
+#### Workflow
+
+**Step 1: Define schema and seed data**
+```bash
+# schema.sql contains both CREATE TABLE and INSERT statements
+mig status  # Preview the migration
+```
+
+**Step 2: Apply migrations to create tables**
+```bash
+mig commit  # Executes CREATE TABLE statements
+```
+
+**Step 3: Seed the database**
+```bash
+mig seed    # Executes INSERT OR REPLACE statements
+```
+
+**Step 4: Re-seed if needed (idempotent)**
+```bash
+mig seed    # Can be run multiple times safely
+```
+
+#### Execution Output
+
+```
+✅ 0
+INSERT OR REPLACE INTO users(id, email, name) VALUES (1, 'alice@example.com', 'Alice')
+
+✅ 1
+INSERT OR REPLACE INTO users(id, email, name) VALUES (2, 'bob@example.com', 'Bob')
+
+✅ 2
+INSERT OR REPLACE INTO posts(id, user_id, title, body) VALUES (1, 1, 'Hello World', 'My first post')
+
+✅ 3
+INSERT OR REPLACE INTO posts(id, user_id, title, body) VALUES (2, 1, 'Second Post', 'Another post from Alice')
+
+✅ 4
+INSERT OR REPLACE INTO posts(id, user_id, title, body) VALUES (3, 2, 'Bob''s Post', 'A post from Bob')
+
+✅ Successfully seeded 5 table(s)
+```
+
+#### Key Features
+
+- **Automatic Dependency Resolution**: Foreign key relationships are analyzed to determine correct execution order
+- **Primary Key Enforcement**: Upsert semantics require primary keys; tables without them are skipped
+- **Atomic Operations**: All seeds execute in a single transaction; any failure rolls back all changes
+- **Idempotent Execution**: Run seeds multiple times without errors or data corruption
+- **Multiple Values Support**: Single INSERT statement with multiple value tuples: `VALUES (1), (2), (3)`
+- **Error Reporting**: Clear error messages for missing tables, constraint violations, and FK failures
+
+#### Limitations
+
+- **Single-Column PKs**: Works best with single-column primary keys (composite PKs supported but less common)
+- **No Multi-Table Transactions**: Each INSERT is a separate operation; all-or-nothing semantics apply to all seeds together
+- **FK-Only Ordering**: Only foreign key constraints are used for ordering; other dependencies (views, triggers) don't affect seed order
+
+#### Implementation Status
+
+✅ COMPLETE - Fully implemented and integrated (January 2025)
+
+- ✅ INSERT statement parsing with FParsec
+- ✅ Primary key validation and filtering
+- ✅ Foreign key-based dependency ordering with topological sort
+- ✅ `INSERT OR REPLACE` SQL generation
+- ✅ Atomic transaction-based execution with rollback
+- ✅ `mig seed` CLI command
+- ✅ Idempotent upsert behavior
+- ✅ Multi-row INSERT support
+- ✅ Warning messages for skipped tables
+
 ## Architecture
 
 ### High-Level Components

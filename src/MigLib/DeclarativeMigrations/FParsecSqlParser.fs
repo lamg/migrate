@@ -47,7 +47,10 @@ let keywords =
     "GROUP"
     "ORDER"
     "LIMIT"
-    "UNION" ]
+    "UNION"
+    "INSERT"
+    "INTO"
+    "VALUES" ]
   |> Set.ofList
 
 // Identifier parsing - handles quoted and unquoted identifiers
@@ -93,17 +96,20 @@ let sqlType: Parser<SqlType, unit> =
       typeParser "STRING" SqlString ]
   <|> preturn SqlFlexible
 
-// Expression parsing (simplified - stores as Value for now)
+// Expression parsing
 let expression: Parser<Expr, unit> =
   let quotedString =
-    between (pchar '\'') (pchar '\'') (manySatisfy (fun c -> c <> '\''))
+    between (pchar '\'') (pchar '\'') (manySatisfy (fun c -> c <> '\'')) |>> String
 
-  let number = pint32
+  let floatingPoint = pfloat |>> Real
 
-  choice
-    [ quotedString |>> Value
-      number |>> Integer
-      manySatisfy (fun c -> c <> ',' && c <> ')') |>> fun s -> Value(s.Trim()) ]
+  let integer = pint32 |>> Integer
+
+  let unquotedValue =
+    manySatisfy (fun c -> c <> ',' && c <> ')' && c <> ';')
+    |>> fun s -> Value(s.Trim())
+
+  choice [ attempt quotedString; attempt floatingPoint; attempt integer; unquotedValue ]
   .>> ws
 
 // Column constraint parsing
@@ -308,12 +314,25 @@ let createTrigger: Parser<CreateTrigger, unit> =
       sqlTokens = [ sql.Trim() ]
       dependencies = if System.String.IsNullOrEmpty table then [] else [ table ] }
 
+// INSERT INTO parsing
+let insertInto: Parser<InsertInto, unit> =
+  keyword "INSERT" >>. keyword "INTO" >>. identifier
+  .>>. (opar >>. sepBy1 identifier comma .>> cpar)
+  .>>. (keyword "VALUES"
+        >>. sepBy1 (opar >>. sepBy1 expression comma .>> cpar) (comma .>> ws))
+  .>> opt semi
+  |>> fun (((tableName, columnNames), valueLists)) ->
+    { table = tableName
+      columns = columnNames
+      values = valueLists }
+
 // Statement parsing
 type Statement =
   | TableStmt of CreateTable
   | ViewStmt of CreateView
   | IndexStmt of CreateIndex
   | TriggerStmt of CreateTrigger
+  | InsertStmt of InsertInto
 
 let statement: Parser<Statement, unit> =
   ws
@@ -321,7 +340,8 @@ let statement: Parser<Statement, unit> =
     [ attempt createTable |>> TableStmt
       attempt createView |>> ViewStmt
       attempt createIndex |>> IndexStmt
-      attempt createTrigger |>> TriggerStmt ]
+      attempt createTrigger |>> TriggerStmt
+      attempt insertInto |>> InsertStmt ]
   .>> ws
 
 // Parse multiple statements
@@ -345,6 +365,10 @@ let parseSqlFile (fileName: string, sql: string) : Result<SqlFile, string> =
         file <-
           { file with
               triggers = t :: file.triggers }
+      | InsertStmt i ->
+        file <-
+          { file with
+              inserts = i :: file.inserts }
 
     Result.Ok file
   | Failure(errorMsg, _, _) -> Result.Error $"Parse error in {fileName}: {errorMsg}"
