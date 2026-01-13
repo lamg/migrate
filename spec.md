@@ -148,6 +148,7 @@ Provides both CLI and library interfaces for executing migrations:
 - `mig log` - Display migration history and metadata
 - `mig schema` - Show current database schema
 - `mig codegen` - Generate F# types from SQL schema files
+- `mig seed` - Execute seed statements (INSERT OR REPLACE) from SQL files
 
 **Library Interface:**
 - MigLib NuGet package for programmatic access
