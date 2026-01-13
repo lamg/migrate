@@ -81,3 +81,92 @@ All changes should pass the existing test suite:
 ```bash
 cd src && dotnet test
 ```
+
+## Documentation Conventions
+
+### Feature Documentation Structure
+
+The project uses two main documentation files with distinct purposes:
+
+#### spec.md - Specification and Feature Documentation
+**Purpose:** Complete specification of the project including all implemented and planned features
+
+**Contains:**
+- Comprehensive overview of the project
+- Complete documentation of all implemented features with examples
+- Architecture details and design decisions
+- API documentation and usage examples
+- Testing strategy and current test counts
+- Future enhancements and planned features
+
+**When to update:**
+- When a feature is fully implemented and tested
+- When architecture or design decisions are finalized
+- When API or usage patterns change
+- When test coverage changes significantly
+
+#### PROGRESS.md - Development History and Current Status
+**Purpose:** Lightweight record of development progress and implementation history
+
+**Contains:**
+- High-level status summary (completed tasks, current work)
+- Implementation timeline and milestones
+- Brief notes on what was implemented in each phase
+- Future work and next steps
+- Quick reference for resuming development
+
+**When to update:**
+- During active development to track progress
+- When completing major milestones or phases
+- When planning next steps
+
+### Documentation Workflow
+
+1. **During Development:**
+   - Track progress in PROGRESS.md with status updates
+   - Document implementation decisions and challenges
+   - Maintain lightweight notes about what was done
+
+2. **After Feature Completion:**
+   - Move complete feature documentation to spec.md
+   - Include usage examples, API documentation, and behavior description
+   - Update test counts and status in spec.md
+   - Simplify PROGRESS.md entry to reference spec.md for details
+
+3. **Long-term:**
+   - spec.md serves as the authoritative documentation
+   - PROGRESS.md provides historical context for development
+   - Both files complement each other but avoid duplication
+
+### Example
+
+**In spec.md:**
+```markdown
+### 8. Normalized Schema Representation with Discriminated Unions
+
+For normalized database schemas (2NF) that eliminate NULLs...
+
+**Schema Example:**
+[full examples with code]
+
+**Generated Code:**
+[complete generated code examples]
+
+**Implementation Status:**
+✅ COMPLETE - Fully implemented and integrated (January 2025)
+[detailed feature list]
+```
+
+**In PROGRESS.md:**
+```markdown
+## ✅ Feature Complete: Normalized Schema Representation
+
+**Status:** ✅ COMPLETE - All 7 phases implemented
+
+**Progress Summary:**
+- ✅ Phase 1: Detection and Validation (11 tests)
+- ✅ Phase 2: Type Generation (8 tests)
+[brief phase list]
+
+See spec.md section 8 for complete documentation and usage examples.
+```

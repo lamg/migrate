@@ -10,6 +10,61 @@ Migrate is a declarative database migration tool and F# type generator for SQLit
 **Database:** SQLite
 **License:** Apache 2.0
 
+## Functional Type Relational Mapping (FTRM)
+
+While Object-Relational Mapping (ORM) tools map database relations to object-oriented classes, Migrate implements **Functional Type Relational Mapping (FTRM)** - a paradigm that maps database relations to functional types.
+
+### ORM vs FTRM Comparison
+
+**Traditional ORM (Object-Relational Mapping):**
+```csharp
+// Relations → Objects
+public class Student {
+    public long Id { get; set; }
+    public string Name { get; set; }
+    public string? Address { get; set; }  // Nullable reference
+}
+
+// Optional data represented by null
+var student = new Student { Id = 1, Name = "Alice", Address = null };
+```
+
+**FTRM (Functional Type Relational Mapping):**
+```fsharp
+// Relations → Functional Types
+type Student = {
+    Id: int64
+    Name: string
+    Address: string option  // Option type for nullable data
+}
+
+// Optional data represented by option type
+let student = { Id = 1L; Name = "Alice"; Address = None }
+```
+
+### Why Functional Types?
+
+Functional types provide several advantages for database access:
+
+1. **Algebraic Data Types (ADTs)**: Discriminated unions naturally represent denormalized data and table relationships
+2. **Immutability**: Generated types are immutable by default, preventing accidental mutations
+3. **Type Safety**: Option types make nullability explicit and compiler-enforced
+4. **Pattern Matching**: Exhaustive matching ensures all cases are handled
+5. **Composition**: Functional types compose better through function pipelines
+6. **Domain Modeling**: Sum types (DUs) model domain states explicitly (e.g., `Student.Base | Student.WithAddress`)
+
+### FTRM in Practice
+
+Migrate generates functional types that preserve database semantics:
+
+- **Tables → Records**: Each table becomes an F# record type with properly typed fields
+- **NULL → Option**: Nullable columns map to `option` types
+- **Foreign Keys → Types**: Referenced tables become typed references (planned)
+- **1:1 Extensions → Discriminated Unions**: Optional related data becomes DU cases instead of nullable fields
+- **Transactions → Functions**: All operations are pure functions taking a transaction parameter
+
+This functional approach provides **type-level guarantees** about data structure and relationships, catching errors at compile time rather than runtime.
+
 ## Core Features
 
 ### 1. Declarative Migrations
@@ -575,6 +630,59 @@ For each table T in schema:
 - All columns must be NOT NULL (nullable columns cause generation error)
 - Manual schema migration if changing from option-based to DU-based representation
 
+**Convenience Properties:**
+
+Generated discriminated unions include convenience properties that expose all fields:
+
+```fsharp
+type Student with
+  // Common fields (in all cases) - non-optional
+  member this.Id : int64 =
+    match this with
+    | Student.Base data -> data.Id
+    | Student.WithAddress data -> data.Id
+
+  member this.Name : string =
+    match this with
+    | Student.Base data -> data.Name
+    | Student.WithAddress data -> data.Name
+
+  // Partial fields (only in some cases) - optional
+  member this.Address : string option =
+    match this with
+    | Student.Base _ -> None
+    | Student.WithAddress data -> Some data.Address
+```
+
+This allows accessing fields without manual pattern matching: `student.Address` returns `string option`.
+
+**Implementation Status:**
+
+✅ **COMPLETE** - Fully implemented and integrated (January 2025)
+
+The normalized schema feature has been fully implemented with:
+- Automatic detection of extension tables with comprehensive validation
+- Discriminated union type generation (New* and query types)
+- Convenience properties for all fields (common and partial)
+- Complete CRUD operations with pattern matching (Insert, GetAll, GetById, GetOne, Update, Delete)
+- Comprehensive error handling with actionable suggestions
+- Integration with `mig codegen` CLI command
+- 65 tests covering all functionality
+
+Statistics display in CLI:
+```
+$ mig codegen
+Code generation complete!
+
+Statistics:
+  Normalized tables (DU): 1
+  Regular tables (records): 2
+  Views: 0
+
+Generated files:
+  ...
+```
+
 ## Architecture
 
 ### High-Level Components
@@ -872,7 +980,7 @@ Complete F# Source Files
 
 ## Design Decisions
 
-### 1. FParsec Parser Instead of ANTLR4
+### 1. FParsec Parser for SQL Parsing
 **Decision:** Implement an FParsec-based parser in F# instead of using ANTLR4 with generated C# code
 
 **Rationale:**
@@ -884,6 +992,8 @@ Complete F# Source Files
 - No build-time code generation complexity
 
 **Trade-off:** Additional dependency (FParsec) adds ~200KB to binary, but provides superior error recovery and maintainability compared to regex-based approach
+
+**Status:** ✅ Fully implemented. Handles CREATE TABLE, CREATE VIEW, CREATE INDEX, CREATE TRIGGER with comprehensive constraint support.
 
 ### 2. Declarative vs. Imperative Migrations
 **Decision:** Use declarative approach where users define target schema, not individual migration steps
@@ -1042,34 +1152,45 @@ Complete F# Source Files
 5. Automatic data transformation suggestions
 
 ### Potential Improvements
-1. Full SQL parser using parser combinators (FParsec)
-2. Migration templates for common patterns
-3. Integration with version control systems
-4. Web UI for migration management
-5. Performance optimizations for large schemas
-6. Generated code optimization (cached SqliteCommand instances)
-7. Query result streaming for large datasets
-8. Bulk insert operations
+1. Migration templates for common patterns
+2. Integration with version control systems
+3. Web UI for migration management
+4. Performance optimizations for large schemas
+5. Generated code optimization (cached SqliteCommand instances)
+6. Query result streaming for large datasets
+7. Bulk insert operations
+8. Combinatorial cases for normalized schemas (multiple active extensions)
+9. Flexible naming patterns for extension tables (via configuration)
+10. Automated migration from option-based to DU-based representation
 
 ## Testing Strategy
 
-**Test Coverage:**
+**Test Coverage:** 86 tests (all passing)
 
 **Migration Tests:**
 - Table migration tests - verifies DDL generation for various schema changes
 - View migration tests - ensures dependency ordering for views
 - Library usage tests - confirms programmatic API functionality
-- Parser tests - validates SQL parsing accuracy
+- Composite primary key tests - validates multi-column PK support
 
 **Code Generation Tests:**
 - Type generation tests - verifies correct F# record type generation from SQL
 - CRUD method tests - ensures generated Insert/Update/Delete/Get methods compile and work
-- JOIN query tests - validates foreign key relationship query generation
 - Transaction helper tests - confirms transaction methods work correctly
 - Type mapping tests - verifies SQL type → F# type conversions
 - Null handling tests - ensures option types generated for nullable columns
+- View code generation tests - validates read-only GetAll and GetOne for views
 - Project file generation tests - validates .fsproj structure and dependencies
-- Integration tests - end-to-end tests from SQL schema to working F# code
+
+**Normalized Schema Tests (65 tests):**
+- Detection and validation tests (11) - extension table detection, FK validation
+- Type generation tests (8) - DU generation, case naming
+- Property generation tests (7) - convenience properties for common/partial fields
+- Insert query tests (8) - pattern matching, multi-table inserts
+- Read query tests (8) - LEFT JOINs, case selection, GetAll/GetById/GetOne
+- Update/Delete query tests (9) - case transitions, FK cascades
+- Validation error tests (10) - error messages with actionable suggestions
+- Integration tests (5) - end-to-end code generation with statistics
 
 **Test Framework:** xUnit
 **Run Tests:** `cd src && dotnet test`

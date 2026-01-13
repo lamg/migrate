@@ -60,7 +60,7 @@ let capitalize (s: string) =
   if System.String.IsNullOrWhiteSpace s then
     s
   else
-    s.Split('_')
+    s.Split '_'
     |> Array.map (fun part ->
       if part.Length > 0 then
         (string part.[0]).ToUpper() + part.[1..].ToLower()

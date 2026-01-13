@@ -96,8 +96,7 @@ let ``Complex view with JOIN is supported`` () =
     return columns.Length
   }
   |> function
-    | Ok count ->
-      Assert.Equal(2, count) // name and title columns
+    | Ok count -> Assert.Equal(2, count) // name and title columns
     | Error e -> Assert.Fail $"View introspection failed: {e}"
 
 [<Fact>]

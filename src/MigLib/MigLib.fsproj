@@ -37,6 +37,9 @@
     <Compile Include="CodeGen\FabulousAstHelpers.fs" />
     <Compile Include="CodeGen\ViewIntrospection.fs" />
     <Compile Include="CodeGen\TypeGenerator.fs" />
+    <Compile Include="CodeGen\NormalizedSchema.fs" />
+    <Compile Include="CodeGen\NormalizedTypeGenerator.fs" />
+    <Compile Include="CodeGen\NormalizedQueryGenerator.fs" />
     <Compile Include="CodeGen\QueryGenerator.fs" />
     <Compile Include="CodeGen\FileMapper.fs" />
     <Compile Include="CodeGen\ProjectGenerator.fs" />

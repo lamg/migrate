@@ -143,10 +143,17 @@ let codegen (flags: ParseResults<CodegenArgs>) =
 
   CodeGen.generateCode directory
   |> function
-    | Ok files ->
+    | Ok stats ->
+      printfn "Code generation complete!"
+      printfn ""
+      printfn "Statistics:"
+      printfn $"  Normalized tables (DU): {stats.NormalizedTables}"
+      printfn $"  Regular tables (records): {stats.RegularTables}"
+      printfn $"  Views: {stats.Views}"
+      printfn ""
       printfn "Generated files:"
 
-      for file in files do
+      for file in stats.GeneratedFiles do
         printfn $"  {file}"
 
       0

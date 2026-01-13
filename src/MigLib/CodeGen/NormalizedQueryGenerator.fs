@@ -1,0 +1,579 @@
+/// Module for generating CRUD query methods for normalized schemas with discriminated unions.
+/// Generates methods with pattern matching for DU cases.
+module internal migrate.CodeGen.NormalizedQueryGenerator
+
+open migrate.DeclarativeMigrations.Types
+
+/// Helper to get reader method name from F# type
+let private readerMethod (t: string) =
+  t.Replace("int64", "Int64").Replace("string", "String").Replace("float", "Double").Replace("DateTime", "DateTime")
+
+/// Get the non-PK columns from a table (for INSERT)
+let private getInsertColumns (table: CreateTable) : ColumnDef list =
+  table.columns
+  |> List.filter (fun col ->
+    // Exclude auto-increment primary key columns
+    not (
+      col.constraints
+      |> List.exists (fun c ->
+        match c with
+        | PrimaryKey pk -> pk.isAutoincrement
+        | _ -> false)
+    ))
+
+/// Generate SQL INSERT statement for a table with specific columns
+let private generateInsertSql (tableName: string) (columns: ColumnDef list) : string =
+  let columnNames = columns |> List.map (fun c -> c.name) |> String.concat ", "
+  let paramNames = columns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "
+  $"INSERT INTO {tableName} ({columnNames}) VALUES ({paramNames})"
+
+/// Generate parameter binding code for columns
+let private generateParamBindings (columns: ColumnDef list) (dataAccessor: string) : string list =
+  columns
+  |> List.map (fun col ->
+    let fieldName = TypeGenerator.toPascalCase col.name
+    let isNullable = TypeGenerator.isColumnNullable col
+
+    if isNullable then
+      $"      cmd.Parameters.AddWithValue(\"@{col.name}\", match {dataAccessor}.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+    else
+      $"      cmd.Parameters.AddWithValue(\"@{col.name}\", {dataAccessor}.{fieldName}) |> ignore")
+
+/// Generate the Base case insert (single table)
+let private generateBaseCase (baseTable: CreateTable) (typeName: string) : string =
+  let insertColumns = getInsertColumns baseTable
+  let insertSql = generateInsertSql baseTable.name insertColumns
+  let paramBindings = generateParamBindings insertColumns "data" |> String.concat "\n"
+
+  $"""      | New{typeName}.Base data ->
+        // Single INSERT into base table
+        use cmd = new SqliteCommand("{insertSql}", tx.Connection, tx)
+{paramBindings}
+        cmd.ExecuteNonQuery() |> ignore
+        use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+        let {baseTable.name}Id = lastIdCmd.ExecuteScalar() |> unbox<int64>
+        Ok {baseTable.name}Id"""
+
+/// Generate an extension case insert (multi-table)
+let private generateExtensionCase (baseTable: CreateTable) (extension: ExtensionTable) (typeName: string) : string =
+  let caseName = TypeGenerator.toPascalCase extension.aspectName
+  let baseInsertColumns = getInsertColumns baseTable
+  let baseInsertSql = generateInsertSql baseTable.name baseInsertColumns
+
+  let baseParamBindings =
+    generateParamBindings baseInsertColumns "data" |> String.concat "\n"
+
+  // Extension columns excluding the FK column
+  let extensionInsertColumns =
+    extension.table.columns
+    |> List.filter (fun col -> col.name <> extension.fkColumn)
+
+  let extensionInsertSql =
+    generateInsertSql extension.table.name extensionInsertColumns
+
+  let extensionParamBindings =
+    generateParamBindings extensionInsertColumns "data" |> String.concat "\n"
+
+  $"""      | New{typeName}.With{caseName} data ->
+        // Two inserts in same transaction (atomic)
+        use cmd1 = new SqliteCommand("{baseInsertSql}", tx.Connection, tx)
+{baseParamBindings}
+        cmd1.ExecuteNonQuery() |> ignore
+
+        use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+        let {baseTable.name}Id = lastIdCmd.ExecuteScalar() |> unbox<int64>
+
+        use cmd2 = new SqliteCommand("INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "}) VALUES (@{extension.fkColumn}, {extensionInsertColumns
+                                                                                                                                                                                                              |> List.map (fun c -> $"@{{c.name}}")
+                                                                                                                                                                                                              |> String.concat ", "})", tx.Connection, tx)
+        cmd2.Parameters.AddWithValue("@{extension.fkColumn}", {baseTable.name}Id) |> ignore
+{extensionParamBindings}
+        cmd2.ExecuteNonQuery() |> ignore
+        Ok {baseTable.name}Id"""
+
+/// Generate the Insert method for a normalized table
+let generateInsert (normalized: NormalizedTable) : string =
+  let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
+
+  // Generate Base case
+  let baseCase = generateBaseCase normalized.baseTable typeName
+
+  // Generate extension cases
+  let extensionCases =
+    normalized.extensions
+    |> List.map (fun ext -> generateExtensionCase normalized.baseTable ext typeName)
+    |> String.concat "\n\n"
+
+  let allCases =
+    if normalized.extensions.IsEmpty then
+      baseCase
+    else
+      $"{baseCase}\n\n{extensionCases}"
+
+  $"""  static member Insert (item: New{typeName}) (tx: SqliteTransaction)
+    : Result<int64, SqliteException> =
+    try
+      match item with
+{allCases}
+    with
+    | :? SqliteException as ex -> Error ex"""
+
+/// Get the primary key column(s) from a table
+let private getPrimaryKeyColumns (table: CreateTable) : ColumnDef list =
+  // Check for table-level primary keys first
+  let tableLevelPk =
+    table.constraints
+    |> List.tryPick (fun c ->
+      match c with
+      | PrimaryKey pk when pk.columns.Length > 0 -> Some pk.columns
+      | _ -> None)
+
+  match tableLevelPk with
+  | Some cols -> table.columns |> List.filter (fun col -> List.contains col.name cols)
+  | None ->
+    // Check for column-level primary keys
+    table.columns
+    |> List.filter (fun col ->
+      col.constraints
+      |> List.exists (fun c ->
+        match c with
+        | PrimaryKey _ -> true
+        | _ -> false))
+
+/// Generate LEFT JOIN clauses for all extension tables
+let private generateLeftJoins (baseTable: CreateTable) (extensions: ExtensionTable list) : string =
+  extensions
+  |> List.mapi (fun i ext ->
+    let alias = $"ext{i}"
+    $"LEFT JOIN {ext.table.name} {alias} ON {baseTable.name}.id = {alias}.{ext.fkColumn}")
+  |> String.concat "\n         "
+
+/// Generate column list for SELECT with proper aliases
+let private generateSelectColumns (baseTable: CreateTable) (extensions: ExtensionTable list) : string =
+  let baseColumns =
+    baseTable.columns
+    |> List.map (fun c -> $"{baseTable.name}.{c.name}")
+    |> String.concat ", "
+
+  let extensionColumns =
+    extensions
+    |> List.mapi (fun i ext ->
+      ext.table.columns
+      |> List.filter (fun col -> col.name <> ext.fkColumn)
+      |> List.map (fun c -> $"ext{i}.{c.name}")
+      |> String.concat ", ")
+    |> List.filter (fun s -> s <> "")
+    |> String.concat ", "
+
+  if extensionColumns = "" then
+    baseColumns
+  else
+    $"{baseColumns}, {extensionColumns}"
+
+/// Generate field reading code for base table columns
+let private generateBaseFieldReads (baseTable: CreateTable) (startIndex: int) : string list =
+  baseTable.columns
+  |> List.mapi (fun i col ->
+    let fieldName = TypeGenerator.toPascalCase col.name
+    let colIndex = startIndex + i
+    let isNullable = TypeGenerator.isColumnNullable col
+    let readerMethod = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+
+    if isNullable then
+      $"          {fieldName} = if reader.IsDBNull {colIndex} then None else Some(reader.Get{readerMethod} {colIndex})"
+    else
+      $"          {fieldName} = reader.Get{readerMethod} {colIndex}")
+
+/// Generate field reading code for extension columns (excluding FK)
+let private generateExtensionFieldReads (extension: ExtensionTable) (startIndex: int) : string list =
+  extension.table.columns
+  |> List.filter (fun col -> col.name <> extension.fkColumn)
+  |> List.mapi (fun i col ->
+    let fieldName = TypeGenerator.toPascalCase col.name
+    let colIndex = startIndex + i
+    let isNullable = TypeGenerator.isColumnNullable col
+    let readerMethod = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+
+    if isNullable then
+      $"          {fieldName} = if reader.IsDBNull {colIndex} then None else Some(reader.Get{readerMethod} {colIndex})"
+    else
+      $"          {fieldName} = reader.Get{readerMethod} {colIndex}")
+
+/// Generate pattern matching for case selection based on NULL checks
+let private generateCaseSelection
+  (baseTable: CreateTable)
+  (extensions: ExtensionTable list)
+  (typeName: string)
+  : string =
+  // Generate NULL check variables for each extension
+  let nullChecks =
+    extensions
+    |> List.mapi (fun i ext ->
+      let firstExtCol =
+        ext.table.columns
+        |> List.filter (fun col -> col.name <> ext.fkColumn)
+        |> List.head
+
+      let colIndex =
+        baseTable.columns.Length
+        + (extensions |> List.take i |> List.sumBy (fun e -> e.table.columns.Length - 1))
+
+      $"let has{TypeGenerator.toPascalCase ext.aspectName} = not (reader.IsDBNull {colIndex})")
+    |> String.concat "\n          "
+
+  // Generate base field reads
+  let baseFields = generateBaseFieldReads baseTable 0 |> String.concat "\n"
+
+  // Generate match patterns for each extension
+  let matchPatterns =
+    extensions
+    |> List.mapi (fun i ext ->
+      let caseName = TypeGenerator.toPascalCase ext.aspectName
+
+      let pattern =
+        extensions
+        |> List.mapi (fun j _ -> if i = j then "true" else "false")
+        |> String.concat ", "
+
+      let allFields =
+        generateBaseFieldReads baseTable 0
+        @ generateExtensionFieldReads
+            ext
+            (baseTable.columns.Length
+             + (extensions |> List.take i |> List.sumBy (fun e -> e.table.columns.Length - 1)))
+        |> String.concat "\n"
+
+      $"          | {pattern} ->
+            {typeName}.With{caseName} {{|
+{allFields}
+            |}}")
+    |> String.concat "\n"
+
+  // Base case pattern (all false)
+  let basePattern = extensions |> List.map (fun _ -> "false") |> String.concat ", "
+
+  let baseCaseMatch =
+    $"          | {basePattern} ->
+            {typeName}.Base {{|
+{baseFields}
+            |}}"
+
+  // Default case (multiple extensions - choose first)
+  let defaultCase =
+    $"          | _ ->
+            // Multiple extensions active - choosing Base case
+            {typeName}.Base {{|
+{baseFields}
+            |}}"
+
+  $"""          {nullChecks}
+
+          match {extensions
+                 |> List.map (fun ext -> $"has{TypeGenerator.toPascalCase ext.aspectName}")
+                 |> String.concat ", "} with
+{matchPatterns}
+{baseCaseMatch}
+{defaultCase}"""
+
+/// Generate GetAll method for normalized table
+let generateGetAll (normalized: NormalizedTable) : string =
+  let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
+  let selectColumns = generateSelectColumns normalized.baseTable normalized.extensions
+
+  let leftJoins =
+    if normalized.extensions.IsEmpty then
+      ""
+    else
+      "\n         " + generateLeftJoins normalized.baseTable normalized.extensions
+
+  let getSql =
+    $"SELECT {selectColumns}\n         FROM {normalized.baseTable.name}{leftJoins}"
+
+  let caseSelection =
+    generateCaseSelection normalized.baseTable normalized.extensions typeName
+
+  $"""  static member GetAll (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
+    try
+      use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
+      use reader = cmd.ExecuteReader()
+      let results = ResizeArray<{typeName}>()
+      while reader.Read() do
+        let item =
+{caseSelection}
+        results.Add item
+      Ok(results |> Seq.toList)
+    with
+    | :? SqliteException as ex -> Error ex"""
+
+/// Generate GetById method for normalized table
+let generateGetById (normalized: NormalizedTable) : string option =
+  let pkCols = getPrimaryKeyColumns normalized.baseTable
+
+  match pkCols with
+  | [] -> None
+  | pks ->
+    let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
+    let selectColumns = generateSelectColumns normalized.baseTable normalized.extensions
+
+    let leftJoins =
+      if normalized.extensions.IsEmpty then
+        ""
+      else
+        "\n         " + generateLeftJoins normalized.baseTable normalized.extensions
+
+    let whereClause =
+      pks
+      |> List.map (fun pk -> $"{normalized.baseTable.name}.{pk.name} = @{pk.name}")
+      |> String.concat " AND "
+
+    let getSql =
+      $"SELECT {selectColumns}\n         FROM {normalized.baseTable.name}{leftJoins}\n         WHERE {whereClause}"
+
+    let paramList =
+      pks
+      |> List.map (fun pk ->
+        let pkType = TypeGenerator.mapSqlType pk.columnType false
+        $"({pk.name}: {pkType})")
+      |> String.concat " "
+
+    let paramBindings =
+      pks
+      |> List.map (fun pk -> $"      cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+      |> String.concat "\n"
+
+    let caseSelection =
+      generateCaseSelection normalized.baseTable normalized.extensions typeName
+
+    Some
+      $"""  static member GetById {paramList} (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
+    try
+      use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
+{paramBindings}
+      use reader = cmd.ExecuteReader()
+      if reader.Read() then
+        let item =
+{caseSelection}
+        Ok(Some item)
+      else
+        Ok None
+    with
+    | :? SqliteException as ex -> Error ex"""
+
+/// Generate GetOne method for normalized table
+let generateGetOne (normalized: NormalizedTable) : string =
+  let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
+  let selectColumns = generateSelectColumns normalized.baseTable normalized.extensions
+
+  let leftJoins =
+    if normalized.extensions.IsEmpty then
+      ""
+    else
+      "\n         " + generateLeftJoins normalized.baseTable normalized.extensions
+
+  let getSql =
+    $"SELECT {selectColumns}\n         FROM {normalized.baseTable.name}{leftJoins}\n         LIMIT 1"
+
+  let caseSelection =
+    generateCaseSelection normalized.baseTable normalized.extensions typeName
+
+  $"""  static member GetOne (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
+    try
+      use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
+      use reader = cmd.ExecuteReader()
+      if reader.Read() then
+        let item =
+{caseSelection}
+        Ok(Some item)
+      else
+        Ok None
+    with
+    | :? SqliteException as ex -> Error ex"""
+
+/// Generate UPDATE SQL for base table
+let private generateUpdateBaseSql (baseTable: CreateTable) : string =
+  let pkCols =
+    getPrimaryKeyColumns baseTable |> List.map (fun c -> c.name) |> Set.ofList
+
+  let updateCols =
+    baseTable.columns |> List.filter (fun col -> not (Set.contains col.name pkCols))
+
+  let setClauses =
+    updateCols |> List.map (fun c -> $"{c.name} = @{c.name}") |> String.concat ", "
+
+  let whereClause =
+    pkCols
+    |> Set.toList
+    |> List.map (fun pk -> $"{pk} = @{pk}")
+    |> String.concat " AND "
+
+  $"UPDATE {baseTable.name} SET {setClauses} WHERE {whereClause}"
+
+/// Generate Base case update (UPDATE base, DELETE extensions)
+let private generateUpdateBaseCase
+  (baseTable: CreateTable)
+  (extensions: ExtensionTable list)
+  (typeName: string)
+  : string =
+  let updateSql = generateUpdateBaseSql baseTable
+
+  let paramBindings =
+    generateParamBindings baseTable.columns "data" |> String.concat "\n"
+
+  let deleteStatements =
+    extensions
+    |> List.map (fun ext ->
+      $"        use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n        delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", data.Id) |> ignore\n        delCmd{ext.aspectName}.ExecuteNonQuery() |> ignore")
+    |> String.concat "\n"
+
+  $"""      | {typeName}.Base data ->
+        // Update base table, delete all extensions
+        use cmd = new SqliteCommand("{updateSql}", tx.Connection, tx)
+{paramBindings}
+        cmd.ExecuteNonQuery() |> ignore
+
+{deleteStatements}        Ok()"""
+
+/// Generate extension case update (UPDATE base, INSERT OR REPLACE extension)
+let private generateUpdateExtensionCase
+  (baseTable: CreateTable)
+  (extension: ExtensionTable)
+  (allExtensions: ExtensionTable list)
+  (typeName: string)
+  : string =
+  let caseName = TypeGenerator.toPascalCase extension.aspectName
+  let updateSql = generateUpdateBaseSql baseTable
+
+  let baseParamBindings =
+    generateParamBindings baseTable.columns "data" |> String.concat "\n"
+
+  // Extension columns excluding FK
+  let extensionInsertColumns =
+    extension.table.columns
+    |> List.filter (fun col -> col.name <> extension.fkColumn)
+
+  let extensionColumnNames =
+    extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "
+
+  let extensionParamNames =
+    extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "
+
+  let insertOrReplaceSql =
+    $"INSERT OR REPLACE INTO {extension.table.name} ({extension.fkColumn}, {extensionColumnNames}) VALUES (@{extension.fkColumn}, {extensionParamNames})"
+
+  let extensionParamBindings =
+    generateParamBindings extensionInsertColumns "data" |> String.concat "\n"
+
+  // Delete other extensions
+  let deleteOtherExtensions =
+    allExtensions
+    |> List.filter (fun e -> e.table.name <> extension.table.name)
+    |> List.map (fun ext ->
+      $"        use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n        delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", data.Id) |> ignore\n        delCmd{ext.aspectName}.ExecuteNonQuery() |> ignore")
+    |> String.concat "\n"
+
+  $"""      | {typeName}.With{caseName} data ->
+        // Update base, INSERT OR REPLACE extension
+        use cmd1 = new SqliteCommand("{updateSql}", tx.Connection, tx)
+{baseParamBindings}
+        cmd1.ExecuteNonQuery() |> ignore
+
+        use cmd2 = new SqliteCommand("{insertOrReplaceSql}", tx.Connection, tx)
+        cmd2.Parameters.AddWithValue("@{extension.fkColumn}", data.Id) |> ignore
+{extensionParamBindings}
+        cmd2.ExecuteNonQuery() |> ignore
+
+{deleteOtherExtensions}        Ok()"""
+
+/// Generate Update method for normalized table
+let generateUpdate (normalized: NormalizedTable) : string option =
+  let pkCols = getPrimaryKeyColumns normalized.baseTable
+
+  match pkCols with
+  | [] -> None
+  | _ ->
+    let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
+
+    // Generate Base case
+    let baseCase =
+      generateUpdateBaseCase normalized.baseTable normalized.extensions typeName
+
+    // Generate extension cases
+    let extensionCases =
+      normalized.extensions
+      |> List.map (fun ext -> generateUpdateExtensionCase normalized.baseTable ext normalized.extensions typeName)
+      |> String.concat "\n\n"
+
+    let allCases =
+      if normalized.extensions.IsEmpty then
+        baseCase
+      else
+        $"{baseCase}\n\n{extensionCases}"
+
+    Some
+      $"""  static member Update (item: {typeName}) (tx: SqliteTransaction)
+    : Result<unit, SqliteException> =
+    try
+      match item with
+{allCases}
+    with
+    | :? SqliteException as ex -> Error ex"""
+
+/// Generate Delete method for normalized table
+let generateDelete (normalized: NormalizedTable) : string option =
+  let pkCols = getPrimaryKeyColumns normalized.baseTable
+
+  match pkCols with
+  | [] -> None
+  | pks ->
+    let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
+
+    let whereClause =
+      pks |> List.map (fun pk -> $"{pk.name} = @{pk.name}") |> String.concat " AND "
+
+    let deleteSql = $"DELETE FROM {normalized.baseTable.name} WHERE {whereClause}"
+
+    let paramList =
+      pks
+      |> List.map (fun pk ->
+        let pkType = TypeGenerator.mapSqlType pk.columnType false
+        $"({pk.name}: {pkType})")
+      |> String.concat " "
+
+    let paramBindings =
+      pks
+      |> List.map (fun pk -> $"      cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+      |> String.concat "\n"
+
+    Some
+      $"""  static member Delete {paramList} (tx: SqliteTransaction)
+    : Result<unit, SqliteException> =
+    try
+      use cmd = new SqliteCommand("{deleteSql}", tx.Connection, tx)
+{paramBindings}
+      cmd.ExecuteNonQuery() |> ignore
+      Ok()
+    with
+    | :? SqliteException as ex -> Error ex"""
+
+/// Generate all methods for a normalized table
+let generateNormalizedTableCode (normalized: NormalizedTable) : string =
+  let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
+  let insertMethod = generateInsert normalized
+  let getAllMethod = generateGetAll normalized
+  let getByIdMethod = generateGetById normalized
+  let getOneMethod = generateGetOne normalized
+  let updateMethod = generateUpdate normalized
+  let deleteMethod = generateDelete normalized
+
+  let methods =
+    [ Some insertMethod
+      Some getAllMethod
+      getByIdMethod
+      Some getOneMethod
+      updateMethod
+      deleteMethod ]
+    |> List.choose id
+    |> String.concat "\n\n"
+
+  $"""type {typeName} with
+{methods}"""

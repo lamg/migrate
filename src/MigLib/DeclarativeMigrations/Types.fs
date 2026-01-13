@@ -87,3 +87,37 @@ type MigrationError =
   | ReadSchemaFailed of message: string
   | Composed of MigrationError list
   | FailedSteps of string list
+
+/// Represents an extension table that extends a base table in a 1:1 relationship.
+/// Extension tables follow the naming convention: {base_table}_{aspect}
+/// and have their FK column as the PK (enforcing at most one extension per base record).
+type internal ExtensionTable =
+  {
+    /// The extension table definition
+    table: CreateTable
+    /// The aspect name derived from the table suffix (e.g., "address" from "student_address")
+    aspectName: string
+    /// The FK column that references the base table (also the PK of this table)
+    fkColumn: string
+  }
+
+/// Represents a base table with its detected extension tables.
+/// Used for generating discriminated union types instead of option types.
+type internal NormalizedTable =
+  {
+    /// The base table definition
+    baseTable: CreateTable
+    /// List of extension tables that extend this base table
+    extensions: ExtensionTable list
+  }
+
+/// Represents validation errors for normalized schema detection.
+type NormalizedSchemaError =
+  /// Table or extension has nullable columns, which are not allowed in normalized schemas
+  | NullableColumnsDetected of table: string * columns: string list
+  /// Extension table has invalid foreign key relationship to base table
+  | InvalidForeignKey of extension: string * expected: string * reason: string
+  /// Extension table doesn't follow naming convention
+  | InvalidNaming of table: string * expected: string
+  /// Extension table FK column is not the PK (must be 1:1 relationship)
+  | ForeignKeyNotPrimaryKey of extension: string * fkColumn: string

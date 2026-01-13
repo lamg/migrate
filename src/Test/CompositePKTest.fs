@@ -85,7 +85,8 @@ let ``Generated Update method excludes all PK columns from SET with transaction`
 
 [<Fact>]
 let ``GetOne method is generated for tables`` () =
-  let sql = "CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL, age integer)"
+  let sql =
+    "CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL, age integer)"
 
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)

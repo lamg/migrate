@@ -14,6 +14,15 @@
     <Compile Include="CompositePKTest.fs" />
     <Compile Include="TransactionTest.fs" />
     <Compile Include="ViewCodeGenTest.fs" />
+    <Compile Include="NormalizedSchemaTest.fs" />
+    <Compile Include="NormalizedTypeGenTest.fs" />
+    <Compile Include="NormalizedPropertyTest.fs" />
+    <Compile Include="DUTypeExtensionTest.fs" />
+    <Compile Include="NormalizedInsertTest.fs" />
+    <Compile Include="NormalizedQueryTest.fs" />
+    <Compile Include="NormalizedUpdateDeleteTest.fs" />
+    <Compile Include="NormalizedSchemaValidationTest.fs" />
+    <Compile Include="NormalizedIntegrationTest.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

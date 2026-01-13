@@ -9,7 +9,7 @@ let toPascalCase (s: string) =
   if String.IsNullOrWhiteSpace s then
     s
   else
-    s.Split('_')
+    s.Split '_'
     |> Array.map (fun part ->
       if String.length part > 0 then
         (string part.[0]).ToUpper() + part.[1..].ToLower()
@@ -30,12 +30,14 @@ let mapSqlType (sqlType: SqlType) (isNullable: bool) : string =
 
   if isNullable then $"{baseType} option" else baseType
 
-/// Check if a column is nullable (doesn't have NOT NULL constraint)
+/// Check if a column is nullable (doesn't have NOT NULL constraint or PRIMARY KEY)
+/// PRIMARY KEY columns are implicitly NOT NULL in SQLite
 let isColumnNullable (column: ColumnDef) : bool =
   column.constraints
   |> List.exists (fun c ->
     match c with
     | NotNull -> true
+    | PrimaryKey _ -> true
     | _ -> false)
   |> not
 
