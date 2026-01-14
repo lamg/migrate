@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-01-14
+
+Added:
+
+- **Seed Statement Support**: New `mig seed` command for database seeding with INSERT OR REPLACE upserts
+  - Allows declarative seed data in migration files
+  - Automatically handles conflicts using INSERT OR REPLACE
+- **QueryBy Annotation**: Custom query generation feature for tables
+  - Add `-- @QueryBy column1,column2` annotations above table definitions
+  - Generates custom query methods like `GetByColumn1AndColumn2`
+  - Supports both regular and normalized schema tables
+
+Changed:
+
+- **Version Alignment**: MigLib version bumped to 2.2.0 to match migtool CLI version
+  - Ensures consistent feature set across library and CLI tool
+  - Both packages now reflect the same capabilities
+
 ## [2.0.0] - 2025-01-13
 
 Added:
