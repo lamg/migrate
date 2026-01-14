@@ -27,27 +27,46 @@ let private generateInsertSql (tableName: string) (columns: ColumnDef list) : st
   let paramNames = columns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "
   $"INSERT INTO {tableName} ({columnNames}) VALUES ({paramNames})"
 
-/// Generate parameter binding code for columns
-let private generateParamBindings (columns: ColumnDef list) (dataAccessor: string) : string list =
+/// Generate named field pattern for pattern matching (e.g., "Name = name, Age = age")
+let private generateFieldPattern (columns: ColumnDef list) : string =
   columns
   |> List.map (fun col ->
     let fieldName = TypeGenerator.toPascalCase col.name
+
+    let varName =
+      fieldName.ToLower().[0..0]
+      + (if fieldName.Length > 1 then fieldName.[1..] else "")
+
+    $"{fieldName} = {varName}")
+  |> String.concat "; "
+
+/// Generate parameter binding code for columns using variable names
+let private generateParamBindings (columns: ColumnDef list) : string list =
+  columns
+  |> List.map (fun col ->
+    let fieldName = TypeGenerator.toPascalCase col.name
+
+    let varName =
+      fieldName.ToLower().[0..0]
+      + (if fieldName.Length > 1 then fieldName.[1..] else "")
+
     let isNullable = TypeGenerator.isColumnNullable col
 
     if isNullable then
-      $"cmd.Parameters.AddWithValue(\"@{col.name}\", match {dataAccessor}.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+      $"cmd.Parameters.AddWithValue(\"@{col.name}\", match {varName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
     else
-      $"cmd.Parameters.AddWithValue(\"@{col.name}\", {dataAccessor}.{fieldName}) |> ignore")
+      $"cmd.Parameters.AddWithValue(\"@{col.name}\", {varName}) |> ignore")
 
 /// Generate the Base case insert (single table)
 let private generateBaseCase (baseTable: CreateTable) (typeName: string) : string =
   let insertColumns = getInsertColumns baseTable
   let insertSql = generateInsertSql baseTable.name insertColumns
+  let fieldPattern = generateFieldPattern insertColumns
 
   let paramBindings =
-    generateParamBindings insertColumns "data" |> String.concat "\n        "
+    generateParamBindings insertColumns |> String.concat "\n        "
 
-  $"""      | New{typeName}.Base data ->
+  $"""      | New{typeName}.Base({fieldPattern}) ->
         // Single INSERT into base table
         use cmd = new SqliteCommand("{insertSql}", tx.Connection, tx)
         {paramBindings}
@@ -62,9 +81,6 @@ let private generateExtensionCase (baseTable: CreateTable) (extension: Extension
   let baseInsertColumns = getInsertColumns baseTable
   let baseInsertSql = generateInsertSql baseTable.name baseInsertColumns
 
-  let baseParamBindings =
-    generateParamBindings baseInsertColumns "data" |> String.concat "\n        "
-
   // Extension columns excluding the FK column
   let extensionInsertColumns =
     extension.table.columns
@@ -73,11 +89,17 @@ let private generateExtensionCase (baseTable: CreateTable) (extension: Extension
   let extensionInsertSql =
     generateInsertSql extension.table.name extensionInsertColumns
 
-  let extensionParamBindings =
-    generateParamBindings extensionInsertColumns "data"
-    |> String.concat "\n        "
+  // Combine all columns for the field pattern
+  let allColumns = baseInsertColumns @ extensionInsertColumns
+  let fieldPattern = generateFieldPattern allColumns
 
-  $"""      | New{typeName}.With{caseName} data ->
+  let baseParamBindings =
+    generateParamBindings baseInsertColumns |> String.concat "\n        "
+
+  let extensionParamBindings =
+    generateParamBindings extensionInsertColumns |> String.concat "\n        "
+
+  $"""      | New{typeName}.With{caseName}({fieldPattern}) ->
         // Two inserts in same transaction (atomic)
         use cmd1 = new SqliteCommand("{baseInsertSql}", tx.Connection, tx)
         {baseParamBindings}
@@ -418,17 +440,34 @@ let private generateUpdateBaseCase
   (typeName: string)
   : string =
   let updateSql = generateUpdateBaseSql baseTable
+  let fieldPattern = generateFieldPattern baseTable.columns
 
   let paramBindings =
-    generateParamBindings baseTable.columns "data" |> String.concat "\n        "
+    generateParamBindings baseTable.columns |> String.concat "\n        "
+
+  // Get the Id variable name for delete statements
+  let idCol =
+    baseTable.columns
+    |> List.find (fun col ->
+      col.constraints
+      |> List.exists (fun c ->
+        match c with
+        | PrimaryKey _ -> true
+        | _ -> false))
+
+  let idFieldName = TypeGenerator.toPascalCase idCol.name
+
+  let idVarName =
+    idFieldName.ToLower().[0..0]
+    + (if idFieldName.Length > 1 then idFieldName.[1..] else "")
 
   let deleteStatements =
     extensions
     |> List.map (fun ext ->
-      $"        use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n        delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", data.Id) |> ignore\n        delCmd{ext.aspectName}.ExecuteNonQuery() |> ignore")
+      $"        use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n        delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", {idVarName}) |> ignore\n        delCmd{ext.aspectName}.ExecuteNonQuery() |> ignore")
     |> String.concat "\n"
 
-  $"""      | {typeName}.Base data ->
+  $"""      | {typeName}.Base({fieldPattern}) ->
         // Update base table, delete all extensions
         use cmd = new SqliteCommand("{updateSql}", tx.Connection, tx)
         {paramBindings}
@@ -446,9 +485,6 @@ let private generateUpdateExtensionCase
   let caseName = TypeGenerator.toPascalCase extension.aspectName
   let updateSql = generateUpdateBaseSql baseTable
 
-  let baseParamBindings =
-    generateParamBindings baseTable.columns "data" |> String.concat "\n        "
-
   // Extension columns excluding FK
   let extensionInsertColumns =
     extension.table.columns
@@ -463,26 +499,48 @@ let private generateUpdateExtensionCase
   let insertOrReplaceSql =
     $"INSERT OR REPLACE INTO {extension.table.name} ({extension.fkColumn}, {extensionColumnNames}) VALUES (@{extension.fkColumn}, {extensionParamNames})"
 
+  // Combine all columns for the field pattern
+  let allColumns = baseTable.columns @ extensionInsertColumns
+  let fieldPattern = generateFieldPattern allColumns
+
+  let baseParamBindings =
+    generateParamBindings baseTable.columns |> String.concat "\n        "
+
   let extensionParamBindings =
-    generateParamBindings extensionInsertColumns "data"
-    |> String.concat "\n        "
+    generateParamBindings extensionInsertColumns |> String.concat "\n        "
+
+  // Get the Id variable name for delete statements
+  let idCol =
+    baseTable.columns
+    |> List.find (fun col ->
+      col.constraints
+      |> List.exists (fun c ->
+        match c with
+        | PrimaryKey _ -> true
+        | _ -> false))
+
+  let idFieldName = TypeGenerator.toPascalCase idCol.name
+
+  let idVarName =
+    idFieldName.ToLower().[0..0]
+    + (if idFieldName.Length > 1 then idFieldName.[1..] else "")
 
   // Delete other extensions
   let deleteOtherExtensions =
     allExtensions
     |> List.filter (fun e -> e.table.name <> extension.table.name)
     |> List.map (fun ext ->
-      $"        use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n        delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", data.Id) |> ignore\n        delCmd{ext.aspectName}.ExecuteNonQuery() |> ignore")
+      $"        use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n        delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", {idVarName}) |> ignore\n        delCmd{ext.aspectName}.ExecuteNonQuery() |> ignore")
     |> String.concat "\n"
 
-  $"""      | {typeName}.With{caseName} data ->
+  $"""      | {typeName}.With{caseName}({fieldPattern}) ->
         // Update base, INSERT OR REPLACE extension
         use cmd1 = new SqliteCommand("{updateSql}", tx.Connection, tx)
         {baseParamBindings}
         cmd1.ExecuteNonQuery() |> ignore
 
         use cmd2 = new SqliteCommand("{insertOrReplaceSql}", tx.Connection, tx)
-        cmd2.Parameters.AddWithValue("@{extension.fkColumn}", data.Id) |> ignore
+        cmd2.Parameters.AddWithValue("@{extension.fkColumn}", {idVarName}) |> ignore
         {extensionParamBindings}
         cmd2.ExecuteNonQuery() |> ignore
 
@@ -750,9 +808,13 @@ let private generateNormalizedQueryByOrCreate
 
       let allCases = baseCaseName :: extensionCases
 
+      let varName =
+        fieldName.ToLower().[0..0]
+        + (if fieldName.Length > 1 then fieldName.[1..] else "")
+
       let caseMatches =
         allCases
-        |> List.map (fun caseName -> $"        | {newTypeName}.{caseName} data -> data.{fieldName}")
+        |> List.map (fun caseName -> $"        | {newTypeName}.{caseName}({fieldName} = {varName}) -> {varName}")
         |> String.concat "\n"
 
       $"      let {col} = \n        match newItem with\n{caseMatches}")

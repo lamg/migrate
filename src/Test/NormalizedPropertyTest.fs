@@ -33,10 +33,10 @@ let ``Properties are generated for common fields`` () =
       Assert.Contains("member this.Name : string", code)
 
       // Pattern matching for common fields
-      Assert.Contains("| Student.Base data -> data.Id", code)
-      Assert.Contains("| Student.WithAddress data -> data.Id", code)
-      Assert.Contains("| Student.Base data -> data.Name", code)
-      Assert.Contains("| Student.WithAddress data -> data.Name", code)
+      Assert.Contains("| Student.Base(Id = id) -> id", code)
+      Assert.Contains("| Student.WithAddress(Id = id) -> id", code)
+      Assert.Contains("| Student.Base(Name = name) -> name", code)
+      Assert.Contains("| Student.WithAddress(Name = name) -> name", code)
 
     | Error e -> Assert.Fail $"Failed: {e}"
 
@@ -67,7 +67,7 @@ let ``Properties are generated for partial fields with option type`` () =
 
       // Pattern matching for partial field
       Assert.Contains("| Student.Base _ -> None", code)
-      Assert.Contains("| Student.WithAddress data -> Some data.Address", code)
+      Assert.Contains("| Student.WithAddress(Address = address) -> Some address", code)
 
     | Error e -> Assert.Fail $"Failed: {e}"
 
@@ -111,10 +111,10 @@ let ``Properties work with multiple extensions`` () =
       // Address property should return None for Base and WithEmailPhone
       Assert.Contains("| Student.Base _ -> None", code)
       Assert.Contains("| Student.WithEmailPhone _ -> None", code)
-      Assert.Contains("| Student.WithAddress data -> Some data.Address", code)
+      Assert.Contains("| Student.WithAddress(Address = address) -> Some address", code)
 
       // Email property pattern matching
-      Assert.Contains("| Student.WithEmailPhone data -> Some data.Email", code)
+      Assert.Contains("| Student.WithEmailPhone(Email = email) -> Some email", code)
 
     | Error e -> Assert.Fail $"Failed: {e}"
 

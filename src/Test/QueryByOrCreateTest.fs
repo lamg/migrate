@@ -347,8 +347,8 @@ let ``QueryByOrCreate works with normalized tables`` () =
       Assert.Contains("(newItem: NewStudent)", code)
       // Should extract name from NewStudent DU via pattern matching
       Assert.Contains("match newItem with", code)
-      Assert.Contains("NewStudent.Base data -> data.Name", code)
-      Assert.Contains("NewStudent.WithAddress data -> data.Name", code)
+      Assert.Contains("NewStudent.Base(Name = name) -> name", code)
+      Assert.Contains("NewStudent.WithAddress(Name = name) -> name", code)
       // Should NOT have name as separate parameter
       Assert.DoesNotContain("name: string, newItem", code)
     | Error e -> Assert.Fail $"Code generation failed: {e}"

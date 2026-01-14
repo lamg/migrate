@@ -238,10 +238,12 @@ let private generateProperties (normalized: NormalizedTable) : string =
             |> List.exists (fun (col: ColumnDef) -> TypeGenerator.toPascalCase col.name = field.Name)
 
           if hasField then
+            let varName = field.Name.ToLower().[0..0] + field.Name.[1..]
+
             if field.InAllCases then
-              $"    | {typeName}.{caseName} data -> data.{field.Name}"
+              $"    | {typeName}.{caseName}({field.Name} = {varName}) -> {varName}"
             else
-              $"    | {typeName}.{caseName} data -> Some data.{field.Name}"
+              $"    | {typeName}.{caseName}({field.Name} = {varName}) -> Some {varName}"
           else
             $"    | {typeName}.{caseName} _ -> None"
 

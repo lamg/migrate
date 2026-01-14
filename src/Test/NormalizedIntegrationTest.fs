@@ -273,7 +273,7 @@ let ``Generated code includes convenience properties`` () =
 
       // Verify pattern matching for partial property
       Assert.Contains("| Student.Base _ -> None", generatedCode)
-      Assert.Contains("| Student.WithAddress data -> Some data.Address", generatedCode)
+      Assert.Contains("| Student.WithAddress(Address = address) -> Some address", generatedCode)
 
     | Error e -> Assert.Fail $"Code generation failed: {e}"
 

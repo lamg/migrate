@@ -56,8 +56,8 @@ let ``Update method has pattern matching on Student cases`` () =
   |> function
     | Ok(Some code) ->
       Assert.Contains("match item with", code)
-      Assert.Contains("| Student.Base data ->", code)
-      Assert.Contains("| Student.WithAddress data ->", code)
+      Assert.Contains("| Student.Base(", code)
+      Assert.Contains("| Student.WithAddress(", code)
     | Ok None -> Assert.Fail "Update should be generated"
     | Error e -> Assert.Fail $"Failed: {e}"
 
