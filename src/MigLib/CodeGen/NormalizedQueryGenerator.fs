@@ -38,7 +38,7 @@ let private generateFieldPattern (columns: ColumnDef list) : string =
       + (if fieldName.Length > 1 then fieldName.[1..] else "")
 
     $"{fieldName} = {varName}")
-  |> String.concat "; "
+  |> String.concat ", "
 
 /// Generate parameter binding code for columns using variable names
 let private generateParamBindings (columns: ColumnDef list) (cmdVarName: string) : string list =
@@ -270,9 +270,7 @@ let private generateCaseSelection
         |> String.concat "\n          "
 
       $"          | {pattern} ->
-            {typeName}.With{caseName} {{|
-          {allFields}
-            |}}")
+            {typeName}.With{caseName} ({allFields})")
     |> String.concat "\n"
 
   // Base case pattern (all false)
@@ -280,17 +278,13 @@ let private generateCaseSelection
 
   let baseCaseMatch =
     $"          | {basePattern} ->
-            {typeName}.Base {{|
-          {baseFields}
-            |}}"
+            {typeName}.Base ({baseFields})"
 
   // Default case (multiple extensions - choose first)
   let defaultCase =
     $"          | _ ->
             // Multiple extensions active - choosing Base case
-            {typeName}.Base {{|
-          {baseFields}
-            |}}"
+            {typeName}.Base ({baseFields})"
 
   $"""          {nullChecks}
 
