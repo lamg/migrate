@@ -47,17 +47,21 @@ type internal ColumnDef =
 
 type internal QueryByAnnotation = { columns: string list }
 
+type internal QueryByOrCreateAnnotation = { columns: string list }
+
 type internal CreateView =
   { name: string
     sqlTokens: string seq
     dependencies: string list
-    queryByAnnotations: QueryByAnnotation list }
+    queryByAnnotations: QueryByAnnotation list
+    queryByOrCreateAnnotations: QueryByOrCreateAnnotation list }
 
 type internal CreateTable =
   { name: string
     columns: ColumnDef list
     constraints: ColumnConstraint list
-    queryByAnnotations: QueryByAnnotation list }
+    queryByAnnotations: QueryByAnnotation list
+    queryByOrCreateAnnotations: QueryByOrCreateAnnotation list }
 
 type internal CreateIndex =
   { name: string

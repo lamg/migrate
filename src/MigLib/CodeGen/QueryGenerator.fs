@@ -416,16 +416,148 @@ let generateQueryBy (table: CreateTable) (annotation: QueryByAnnotation) : strin
     with
     | :? SqliteException as ex -> Error ex"""
 
+/// Validate QueryByOrCreate annotation references existing columns (case-insensitive)
+let validateQueryByOrCreateAnnotation
+  (table: CreateTable)
+  (annotation: QueryByOrCreateAnnotation)
+  : Result<unit, string> =
+  // Same validation as QueryBy
+  let availableColumns = table.columns |> List.map (fun c -> c.name.ToLower())
+
+  let invalidColumns =
+    annotation.columns
+    |> List.filter (fun col -> not (availableColumns |> List.contains (col.ToLower())))
+
+  match invalidColumns with
+  | [] -> Ok()
+  | invalidCol :: _ ->
+    let availableCols =
+      table.columns |> List.map (fun c -> c.name) |> String.concat ", "
+
+    Error
+      $"QueryByOrCreate annotation references non-existent column '{invalidCol}' in table '{table.name}'. Available columns: {availableCols}"
+
+/// Generate custom QueryByOrCreate method that extracts query values from newItem
+let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnnotation) : string =
+  let typeName = capitalize table.name
+  let pkCols = getPrimaryKey table
+
+  // 1. Build method name: GetByStatusOrCreate
+  let methodName =
+    annotation.columns
+    |> List.map (fun col -> capitalize col)
+    |> String.concat ""
+    |> sprintf "GetBy%sOrCreate"
+
+  // 2. Build WHERE clause
+  let whereClause =
+    annotation.columns
+    |> List.map (fun col -> $"{col} = @{col}")
+    |> String.concat " AND "
+
+  // 3. Generate value extraction from newItem
+  let valueExtractions =
+    annotation.columns
+    |> List.map (fun col ->
+      let fieldName = capitalize col
+      $"      let {col} = newItem.{fieldName}")
+    |> String.concat "\n"
+
+  // 4. Build parameter bindings (using extracted variables)
+  let paramBindings =
+    annotation.columns
+    |> List.map (fun col ->
+      let columnDef = findColumn table col |> Option.get
+      let isNullable = TypeGenerator.isColumnNullable columnDef
+
+      if isNullable then
+        $"      cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+      else
+        $"      cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+    |> String.concat "\n"
+
+  // 6. Get column names for SELECT
+  let columnNames = table.columns |> List.map (fun c -> c.name) |> String.concat ", "
+
+  // 7. Generate field mappings for reader
+  let fieldMappings =
+    table.columns
+    |> List.mapi (fun i col ->
+      let fieldName = capitalize col.name
+      let isNullable = TypeGenerator.isColumnNullable col
+      let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+
+      if isNullable then
+        $"          {fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
+      else
+        $"          {fieldName} = reader.Get{method} {i}")
+    |> String.concat "\n"
+
+  // 6. Build GetById call (handle composite PK or no PK)
+  let getByIdCall =
+    match pkCols with
+    | [] ->
+      // No primary key - re-query with WHERE clause (values already extracted above)
+      $"""
+      // No primary key - re-query to get inserted record
+      use cmd = new SqliteCommand("SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1", tx.Connection, tx)
+{paramBindings}
+      use reader = cmd.ExecuteReader()
+      if reader.Read() then
+        Ok {{
+{fieldMappings}
+        }}
+      else
+        Error (SqliteException("Failed to retrieve inserted record", 0))"""
+    | pks ->
+      // Has primary key - use GetById
+      let getByIdParams = pks |> List.map (fun pk -> "newId") |> String.concat " "
+
+      $"""
+      // Fetch newly inserted record by ID
+      match {typeName}.GetById {getByIdParams} tx with
+      | Ok (Some item) -> Ok item
+      | Ok None -> Error (SqliteException("Failed to retrieve inserted record", 0))
+      | Error ex -> Error ex"""
+
+  // 5. Generate full method
+  $"""  static member {methodName} (newItem: {typeName}) (tx: SqliteTransaction) : Result<{typeName}, SqliteException> =
+    try
+      // Extract query values from newItem
+{valueExtractions}
+      // Try to find existing record
+      use cmd = new SqliteCommand("SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1", tx.Connection, tx)
+{paramBindings}
+      use reader = cmd.ExecuteReader()
+      if reader.Read() then
+        // Found existing record - return it
+        Ok {{
+{fieldMappings}
+        }}
+      else
+        // Not found - insert and fetch
+        reader.Close()
+        match {typeName}.Insert newItem tx with
+        | Ok newId ->{getByIdCall}
+        | Error ex -> Error ex
+    with
+    | :? SqliteException as ex -> Error ex"""
+
 /// Generate code for a table
 let generateTableCode (table: CreateTable) : Result<string, string> =
   let typeName = capitalize table.name
 
   // Validate all QueryBy annotations
-  let validationResults =
+  let queryByValidationResults =
     table.queryByAnnotations |> List.map (validateQueryByAnnotation table)
 
+  // Validate all QueryByOrCreate annotations
+  let queryByOrCreateValidationResults =
+    table.queryByOrCreateAnnotations
+    |> List.map (validateQueryByOrCreateAnnotation table)
+
   let firstError =
-    validationResults
+    (queryByValidationResults @ queryByOrCreateValidationResults)
     |> List.tryFind (fun r ->
       match r with
       | Error _ -> true
@@ -445,6 +577,10 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
     // Generate QueryBy methods
     let queryByMethods = table.queryByAnnotations |> List.map (generateQueryBy table)
 
+    // Generate QueryByOrCreate methods
+    let queryByOrCreateMethods =
+      table.queryByOrCreateAnnotations |> List.map (generateQueryByOrCreate table)
+
     let allMethods =
       [ Some insertMethod
         getMethod
@@ -453,6 +589,7 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
         updateMethod
         deleteMethod ]
       @ (queryByMethods |> List.map Some)
+      @ (queryByOrCreateMethods |> List.map Some)
       |> List.choose id
       |> String.concat "\n\n"
 
@@ -619,31 +756,37 @@ let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotatio
 let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<string, string> =
   let typeName = capitalize view.name
 
-  // Validate all QueryBy annotations
-  let validationResults =
-    view.queryByAnnotations
-    |> List.map (validateViewQueryByAnnotation view.name columns)
+  // Reject QueryByOrCreate annotations on views (views are read-only)
+  match view.queryByOrCreateAnnotations with
+  | [] ->
+    // Validate all QueryBy annotations
+    let validationResults =
+      view.queryByAnnotations
+      |> List.map (validateViewQueryByAnnotation view.name columns)
 
-  let firstError =
-    validationResults
-    |> List.tryFind (fun r ->
-      match r with
-      | Error _ -> true
-      | _ -> false)
+    let firstError =
+      validationResults
+      |> List.tryFind (fun r ->
+        match r with
+        | Error _ -> true
+        | _ -> false)
 
-  match firstError with
-  | Some(Error msg) -> Error msg
-  | _ ->
-    let getAllMethod = generateViewGetAll view.name columns
-    let getOneMethod = generateViewGetOne view.name columns
+    match firstError with
+    | Some(Error msg) -> Error msg
+    | _ ->
+      let getAllMethod = generateViewGetAll view.name columns
+      let getOneMethod = generateViewGetOne view.name columns
 
-    // Generate QueryBy methods
-    let queryByMethods =
-      view.queryByAnnotations |> List.map (generateViewQueryBy view.name columns)
+      // Generate QueryBy methods
+      let queryByMethods =
+        view.queryByAnnotations |> List.map (generateViewQueryBy view.name columns)
 
-    let allMethods =
-      [ getAllMethod; getOneMethod ] @ queryByMethods |> String.concat "\n\n"
+      let allMethods =
+        [ getAllMethod; getOneMethod ] @ queryByMethods |> String.concat "\n\n"
 
-    Ok
-      $"""type {typeName} with
+      Ok
+        $"""type {typeName} with
 {allMethods}"""
+  | _ ->
+    Error
+      $"QueryByOrCreate annotation is not supported on views (view '{view.name}' is read-only). Use QueryBy instead."

@@ -290,14 +290,23 @@ type Student with
 open migrate.Db
 
 // Option 1: Using Db.txn computation expression (recommended)
-Db.txn conn {
+// Db.txn accepts a database file path and automatically handles connection management
+Db.txn "students.db" {
   let! id1 = Student.Insert { Id = 0L; Name = "Alice"; Email = Some "alice@example.com"; EnrollmentDate = DateTime.Now }
   let! id2 = Student.Insert { Id = 0L; Name = "Bob"; Email = None; EnrollmentDate = DateTime.Now }
   let! students = Student.GetAll
   return (id1, id2, students)
 }
 
-// Option 2: Using Db.WithTransaction explicitly
+// In-memory database
+Db.txn ":memory:" {
+  let! students = Student.GetAll
+  return students
+}
+
+// Option 2: Using Db.WithTransaction explicitly (when you have an existing connection)
+use conn = new SqliteConnection("Data Source=students.db")
+conn.Open()
 Db.WithTransaction conn (fun tx ->
   result {
     let! id = Student.Insert { Id = 0L; Name = "Alice"; Email = Some "alice@example.com"; EnrollmentDate = DateTime.Now } tx
@@ -307,11 +316,18 @@ Db.WithTransaction conn (fun tx ->
 
 // Option 3: Partial application
 let insertAlice = Student.Insert { Id = 0L; Name = "Alice"; Email = Some "alice@example.com"; EnrollmentDate = DateTime.Now }
-Db.txn conn {
+Db.txn "students.db" {
   let! id = insertAlice  // Transaction automatically applied
   return id
 }
 ```
+
+**Db.txn API:**
+- **Parameter:** Database file path (string) - e.g., `"mydb.db"`, `"/absolute/path/to/db.db"`, or `":memory:"`
+- **Behavior:** Automatically converts path to SQLite connection string (`Data Source={dbPath}`)
+- **Connection Management:** Opens connection, creates transaction, and automatically disposes both
+- **Error Handling:** Returns `Result<'T, SqliteException>` - captures connection and transaction errors
+- **Note:** For advanced connection string options, use `Db.WithTransaction` with a manually created connection
 
 **CLI Integration:**
 - `mig codegen` - Generate F# types from SQL schema files
@@ -394,19 +410,19 @@ type Student with
 open migrate.Db
 
 // Query by single column
-Db.txn conn {
+Db.txn "students.db" {
   let! activeStudents = Student.GetByStatus "active"
   return activeStudents
 }
 
 // Query by multiple columns (note the tupled parameters)
-Db.txn conn {
+Db.txn "students.db" {
   let! results = Student.GetByNameStatus ("Alice", "active")
   return results
 }
 
 // Query by date
-Db.txn conn {
+Db.txn "students.db" {
   let enrollmentDate = DateTime(2024, 9, 1)
   let! newStudents = Student.GetByEnrollmentDate enrollmentDate
   return newStudents
@@ -414,7 +430,7 @@ Db.txn conn {
 
 // Partial application works
 let getActiveStudents = Student.GetByStatus "active"
-Db.txn conn {
+Db.txn "students.db" {
   let! students = getActiveStudents
   return students
 }
@@ -463,6 +479,225 @@ Available columns: id, name
 - Column validation with error reporting
 - Tupled parameter syntax for query columns
 - Integration with existing CRUD code generation pipeline
+
+### 5. Find-or-Create Query Generation with QueryByOrCreate Annotations
+
+Building on the QueryBy feature, Migrate also supports `QueryByOrCreate` annotations for "find or create" semantics. These annotations generate methods that search for existing records and automatically create them if not found.
+
+**Syntax:**
+```sql
+CREATE TABLE table_name (...);
+-- QueryByOrCreate(column1, column2, ...)
+```
+
+**Placement:** QueryByOrCreate annotations must appear on the line(s) immediately following a CREATE TABLE statement (not supported on views).
+
+**Features:**
+- Multiple QueryByOrCreate annotations per table supported
+- Case-insensitive column name matching
+- Generates methods named `GetBy{Column1}{Column2}...OrCreate`
+- **Single parameter:** Only `newItem` - query values are extracted from it automatically
+- Uses full type for regular tables (`Student`) or `New{Type}` for normalized tables (`NewStudent`)
+- Transaction parameter remains curried (last parameter)
+- Returns `Result<T, SqliteException>` (single item - either found or created)
+- Validates column names at code generation time (halts with error if invalid)
+- Works with regular tables and normalized tables (discriminated unions)
+- **Normalized tables:** Query fields must be in base table (not extension-only)
+- **Not supported on views** (views are read-only, will fail validation with clear error)
+
+**Behavior:**
+1. Extracts query values from `newItem` fields (e.g., `newItem.Email`)
+2. Searches for record matching those values (LIMIT 1)
+3. If found: Returns the first matching record
+4. If not found: Inserts `newItem` and returns it with generated ID
+
+**SQL Example:**
+```sql
+CREATE TABLE students (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  email TEXT UNIQUE,
+  status TEXT NOT NULL DEFAULT 'active'
+);
+-- QueryByOrCreate(email)
+-- QueryByOrCreate(name, status)
+```
+
+**Generated F# Code:**
+```fsharp
+type Student with
+  // ... standard CRUD methods and QueryBy methods ...
+  
+  static member GetByEmailOrCreate (newItem: Student) (tx: SqliteTransaction) : Result<Student, SqliteException> =
+    try
+      // Extract query values from newItem
+      let email = newItem.Email
+      // Try to find existing record
+      use cmd = new SqliteCommand("SELECT id, name, email, status FROM students WHERE email = @email LIMIT 1", tx.Connection, tx)
+      cmd.Parameters.AddWithValue("@email", match email with Some v -> box v | None -> box DBNull.Value) |> ignore
+      use reader = cmd.ExecuteReader()
+      if reader.Read() then
+        // Found existing record - return it
+        Ok {
+          Id = reader.GetInt64(0)
+          Name = reader.GetString(1)
+          Email = if reader.IsDBNull(2) then None else Some(reader.GetString(2))
+          Status = reader.GetString(3)
+        }
+      else
+        // Not found - insert and fetch
+        reader.Close()
+        match Student.Insert newItem tx with
+        | Ok newId ->
+          match Student.GetById newId tx with
+          | Ok (Some item) -> Ok item
+          | Ok None -> Error (SqliteException("Failed to retrieve inserted record", 0))
+          | Error ex -> Error ex
+        | Error ex -> Error ex
+    with
+    | :? SqliteException as ex -> Error ex
+  
+  static member GetByNameStatusOrCreate (newItem: Student) (tx: SqliteTransaction) : Result<Student, SqliteException> =
+    try
+      // Extract query values from newItem
+      let name = newItem.Name
+      let status = newItem.Status
+      // Try to find existing record
+      use cmd = new SqliteCommand("SELECT id, name, email, status FROM students WHERE name = @name AND status = @status LIMIT 1", tx.Connection, tx)
+      cmd.Parameters.AddWithValue("@name", name) |> ignore
+      cmd.Parameters.AddWithValue("@status", status) |> ignore
+      // ... similar logic as above ...
+    with
+    | :? SqliteException as ex -> Error ex
+```
+
+**Usage Example:**
+```fsharp
+open migrate.Db
+
+// Find or create student by email
+// Query value is automatically extracted from newItem.Email
+Db.txn "students.db" {
+  let! student = Student.GetByEmailOrCreate(
+    { Id = 0L; Name = "Alice"; Email = Some "alice@example.com"; Status = "active" }
+  )
+  // student is either existing record with this email, or newly created
+  return student.Id
+}
+
+// Find or create by multiple columns
+// Query values extracted from newItem.Name and newItem.Status
+Db.txn "students.db" {
+  let! student = Student.GetByNameStatusOrCreate(
+    { Id = 0L; Name = "Bob"; Email = None; Status = "active" }
+  )
+  return student
+}
+
+// Idempotent operations - safe to call multiple times
+Db.txn "students.db" {
+  // First call creates the record (queries by email field from newItem)
+  let! student1 = Student.GetByEmailOrCreate(
+    { Id = 0L; Name = "Charlie"; Email = Some "charlie@example.com"; Status = "active" }
+  )
+  
+  // Second call returns the same record (found by email = "charlie@example.com")
+  let! student2 = Student.GetByEmailOrCreate(
+    { Id = 0L; Name = "Different Name"; Email = Some "charlie@example.com"; Status = "inactive" }
+  )
+  
+  // student1.Id = student2.Id (same record found by email match)
+  return student1.Id = student2.Id  // returns true
+}
+```
+
+**Behavior with Different Table Types:**
+
+1. **Regular Tables:**
+   - Generates standard SELECT with WHERE clause and LIMIT 1
+   - On match: Returns first matching record
+   - On no match: Calls `Insert newItem` and returns created record with ID
+
+2. **Normalized Tables (Discriminated Union-based):**
+   - **Query fields must be in base table** (not extension-only) - validated at code generation
+   - Uses LEFT JOINs to include extension tables in search
+   - **newItem parameter uses `New{Type}`** discriminated union (no ID field)
+   - Query values extracted via pattern matching on all DU cases
+   - On match: Returns DU value with appropriate case (Base/WithExtension)
+   - On no match: Calls `Insert newItem` which handles DU pattern matching
+   - Example:
+   ```sql
+   CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+   -- QueryByOrCreate(name)
+   CREATE TABLE person_address (id INTEGER PRIMARY KEY REFERENCES person(id), address TEXT NOT NULL);
+   ```
+   
+   ```fsharp
+   // Query value extracted from newItem (works for all DU cases since name is in base)
+   Db.txn "people.db" {
+     let! person = Person.GetByNameOrCreate(
+       NewPerson.WithAddress {| Name = "Alice"; Address = "123 Main St" |}
+     )
+     // Internally extracts: name = match newItem with Base data -> data.Name | WithAddress data -> data.Name
+     // Returns: Person.Base or Person.WithAddress
+     return person
+   }
+   ```
+
+3. **Views:**
+   - **NOT SUPPORTED** - Views are read-only
+   - Annotation will fail validation with error:
+   ```
+   QueryByOrCreate annotation is not supported on views (view 'view_name' is read-only). Use QueryBy instead.
+   ```
+
+**Validation:**
+- Column names are validated at code generation time (same as QueryBy)
+- Code generation fails with clear error message if:
+  - Column doesn't exist in the table
+  - Column name is misspelled (case-insensitive matching applied)
+  - Annotation is used on a view
+- Error message includes list of available columns for easy correction
+
+**Example Validation Error:**
+```sql
+CREATE TABLE students (id INTEGER, name TEXT);
+-- QueryByOrCreate(email)  -- ERROR: 'email' column doesn't exist
+```
+
+Error output:
+```
+QueryByOrCreate annotation references non-existent column 'email' in table 'students'. 
+Available columns: id, name
+```
+
+**Design Decisions:**
+1. **Returns single item (not list or option):** Guarantees a value (either found or created)
+2. **Returns first on multiple matches:** If multiple records match query, returns first (LIMIT 1)
+3. **Single parameter API:** Only `newItem` parameter - query values extracted automatically from its fields
+4. **Value extraction:** Query columns extracted from `newItem.FieldName` (regular) or via pattern matching (normalized)
+5. **Base table requirement (normalized):** Query fields must be in base table to ensure all DU cases have them
+6. **Transactional:** All operations (SELECT + INSERT) happen atomically in same transaction
+
+**Use Cases:**
+- **Idempotent APIs:** Safely callable multiple times without duplicates
+- **User/Account Creation:** Find existing user by email or create new one
+- **Tag/Category Management:** Find tag by name or create if doesn't exist
+- **Reference Data:** Ensure lookup values exist before use
+- **Deduplication:** Prevent duplicate records based on unique constraints
+
+**Implementation Status:**
+✅ COMPLETE - Fully implemented and integrated (January 2025)
+- SQL comment parsing with FParsec
+- QueryByOrCreate annotation extraction
+- Code generation for regular tables with value extraction from newItem
+- Code generation for normalized tables with DU pattern matching extraction
+- Base table validation for normalized schemas
+- View validation rejection (clear error message)
+- Column validation with error reporting
+- Single parameter API (no redundant query parameters)
+- Integration with Insert and GetById methods
+- Comprehensive test coverage (22 tests)
 
 ### 8. Normalized Schema Representation with Discriminated Unions
 
@@ -684,7 +919,7 @@ open Students
 open migrate.Db
 
 // Insert students with different variants
-Db.txn conn {
+Db.txn "students.db" {
   // Student without additional info
   let! id1 = Student.Insert (NewStudent.Base {| Name = "Alice" |})
 

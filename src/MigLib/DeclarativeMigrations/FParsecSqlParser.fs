@@ -236,6 +236,23 @@ let queryByAnnotation: Parser<QueryByAnnotation, unit> =
 let queryByAnnotations: Parser<QueryByAnnotation list, unit> =
   many (attempt (ws >>. queryByAnnotation))
 
+// QueryByOrCreate annotation parsing
+let queryByOrCreateAnnotation: Parser<QueryByOrCreateAnnotation, unit> =
+  pstring "--"
+  >>. spaces
+  >>. pstringCI "QueryByOrCreate"
+  >>. spaces
+  >>. pchar '('
+  >>. spaces
+  >>. sepBy1 identifier (pchar ',' >>. spaces)
+  .>> spaces
+  .>> pchar ')'
+  .>> restOfLine false
+  |>> fun cols -> { columns = cols }
+
+let queryByOrCreateAnnotations: Parser<QueryByOrCreateAnnotation list, unit> =
+  many (attempt (ws >>. queryByOrCreateAnnotation))
+
 // CREATE TABLE parsing
 let createTable: Parser<CreateTable, unit> =
   str_ws1 "CREATE"
@@ -247,7 +264,8 @@ let createTable: Parser<CreateTable, unit> =
         .>> cpar
         .>> opt semi)
   .>>. queryByAnnotations
-  |>> fun ((tableName, items), annotations) ->
+  .>>. queryByOrCreateAnnotations
+  |>> fun (((tableName, items), queryByAnnos), queryByOrCreateAnnos) ->
     let columns =
       items
       |> List.choose (function
@@ -263,7 +281,8 @@ let createTable: Parser<CreateTable, unit> =
     { name = tableName
       columns = columns
       constraints = constraints
-      queryByAnnotations = annotations }
+      queryByAnnotations = queryByAnnos
+      queryByOrCreateAnnotations = queryByOrCreateAnnos }
 
 // CREATE VIEW parsing
 let createView: Parser<CreateView, unit> =
@@ -276,7 +295,8 @@ let createView: Parser<CreateView, unit> =
   createPart >>. identifier
   .>>. (str_ws1 "AS" >>. many1Satisfy (fun c -> c <> ';') .>> opt semi)
   .>>. queryByAnnotations
-  |>> fun ((viewName, selectPart), annotations) ->
+  .>>. queryByOrCreateAnnotations
+  |>> fun (((viewName, selectPart), queryByAnnos), queryByOrCreateAnnos) ->
     // Build the full CREATE VIEW statement
     let fullStatement = $"CREATE VIEW {viewName} AS {selectPart.Trim()}"
 
@@ -296,7 +316,8 @@ let createView: Parser<CreateView, unit> =
     { name = viewName
       sqlTokens = [ fullStatement ]
       dependencies = dependencies
-      queryByAnnotations = annotations }
+      queryByAnnotations = queryByAnnos
+      queryByOrCreateAnnotations = queryByOrCreateAnnos }
 
 // CREATE INDEX parsing
 let createIndex: Parser<CreateIndex, unit> =

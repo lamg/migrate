@@ -15,6 +15,7 @@
     <Compile Include="TransactionTest.fs" />
     <Compile Include="ViewCodeGenTest.fs" />
     <Compile Include="QueryByTest.fs" />
+    <Compile Include="QueryByOrCreateTest.fs" />
     <Compile Include="NormalizedSchemaTest.fs" />
     <Compile Include="NormalizedTypeGenTest.fs" />
     <Compile Include="NormalizedPropertyTest.fs" />

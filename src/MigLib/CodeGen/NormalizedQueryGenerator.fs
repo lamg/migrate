@@ -675,17 +675,171 @@ let private generateNormalizedQueryBy (normalized: NormalizedTable) (annotation:
     with
     | :? SqliteException as ex -> Error ex"""
 
+/// Validate QueryByOrCreate annotation for normalized table references existing columns (case-insensitive)
+/// AND ensures all query columns are in the base table (not extension-only)
+let private validateNormalizedQueryByOrCreateAnnotation
+  (normalized: NormalizedTable)
+  (annotation: QueryByOrCreateAnnotation)
+  : Result<unit, string> =
+  let allColumns = getAllNormalizedColumns normalized
+
+  let baseColumnNames =
+    normalized.baseTable.columns
+    |> List.map (fun c -> c.name.ToLowerInvariant())
+    |> Set.ofList
+
+  let allColumnNames =
+    allColumns |> List.map (fun (_, c) -> c.name.ToLowerInvariant()) |> Set.ofList
+
+  // First check if all columns exist somewhere
+  annotation.columns
+  |> List.tryFind (fun col -> not (allColumnNames.Contains(col.ToLowerInvariant())))
+  |> function
+    | Some invalidCol ->
+      let availableCols =
+        allColumns |> List.map (fun (_, c) -> c.name) |> String.concat ", "
+
+      Error
+        $"QueryByOrCreate annotation references non-existent column '{invalidCol}' in normalized table '{normalized.baseTable.name}'. Available columns: {availableCols}"
+    | None ->
+      // Then check if all query columns are in the base table
+      annotation.columns
+      |> List.tryFind (fun col -> not (baseColumnNames.Contains(col.ToLowerInvariant())))
+      |> function
+        | Some extensionCol ->
+          let baseCols =
+            normalized.baseTable.columns |> List.map (fun c -> c.name) |> String.concat ", "
+
+          Error
+            $"QueryByOrCreate annotation on normalized table '{normalized.baseTable.name}' requires field '{extensionCol}' to be in base table. Extension-only fields are not supported. Base table columns: {baseCols}"
+        | None -> Ok()
+
+/// Generate custom QueryByOrCreate method for normalized tables that extracts query values from NewType DU
+let private generateNormalizedQueryByOrCreate
+  (normalized: NormalizedTable)
+  (annotation: QueryByOrCreateAnnotation)
+  : string =
+  let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
+  let newTypeName = $"New{typeName}"
+  let pkCol = normalized.baseTable.columns |> List.find (fun c -> c.name = "id")
+
+  // 1. Build method name: GetByNameOrCreate
+  let methodName =
+    annotation.columns
+    |> List.map TypeGenerator.toPascalCase
+    |> String.concat ""
+    |> sprintf "GetBy%sOrCreate"
+
+  // 2. Generate value extraction from NewType DU (pattern match on all cases)
+  // All query fields must be in base table (validated earlier), so they exist in all DU cases
+  let valueExtractions =
+    annotation.columns
+    |> List.map (fun col ->
+      let fieldName = TypeGenerator.toPascalCase col
+
+      // Generate pattern match to extract field from all DU cases
+      let baseCaseName = "Base"
+
+      let extensionCases =
+        normalized.extensions
+        |> List.map (fun ext -> $"With{TypeGenerator.toPascalCase ext.aspectName}")
+
+      let allCases = baseCaseName :: extensionCases
+
+      let caseMatches =
+        allCases
+        |> List.map (fun caseName -> $"        | {newTypeName}.{caseName} data -> data.{fieldName}")
+        |> String.concat "\n"
+
+      $"      let {col} = \n        match newItem with\n{caseMatches}")
+    |> String.concat "\n"
+
+  // 3. Build WHERE clause
+  let whereClause =
+    annotation.columns
+    |> List.map (fun col -> $"{col} = @{col}")
+    |> String.concat " AND "
+
+  // 4. Build parameter bindings (using extracted variables)
+  let paramBindings =
+    annotation.columns
+    |> List.map (fun col ->
+      let _, columnDef = findNormalizedColumn normalized col |> Option.get
+      let isNullable = TypeGenerator.isColumnNullable columnDef
+
+      if isNullable then
+        $"      cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+      else
+        $"      cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+    |> String.concat "\n"
+
+  // 6. Generate LEFT JOIN SQL and column selections (same as generateGetAll)
+  let baseColumns = normalized.baseTable.columns |> List.map (fun c -> $"b.{c.name}")
+
+  let extensionSelects =
+    normalized.extensions
+    |> List.collect (fun ext -> ext.table.columns |> List.map (fun c -> $"e{ext.aspectName}.{c.name}"))
+
+  let allSelects = (baseColumns @ extensionSelects) |> String.concat ", "
+
+  let joins =
+    normalized.extensions
+    |> List.map (fun ext -> $"LEFT JOIN {ext.table.name} e{ext.aspectName} ON b.id = e{ext.aspectName}.{ext.fkColumn}")
+    |> String.concat "\n      "
+
+  let selectSql =
+    if normalized.extensions.IsEmpty then
+      $"SELECT {allSelects} FROM {normalized.baseTable.name} b WHERE {whereClause} LIMIT 1"
+    else
+      $"SELECT {allSelects} FROM {normalized.baseTable.name} b\n      {joins}\n      WHERE {whereClause} LIMIT 1"
+
+  // 7. Generate mapping logic (same as GetById)
+  let caseSelection =
+    generateCaseSelection normalized.baseTable normalized.extensions typeName
+
+  // 5. Generate full method
+  $"""  static member {methodName} (newItem: {newTypeName}) (tx: SqliteTransaction) : Result<{typeName}, SqliteException> =
+    try
+      // Extract query values from NewType DU
+{valueExtractions}
+      // Try to find existing record
+      use cmd = new SqliteCommand("{selectSql}", tx.Connection, tx)
+{paramBindings}
+      use reader = cmd.ExecuteReader()
+      if reader.Read() then
+        // Found existing record - return it
+        let item =
+{caseSelection}
+        Ok item
+      else
+        // Not found - insert and fetch
+        reader.Close()
+        match {typeName}.Insert newItem tx with
+        | Ok newId ->
+          match {typeName}.GetById newId tx with
+          | Ok (Some item) -> Ok item
+          | Ok None -> Error (SqliteException("Failed to retrieve inserted record", 0))
+          | Error ex -> Error ex
+        | Error ex -> Error ex
+    with
+    | :? SqliteException as ex -> Error ex"""
+
 /// Generate all methods for a normalized table
 let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, string> =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
 
   // Validate all QueryBy annotations
-  let validationResults =
+  let queryByValidationResults =
     normalized.baseTable.queryByAnnotations
     |> List.map (validateNormalizedQueryByAnnotation normalized)
 
+  // Validate all QueryByOrCreate annotations
+  let queryByOrCreateValidationResults =
+    normalized.baseTable.queryByOrCreateAnnotations
+    |> List.map (validateNormalizedQueryByOrCreateAnnotation normalized)
+
   let firstError =
-    validationResults
+    (queryByValidationResults @ queryByOrCreateValidationResults)
     |> List.tryFind (fun r ->
       match r with
       | Error _ -> true
@@ -706,6 +860,11 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
       normalized.baseTable.queryByAnnotations
       |> List.map (generateNormalizedQueryBy normalized)
 
+    // Generate QueryByOrCreate methods
+    let queryByOrCreateMethods =
+      normalized.baseTable.queryByOrCreateAnnotations
+      |> List.map (generateNormalizedQueryByOrCreate normalized)
+
     let methods =
       [ Some insertMethod
         Some getAllMethod
@@ -714,6 +873,7 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
         updateMethod
         deleteMethod ]
       @ (queryByMethods |> List.map Some)
+      @ (queryByOrCreateMethods |> List.map Some)
       |> List.choose id
       |> String.concat "\n\n"
 

@@ -24,7 +24,7 @@ let WithTransaction
     Error ex
 
 /// Computation expression builder for database transactions with Result monad
-type TxnBuilder(conn: SqliteConnection) =
+type TxnBuilder(dbPath: string) =
 
   /// Bind a transaction function and continue with another
   member _.Bind
@@ -44,9 +44,16 @@ type TxnBuilder(conn: SqliteConnection) =
     : SqliteTransaction -> Result<'T, SqliteException> =
     m
 
-  /// Execute the transaction with automatic commit/rollback
+  /// Execute the transaction with automatic connection opening, transaction management, and cleanup
   member _.Run(action: SqliteTransaction -> Result<'T, SqliteException>) : Result<'T, SqliteException> =
-    WithTransaction conn action
+    try
+      // Convert database path to SQLite connection string
+      let connString = $"Data Source={dbPath}"
+      use conn = new SqliteConnection(connString)
+      conn.Open()
+      WithTransaction conn action
+    with :? SqliteException as ex ->
+      Error ex
 
-/// Create a transaction computation expression
-let txn (conn: SqliteConnection) = TxnBuilder conn
+/// Create a transaction computation expression that accepts a database file path
+let txn (dbPath: string) = TxnBuilder dbPath
