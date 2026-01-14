@@ -62,74 +62,76 @@ let private getExtensionCaseColumns
 
   baseColumns @ extensionColumns
 
-/// Generate named tuple field string for a DU case
-let private generateNamedTupleFields (columns: ColumnDef list) : string =
-  columns
-  |> List.map (fun col ->
-    let fieldName = TypeGenerator.toPascalCase col.name
-    let isNullable = TypeGenerator.isColumnNullable col
-    let fsharpType = TypeGenerator.mapSqlType col.columnType isNullable
-    $"{fieldName}: {fsharpType}")
-  |> String.concat " * "
-
 /// Generate the "New" discriminated union type for inserts (no auto-increment PK)
 let generateNewType (normalized: NormalizedTable) : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
   let newTypeName = $"New{typeName}"
 
-  // Generate DU cases with named tuple syntax
-  let baseColumns = getBaseCaseColumns normalized.baseTable false
-  let baseFieldsStr = generateNamedTupleFields baseColumns
+  // Helper to generate union case with named tuple fields
+  let generateCaseWidget caseName (columns: ColumnDef list) =
+    let fields =
+      columns
+      |> List.map (fun (col: ColumnDef) ->
+        let fieldName = TypeGenerator.toPascalCase col.name
+        let isNullable = TypeGenerator.isColumnNullable col
+        let fsharpType = TypeGenerator.mapSqlType col.columnType isNullable
+        Ast.Field(fieldName, fsharpType))
 
-  let baseCase = $"  | Base of {baseFieldsStr}"
+    UnionCase(caseName, fields)
 
-  let extensionCases =
-    normalized.extensions
-    |> List.map (fun ext ->
-      let caseName = $"With{aspectToPascalCase ext.aspectName}"
-      let columns = getExtensionCaseColumns normalized.baseTable ext false
-      let fieldsStr = generateNamedTupleFields columns
-      $"  | {caseName} of {fieldsStr}")
-    |> String.concat "\n"
+  Oak() {
+    AnonymousModule() {
+      (Union(newTypeName) {
+        // Base case
+        let baseColumns = getBaseCaseColumns normalized.baseTable false
+        generateCaseWidget "Base" baseColumns
 
-  let allCases =
-    if normalized.extensions.IsEmpty then
-      baseCase
-    else
-      $"{baseCase}\n{extensionCases}"
-
-  $"""[<RequireQualifiedAccess>]
-type {newTypeName} =
-{allCases}"""
+        // Extension cases
+        for ext in normalized.extensions do
+          let caseName = $"With{aspectToPascalCase ext.aspectName}"
+          let columns = getExtensionCaseColumns normalized.baseTable ext false
+          generateCaseWidget caseName columns
+      })
+        .attribute (Attribute("RequireQualifiedAccess"))
+    }
+  }
+  |> Gen.mkOak
+  |> Gen.run
 
 /// Generate the query discriminated union type (includes all columns including PK)
 let generateQueryType (normalized: NormalizedTable) : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
 
-  // Generate DU cases with named tuple syntax
-  let baseColumns = getBaseCaseColumns normalized.baseTable true
-  let baseFieldsStr = generateNamedTupleFields baseColumns
+  // Helper to generate union case with named tuple fields
+  let generateCaseWidget caseName (columns: ColumnDef list) =
+    let fields =
+      columns
+      |> List.map (fun (col: ColumnDef) ->
+        let fieldName = TypeGenerator.toPascalCase col.name
+        let isNullable = TypeGenerator.isColumnNullable col
+        let fsharpType = TypeGenerator.mapSqlType col.columnType isNullable
+        Ast.Field(fieldName, fsharpType))
 
-  let baseCase = $"  | Base of {baseFieldsStr}"
+    UnionCase(caseName, fields)
 
-  let extensionCases =
-    normalized.extensions
-    |> List.map (fun ext ->
-      let caseName = $"With{aspectToPascalCase ext.aspectName}"
-      let columns = getExtensionCaseColumns normalized.baseTable ext true
-      let fieldsStr = generateNamedTupleFields columns
-      $"  | {caseName} of {fieldsStr}")
-    |> String.concat "\n"
+  Oak() {
+    AnonymousModule() {
+      (Union(typeName) {
+        // Base case
+        let baseColumns = getBaseCaseColumns normalized.baseTable true
+        generateCaseWidget "Base" baseColumns
 
-  let allCases =
-    if normalized.extensions.IsEmpty then
-      baseCase
-    else
-      $"{baseCase}\n{extensionCases}"
-
-  $"""[<RequireQualifiedAccess>]
-type {typeName} =
-{allCases}"""
+        // Extension cases
+        for ext in normalized.extensions do
+          let caseName = $"With{aspectToPascalCase ext.aspectName}"
+          let columns = getExtensionCaseColumns normalized.baseTable ext true
+          generateCaseWidget caseName columns
+      })
+        .attribute (Attribute("RequireQualifiedAccess"))
+    }
+  }
+  |> Gen.mkOak
+  |> Gen.run
 
 /// Information about a field across all DU cases
 type private FieldInfo =
