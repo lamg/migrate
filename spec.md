@@ -4,7 +4,7 @@
 
 Migrate is a declarative database migration tool and F# type generator for SQLite. It automatically generates and executes SQL statements to transform an actual database schema into an expected schema, and generates type-safe F# code for database access. Rather than requiring developers to write migration scripts or data access code manually, Migrate compares schemas, generates DDL statements, and produces F# types with CRUD operations.
 
-**Version:** 2.2.0
+**Version:** 2.5.0
 **Target Framework:** .NET 10.0
 **Language:** F#
 **Database:** SQLite
@@ -196,7 +196,9 @@ All CRUD methods use curried signatures with `SqliteTransaction` as the last par
 - Aligns with SQLite reality (without explicit transactions, each statement auto-commits anyway)
 
 **Implementation:**
-- Uses [Fabulous.AST](https://github.com/edgarfgp/Fabulous.AST) for type-safe F# code generation
+- Uses [Fabulous.AST](https://github.com/edgarfgp/Fabulous.AST) for type-safe F# code generation (record types, discriminated unions)
+- Uses [Fantomas](https://fsprojects.github.io/fantomas/) for code formatting with 2-space indentation
+- For constructs not well-supported by Fabulous.AST (e.g., type extensions with static methods), code is generated as strings and formatted with Fantomas
 - Uses raw ADO.NET (Microsoft.Data.Sqlite) for database operations
 - Generated code colocated with SQL files in same directory
 
@@ -1391,20 +1393,22 @@ INSERT OR REPLACE INTO posts(id, user_id, title, body) VALUES (3, 2, 'Bob''s Pos
 - SQL file: `course_enrollments.sql` → F# module: `CourseEnrollments.fs`
 
 #### FabulousAstHelpers.fs
-**Purpose:** Helper functions for working with Fabulous.AST
+**Purpose:** Helper functions for F# code generation and formatting using Fantomas
 
 **Key Functions:**
-- `createModule(name, declarations)` - Create F# module structure
-- `createRecordType(name, fields)` - Create record type definition
-- `createStaticMethod(name, parameters, returnType, body)` - Create static method
-- `createOpenDirective(namespace)` - Add open statements
-- `generateSourceFile(module)` - Convert AST to F# source code string
+- `formatCode(code)` - Format F# code string using Fantomas with 2-space indentation
+- `formatOak(oak)` - Format Fantomas Oak AST to F# code string
+- `text(s)` - Create SingleTextNode for Oak AST
+- `identExpr(name)` - Create identifier expression
+- `constantExpr(value)` - Create constant expression
+- `createTypeAugmentation(typeName, members)` - Create type extension Oak AST
+- `createStaticMethod(name, params, returnType, body)` - Create static method definition
 
-**Fabulous.AST Integration:**
-- Type-safe F# code generation
-- No string concatenation for code generation
-- Proper indentation and formatting
-- Syntax correctness guaranteed by AST
+**Code Generation Strategy:**
+- Uses Fabulous.AST for type definitions (records, discriminated unions)
+- Uses string templates for type extensions with static methods (CRUD operations)
+- All generated code formatted with Fantomas for consistent 2-space indentation
+- Positional pattern matching used (named patterns not supported by Fantomas parser)
 
 ### Data Flow
 
@@ -1553,17 +1557,21 @@ Complete F# Source Files
 - Provides library for programmatic integration
 - Single codebase serves multiple use cases
 
-### 7. Fabulous.AST for Code Generation
-**Decision:** Use Fabulous.AST library for type-safe F# code generation instead of string templates
+### 7. Fabulous.AST + Fantomas for Code Generation
+**Decision:** Use Fabulous.AST for type definitions and Fantomas for code formatting
 
 **Rationale:**
-- **Type Safety:** AST-based generation guarantees syntactically correct F# code
-- **No String Concatenation:** Eliminates entire class of code generation bugs
-- **Maintainability:** Changes to generated code structure are easier to implement
-- **Formatting:** Automatic proper indentation and F# idioms
-- **Refactoring:** AST transformations are safer than text transformations
+- **Type Safety:** Fabulous.AST guarantees syntactically correct F# type definitions (records, DUs)
+- **Consistent Formatting:** Fantomas ensures all generated code has consistent 2-space indentation
+- **Flexibility:** String templates for type extensions (not well-supported by Fabulous.AST), formatted by Fantomas
+- **Pattern Matching:** Positional patterns used for Fantomas parser compatibility
 
-**Trade-off:** Additional dependency and learning curve, but benefits far outweigh costs for code generation quality
+**Trade-off:** Two code generation approaches (AST for types, strings for methods), but Fantomas formatting unifies the output style
+
+**Implementation Notes:**
+- Fabulous.AST used for: Record types, discriminated unions, union cases with named tuple fields
+- String templates used for: Type extensions with static methods (CRUD operations)
+- All output formatted with Fantomas `CodeFormatter.FormatDocumentAsync` with `IndentSize = 2`
 
 ### 8. Static Methods for CRUD Operations
 **Decision:** Generate static methods on types rather than separate repository classes
@@ -1620,8 +1628,9 @@ Complete F# Source Files
 - `FSharpPlus` 1.6.1 - Functional programming utilities
 - `dotenv.net` 3.2.1 - Environment variable loading
 - `Argu` 6.2.4 - Command-line argument parsing
-- `Fabulous.AST` (latest) - Type-safe F# code generation
-- `FParsec` 1.1.1 - Parser combinators (available for future enhancements)
+- `Fabulous.AST` 1.2.0 - Type-safe F# code generation (record types, DUs)
+- `Fantomas.Core` 6.3.16 - F# code formatting with configurable indentation
+- `FParsec` 1.1.1 - Parser combinators for SQL parsing
 
 **Build Tools:**
 - .NET SDK 10.0.0
@@ -1673,7 +1682,7 @@ Complete F# Source Files
 
 ## Testing Strategy
 
-**Test Coverage:** 86 tests (all passing)
+**Test Coverage:** 130 tests (all passing)
 
 **Migration Tests:**
 - Table migration tests - verifies DDL generation for various schema changes

@@ -1,8 +1,8 @@
 # F# Code Generation Implementation Progress
 
 **Branch:** `fsharp-generation`
-**Last Updated:** 2026-01-12
-**Status:** ✅ FParsec parser complete, code generation working, normalized schema Phases 1-2 complete, all 38 tests passing
+**Last Updated:** 2026-01-14
+**Status:** ✅ FParsec parser complete, code generation with Fantomas formatting, normalized schema complete, all 130 tests passing
 
 ## Overview
 
@@ -40,8 +40,12 @@ Created `src/MigLib/Db.fs` - Shared transaction management utilities used by all
 Created 6 new modules in `src/MigLib/CodeGen/`:
 
 #### **FabulousAstHelpers.fs**
-- Currently just a placeholder with formatCode function
-- Initially planned for Fabulous.AST integration, but using string templates for now
+- `formatCode`: Format F# code strings with Fantomas using 2-space indentation
+- `formatOak`: Format Fantomas Oak AST to F# code
+- `text`, `identExpr`, `constantExpr`: Helper functions for Oak AST construction
+- `createTypeAugmentation`: Create type extension Oak AST nodes
+- `createStaticMethod`: Create static method definitions
+- Uses Fantomas.Core with custom `FormatConfig` for consistent formatting
 
 #### **TypeGenerator.fs**
 - `mapSqlType`: Maps SQL types to F# types (INTEGER→int64, TEXT→string, etc.)
@@ -621,7 +625,7 @@ let getPrimaryKey (table: CreateTable) : ColumnDef list =
 ## 🧪 Testing
 
 ### Current Test Status
-All 38 tests passing:
+All 130 tests passing:
 - ✅ TableMigration (6 cases)
 - ✅ ViewMigration
 - ✅ UseAsLib
@@ -745,17 +749,23 @@ Db.txn conn {
 
 ## 💡 Design Decisions Made
 
-1. **String Templates over Fabulous.AST** - Simpler, more direct for now
-2. **Static Methods on Types** - More F# idiomatic than repository pattern
-3. **Result Types** - Explicit error handling, no exceptions thrown
-4. **File Colocation** - SQL and F# files together for discoverability
-5. **Raw ADO.NET** - No ORM overhead, full control, minimal dependencies
-6. **Option Types for Nullables** - Type-safe null handling
-7. **Shared Db Module** - Transaction management extracted to MigLib (not generated per-type)
+1. **Fabulous.AST for Types + Fantomas for Formatting** - Best of both worlds
+   - Fabulous.AST for type definitions (records, discriminated unions)
+   - String templates for type extensions with static methods
+   - Fantomas formats all output with consistent 2-space indentation
+2. **Positional Patterns over Named Patterns** - Fantomas parser compatibility
+   - Use `| Student.Base(id, _) -> id` instead of `| Student.Base(Id = id) -> id`
+   - Named patterns (F# 5+) not supported by Fantomas parser
+3. **Static Methods on Types** - More F# idiomatic than repository pattern
+4. **Result Types** - Explicit error handling, no exceptions thrown
+5. **File Colocation** - SQL and F# files together for discoverability
+6. **Raw ADO.NET** - No ORM overhead, full control, minimal dependencies
+7. **Option Types for Nullables** - Type-safe null handling
+8. **Shared Db Module** - Transaction management extracted to MigLib (not generated per-type)
    - Single implementation shared across all generated code
    - Reduces code duplication
    - Provides both `Db.WithTransaction` and `Db.txn` computation expression
-8. **Curried Signatures with Transaction Last** - All CRUD methods use curried signatures
+9. **Curried Signatures with Transaction Last** - All CRUD methods use curried signatures
    - SqliteTransaction as last parameter enables clean computation expression syntax
    - Allows partial application patterns
    - Works seamlessly with `Db.txn` (transaction parameter automatically supplied)
