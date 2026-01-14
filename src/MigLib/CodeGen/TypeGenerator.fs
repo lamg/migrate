@@ -3,6 +3,8 @@ module internal migrate.CodeGen.TypeGenerator
 open System
 open migrate.DeclarativeMigrations.Types
 open migrate.CodeGen.ViewIntrospection
+open Fabulous.AST
+open type Fabulous.AST.Ast
 
 /// Convert snake_case to PascalCase for F# naming conventions
 let toPascalCase (s: string) =
@@ -52,25 +54,31 @@ let generateField (column: ColumnDef) =
 let generateRecordType (table: CreateTable) : string =
   let typeName = toPascalCase table.name
 
-  let fields =
-    table.columns
-    |> List.map generateField
-    |> List.map (fun (name, typ) -> $"    {name}: {typ}")
-    |> String.concat "\n"
-
-  $"type {typeName} = {{\n{fields}\n}}"
+  Oak() {
+    AnonymousModule() {
+      Record(typeName) {
+        for column in table.columns do
+          let fieldName, fieldType = generateField column
+          Field(fieldName, fieldType)
+      }
+    }
+  }
+  |> Gen.mkOak
+  |> Gen.run
 
 /// Generate an F# record type from a view definition
 let generateViewRecordType (viewName: string) (columns: ViewColumn list) : string =
   let typeName = toPascalCase viewName
 
-  let fields =
-    columns
-    |> List.map (fun col ->
-      let fsharpType = mapSqlType col.columnType col.isNullable
-      let fieldName = toPascalCase col.name
-      fieldName, fsharpType)
-    |> List.map (fun (name, typ) -> $"    {name}: {typ}")
-    |> String.concat "\n"
-
-  $"type {typeName} = {{\n{fields}\n}}"
+  Oak() {
+    AnonymousModule() {
+      Record(typeName) {
+        for col in columns do
+          let fsharpType = mapSqlType col.columnType col.isNullable
+          let fieldName = toPascalCase col.name
+          Field(fieldName, fsharpType)
+      }
+    }
+  }
+  |> Gen.mkOak
+  |> Gen.run

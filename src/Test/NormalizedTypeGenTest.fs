@@ -30,7 +30,7 @@ let ``Generates NewType DU with Base case`` () =
     | Ok code ->
       Assert.Contains("[<RequireQualifiedAccess>]", code)
       Assert.Contains("type NewStudent =", code)
-      Assert.Contains("| Base of {| Name: string |}", code)
+      Assert.Contains("| Base of Name: string", code)
       // Should NOT contain Id in NewStudent (auto-increment PK excluded)
       Assert.DoesNotContain("Id:", code)
     | Error e -> Assert.Fail $"Failed: {e}"
@@ -56,7 +56,7 @@ let ``Generates NewType DU with extension case`` () =
     return normalized |> List.head |> NormalizedTypeGenerator.generateNewType
   }
   |> function
-    | Ok code -> Assert.Contains("| WithAddress of {| Name: string; Address: string |}", code)
+    | Ok code -> Assert.Contains("| WithAddress of Name: string * Address: string", code)
     | Error e -> Assert.Fail $"Failed: {e}"
 
 [<Fact>]
@@ -83,7 +83,7 @@ let ``Generates QueryType DU with Id in Base case`` () =
     | Ok code ->
       Assert.Contains("[<RequireQualifiedAccess>]", code)
       Assert.Contains("type Student =", code)
-      Assert.Contains("| Base of {| Id: int64; Name: string |}", code)
+      Assert.Contains("| Base of Id: int64 * Name: string", code)
     | Error e -> Assert.Fail $"Failed: {e}"
 
 [<Fact>]
@@ -107,7 +107,7 @@ let ``Generates QueryType DU with Id in extension case`` () =
     return normalized |> List.head |> NormalizedTypeGenerator.generateQueryType
   }
   |> function
-    | Ok code -> Assert.Contains("| WithAddress of {| Id: int64; Name: string; Address: string |}", code)
+    | Ok code -> Assert.Contains("| WithAddress of Id: int64 * Name: string * Address: string", code)
     | Error e -> Assert.Fail $"Failed: {e}"
 
 [<Fact>]

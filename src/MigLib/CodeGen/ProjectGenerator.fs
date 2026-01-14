@@ -23,9 +23,9 @@ let generateProjectFile (projectName: string) (sourceFiles: string list) : strin
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="FsToolkit.ErrorHandling" Version="4.18.0" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
-    <PackageReference Include="MigLib" Version="2.0.0" />
+    <PackageReference Include="FsToolkit.ErrorHandling" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="MigLib" />
   </ItemGroup>
 
 </Project>

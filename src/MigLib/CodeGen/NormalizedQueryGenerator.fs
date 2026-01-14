@@ -35,20 +35,22 @@ let private generateParamBindings (columns: ColumnDef list) (dataAccessor: strin
     let isNullable = TypeGenerator.isColumnNullable col
 
     if isNullable then
-      $"      cmd.Parameters.AddWithValue(\"@{col.name}\", match {dataAccessor}.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+      $"cmd.Parameters.AddWithValue(\"@{col.name}\", match {dataAccessor}.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
     else
-      $"      cmd.Parameters.AddWithValue(\"@{col.name}\", {dataAccessor}.{fieldName}) |> ignore")
+      $"cmd.Parameters.AddWithValue(\"@{col.name}\", {dataAccessor}.{fieldName}) |> ignore")
 
 /// Generate the Base case insert (single table)
 let private generateBaseCase (baseTable: CreateTable) (typeName: string) : string =
   let insertColumns = getInsertColumns baseTable
   let insertSql = generateInsertSql baseTable.name insertColumns
-  let paramBindings = generateParamBindings insertColumns "data" |> String.concat "\n"
+
+  let paramBindings =
+    generateParamBindings insertColumns "data" |> String.concat "\n        "
 
   $"""      | New{typeName}.Base data ->
         // Single INSERT into base table
         use cmd = new SqliteCommand("{insertSql}", tx.Connection, tx)
-{paramBindings}
+        {paramBindings}
         cmd.ExecuteNonQuery() |> ignore
         use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
         let {baseTable.name}Id = lastIdCmd.ExecuteScalar() |> unbox<int64>
@@ -61,7 +63,7 @@ let private generateExtensionCase (baseTable: CreateTable) (extension: Extension
   let baseInsertSql = generateInsertSql baseTable.name baseInsertColumns
 
   let baseParamBindings =
-    generateParamBindings baseInsertColumns "data" |> String.concat "\n"
+    generateParamBindings baseInsertColumns "data" |> String.concat "\n        "
 
   // Extension columns excluding the FK column
   let extensionInsertColumns =
@@ -72,12 +74,13 @@ let private generateExtensionCase (baseTable: CreateTable) (extension: Extension
     generateInsertSql extension.table.name extensionInsertColumns
 
   let extensionParamBindings =
-    generateParamBindings extensionInsertColumns "data" |> String.concat "\n"
+    generateParamBindings extensionInsertColumns "data"
+    |> String.concat "\n        "
 
   $"""      | New{typeName}.With{caseName} data ->
         // Two inserts in same transaction (atomic)
         use cmd1 = new SqliteCommand("{baseInsertSql}", tx.Connection, tx)
-{baseParamBindings}
+        {baseParamBindings}
         cmd1.ExecuteNonQuery() |> ignore
 
         use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
@@ -87,7 +90,7 @@ let private generateExtensionCase (baseTable: CreateTable) (extension: Extension
                                                                                                                                                                                                               |> List.map (fun c -> $"@{{c.name}}")
                                                                                                                                                                                                               |> String.concat ", "})", tx.Connection, tx)
         cmd2.Parameters.AddWithValue("@{extension.fkColumn}", {baseTable.name}Id) |> ignore
-{extensionParamBindings}
+        {extensionParamBindings}
         cmd2.ExecuteNonQuery() |> ignore
         Ok {baseTable.name}Id"""
 
@@ -180,9 +183,9 @@ let private generateBaseFieldReads (baseTable: CreateTable) (startIndex: int) : 
     let readerMethod = TypeGenerator.mapSqlType col.columnType false |> readerMethod
 
     if isNullable then
-      $"          {fieldName} = if reader.IsDBNull {colIndex} then None else Some(reader.Get{readerMethod} {colIndex})"
+      $"{fieldName} = if reader.IsDBNull {colIndex} then None else Some(reader.Get{readerMethod} {colIndex})"
     else
-      $"          {fieldName} = reader.Get{readerMethod} {colIndex}")
+      $"{fieldName} = reader.Get{readerMethod} {colIndex}")
 
 /// Generate field reading code for extension columns (excluding FK)
 let private generateExtensionFieldReads (extension: ExtensionTable) (startIndex: int) : string list =
@@ -195,9 +198,9 @@ let private generateExtensionFieldReads (extension: ExtensionTable) (startIndex:
     let readerMethod = TypeGenerator.mapSqlType col.columnType false |> readerMethod
 
     if isNullable then
-      $"          {fieldName} = if reader.IsDBNull {colIndex} then None else Some(reader.Get{readerMethod} {colIndex})"
+      $"{fieldName} = if reader.IsDBNull {colIndex} then None else Some(reader.Get{readerMethod} {colIndex})"
     else
-      $"          {fieldName} = reader.Get{readerMethod} {colIndex}")
+      $"{fieldName} = reader.Get{readerMethod} {colIndex}")
 
 /// Generate pattern matching for case selection based on NULL checks
 let private generateCaseSelection
@@ -222,7 +225,7 @@ let private generateCaseSelection
     |> String.concat "\n          "
 
   // Generate base field reads
-  let baseFields = generateBaseFieldReads baseTable 0 |> String.concat "\n"
+  let baseFields = generateBaseFieldReads baseTable 0 |> String.concat "\n          "
 
   // Generate match patterns for each extension
   let matchPatterns =
@@ -241,11 +244,11 @@ let private generateCaseSelection
             ext
             (baseTable.columns.Length
              + (extensions |> List.take i |> List.sumBy (fun e -> e.table.columns.Length - 1)))
-        |> String.concat "\n"
+        |> String.concat "\n          "
 
       $"          | {pattern} ->
             {typeName}.With{caseName} {{|
-{allFields}
+          {allFields}
             |}}")
     |> String.concat "\n"
 
@@ -255,7 +258,7 @@ let private generateCaseSelection
   let baseCaseMatch =
     $"          | {basePattern} ->
             {typeName}.Base {{|
-{baseFields}
+          {baseFields}
             |}}"
 
   // Default case (multiple extensions - choose first)
@@ -263,7 +266,7 @@ let private generateCaseSelection
     $"          | _ ->
             // Multiple extensions active - choosing Base case
             {typeName}.Base {{|
-{baseFields}
+          {baseFields}
             |}}"
 
   $"""          {nullChecks}
@@ -338,8 +341,8 @@ let generateGetById (normalized: NormalizedTable) : string option =
 
     let paramBindings =
       pks
-      |> List.map (fun pk -> $"      cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
-      |> String.concat "\n"
+      |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+      |> String.concat "\n      "
 
     let caseSelection =
       generateCaseSelection normalized.baseTable normalized.extensions typeName
@@ -348,7 +351,7 @@ let generateGetById (normalized: NormalizedTable) : string option =
       $"""  static member GetById {paramList} (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
     try
       use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
-{paramBindings}
+      {paramBindings}
       use reader = cmd.ExecuteReader()
       if reader.Read() then
         let item =
@@ -417,7 +420,7 @@ let private generateUpdateBaseCase
   let updateSql = generateUpdateBaseSql baseTable
 
   let paramBindings =
-    generateParamBindings baseTable.columns "data" |> String.concat "\n"
+    generateParamBindings baseTable.columns "data" |> String.concat "\n        "
 
   let deleteStatements =
     extensions
@@ -428,7 +431,7 @@ let private generateUpdateBaseCase
   $"""      | {typeName}.Base data ->
         // Update base table, delete all extensions
         use cmd = new SqliteCommand("{updateSql}", tx.Connection, tx)
-{paramBindings}
+        {paramBindings}
         cmd.ExecuteNonQuery() |> ignore
 
 {deleteStatements}        Ok()"""
@@ -444,7 +447,7 @@ let private generateUpdateExtensionCase
   let updateSql = generateUpdateBaseSql baseTable
 
   let baseParamBindings =
-    generateParamBindings baseTable.columns "data" |> String.concat "\n"
+    generateParamBindings baseTable.columns "data" |> String.concat "\n        "
 
   // Extension columns excluding FK
   let extensionInsertColumns =
@@ -461,7 +464,8 @@ let private generateUpdateExtensionCase
     $"INSERT OR REPLACE INTO {extension.table.name} ({extension.fkColumn}, {extensionColumnNames}) VALUES (@{extension.fkColumn}, {extensionParamNames})"
 
   let extensionParamBindings =
-    generateParamBindings extensionInsertColumns "data" |> String.concat "\n"
+    generateParamBindings extensionInsertColumns "data"
+    |> String.concat "\n        "
 
   // Delete other extensions
   let deleteOtherExtensions =
@@ -474,12 +478,12 @@ let private generateUpdateExtensionCase
   $"""      | {typeName}.With{caseName} data ->
         // Update base, INSERT OR REPLACE extension
         use cmd1 = new SqliteCommand("{updateSql}", tx.Connection, tx)
-{baseParamBindings}
+        {baseParamBindings}
         cmd1.ExecuteNonQuery() |> ignore
 
         use cmd2 = new SqliteCommand("{insertOrReplaceSql}", tx.Connection, tx)
         cmd2.Parameters.AddWithValue("@{extension.fkColumn}", data.Id) |> ignore
-{extensionParamBindings}
+        {extensionParamBindings}
         cmd2.ExecuteNonQuery() |> ignore
 
 {deleteOtherExtensions}        Ok()"""
@@ -541,15 +545,15 @@ let generateDelete (normalized: NormalizedTable) : string option =
 
     let paramBindings =
       pks
-      |> List.map (fun pk -> $"      cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
-      |> String.concat "\n"
+      |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+      |> String.concat "\n      "
 
     Some
       $"""  static member Delete {paramList} (tx: SqliteTransaction)
     : Result<unit, SqliteException> =
     try
       use cmd = new SqliteCommand("{deleteSql}", tx.Connection, tx)
-{paramBindings}
+      {paramBindings}
       cmd.ExecuteNonQuery() |> ignore
       Ok()
     with
@@ -626,10 +630,10 @@ let private generateNormalizedQueryBy (normalized: NormalizedTable) (annotation:
       let isNullable = TypeGenerator.isColumnNullable columnDef
 
       if isNullable then
-        $"      cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
       else
-        $"      cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
-    |> String.concat "\n"
+        $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+    |> String.concat "\n      "
 
   // 5. Generate LEFT JOIN SQL and column selections (same as generateGetAll)
   let baseColumns = normalized.baseTable.columns |> List.map (fun c -> $"b.{c.name}")
@@ -664,7 +668,7 @@ let private generateNormalizedQueryBy (normalized: NormalizedTable) (annotation:
   $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
     try
       use cmd = new SqliteCommand("{sql}", tx.Connection, tx)
-{paramBindings}
+      {paramBindings}
       use reader = cmd.ExecuteReader()
       let results = ResizeArray<{typeName}>()
       while reader.Read() do
@@ -768,10 +772,10 @@ let private generateNormalizedQueryByOrCreate
       let isNullable = TypeGenerator.isColumnNullable columnDef
 
       if isNullable then
-        $"      cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
       else
-        $"      cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
-    |> String.concat "\n"
+        $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+    |> String.concat "\n      "
 
   // 6. Generate LEFT JOIN SQL and column selections (same as generateGetAll)
   let baseColumns = normalized.baseTable.columns |> List.map (fun c -> $"b.{c.name}")
@@ -804,7 +808,7 @@ let private generateNormalizedQueryByOrCreate
 {valueExtractions}
       // Try to find existing record
       use cmd = new SqliteCommand("{selectSql}", tx.Connection, tx)
-{paramBindings}
+      {paramBindings}
       use reader = cmd.ExecuteReader()
       if reader.Read() then
         // Found existing record - return it

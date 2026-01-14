@@ -82,6 +82,45 @@ All changes should pass the existing test suite:
 cd src && dotnet test
 ```
 
+## Code Generation Conventions
+
+### Generated Project Files
+
+The `mig codegen` command generates `.fsproj` files that use **Central Package Management (CPM)**.
+
+**Generated format:**
+```xml
+<ItemGroup>
+  <PackageReference Include="FsToolkit.ErrorHandling" />
+  <PackageReference Include="Microsoft.Data.Sqlite" />
+  <PackageReference Include="MigLib" />
+</ItemGroup>
+```
+
+**Why CPM:**
+- Modern .NET best practice for managing package versions
+- Centralized version control via `Directory.Packages.props`
+- Easier to maintain consistent versions across multiple projects
+- Reduces duplication in project files
+
+**User setup requirement:**
+Users must create a `Directory.Packages.props` file in their solution root:
+
+```xml
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="FsToolkit.ErrorHandling" Version="4.18.0" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+    <PackageVersion Include="MigLib" Version="2.0.0" />
+  </ItemGroup>
+</Project>
+```
+
+**Note:** This is a breaking change from traditional package references with inline versions. Users without CPM will get build error `NU1015` and must set up `Directory.Packages.props`.
+
 ## Version Management
 
 ### Version Synchronization

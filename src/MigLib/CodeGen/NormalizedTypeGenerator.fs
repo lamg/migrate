@@ -3,6 +3,8 @@
 module internal migrate.CodeGen.NormalizedTypeGenerator
 
 open migrate.DeclarativeMigrations.Types
+open Fabulous.AST
+open type Fabulous.AST.Ast
 
 /// Get columns that should be included in the "New" type (excludes auto-increment PKs)
 let private getInsertColumns (table: CreateTable) : ColumnDef list =
@@ -65,41 +67,71 @@ let generateNewType (normalized: NormalizedTable) : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
   let newTypeName = $"New{typeName}"
 
-  // Base case
-  let baseColumns = getBaseCaseColumns normalized.baseTable false
-  let baseCase = generateCase "Base" baseColumns
+  // Helper to generate union case with anonymous record fields
+  let generateCaseWidget caseName (columns: ColumnDef list) =
+    let fields =
+      columns
+      |> List.map (fun (col: ColumnDef) ->
+        let fieldName = TypeGenerator.toPascalCase col.name
+        let isNullable = TypeGenerator.isColumnNullable col
+        let fsharpType = TypeGenerator.mapSqlType col.columnType isNullable
+        Ast.Field(fieldName, fsharpType))
 
-  // Extension cases
-  let extensionCases =
-    normalized.extensions
-    |> List.map (fun ext ->
-      let caseName = $"With{aspectToPascalCase ext.aspectName}"
-      let columns = getExtensionCaseColumns normalized.baseTable ext false
-      generateCase caseName columns)
+    UnionCase(caseName, fields)
 
-  let allCases = baseCase :: extensionCases |> String.concat "\n"
+  Oak() {
+    AnonymousModule() {
+      (Union(newTypeName) {
+        // Base case
+        let baseColumns = getBaseCaseColumns normalized.baseTable false
+        generateCaseWidget "Base" baseColumns
 
-  $"[<RequireQualifiedAccess>]\ntype {newTypeName} =\n{allCases}"
+        // Extension cases
+        for ext in normalized.extensions do
+          let caseName = $"With{aspectToPascalCase ext.aspectName}"
+          let columns = getExtensionCaseColumns normalized.baseTable ext false
+          generateCaseWidget caseName columns
+      })
+        .attribute (Attribute("RequireQualifiedAccess"))
+    }
+  }
+  |> Gen.mkOak
+  |> Gen.run
 
 /// Generate the query discriminated union type (includes all columns including PK)
 let generateQueryType (normalized: NormalizedTable) : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
 
-  // Base case
-  let baseColumns = getBaseCaseColumns normalized.baseTable true
-  let baseCase = generateCase "Base" baseColumns
+  // Helper to generate union case with anonymous record fields
+  let generateCaseWidget caseName (columns: ColumnDef list) =
+    let fields =
+      columns
+      |> List.map (fun (col: ColumnDef) ->
+        let fieldName = TypeGenerator.toPascalCase col.name
+        let isNullable = TypeGenerator.isColumnNullable col
+        let fsharpType = TypeGenerator.mapSqlType col.columnType isNullable
+        Ast.Field(fieldName, fsharpType))
 
-  // Extension cases
-  let extensionCases =
-    normalized.extensions
-    |> List.map (fun ext ->
-      let caseName = $"With{aspectToPascalCase ext.aspectName}"
-      let columns = getExtensionCaseColumns normalized.baseTable ext true
-      generateCase caseName columns)
+    UnionCase(caseName, fields)
 
-  let allCases = baseCase :: extensionCases |> String.concat "\n"
+  Oak() {
+    AnonymousModule() {
+      (Union(typeName) {
+        // Base case
+        let baseColumns = getBaseCaseColumns normalized.baseTable true
+        generateCaseWidget "Base" baseColumns
 
-  $"[<RequireQualifiedAccess>]\ntype {typeName} =\n{allCases}"
+        // Extension cases
+        for ext in normalized.extensions do
+          let caseName = $"With{aspectToPascalCase ext.aspectName}"
+          let columns = getExtensionCaseColumns normalized.baseTable ext true
+          generateCaseWidget caseName columns
+      })
+        .attribute (Attribute("RequireQualifiedAccess"))
+    }
+  }
+  |> Gen.mkOak
+  |> Gen.run
 
 /// Information about a field across all DU cases
 type private FieldInfo =
@@ -144,50 +176,42 @@ let private collectFields (normalized: NormalizedTable) (includeAutoIncrementPk:
   fieldMap |> Map.toList |> List.map snd
 
 /// Generate a property member for a field
-let private generateProperty (typeName: string) (field: FieldInfo) (normalized: NormalizedTable) : string =
+let private generateProperty (typeName: string) (field: FieldInfo) (normalized: NormalizedTable) =
   let returnType =
     if field.InAllCases then
       field.FSharpType
     else
       $"{field.FSharpType} option"
 
-  // Generate pattern matching
-  let baseCase =
-    let baseColumns = getBaseCaseColumns normalized.baseTable true
-
+  // Helper to create match clause for a case
+  let createMatchClause caseName (columns: ColumnDef list) =
     let hasField =
-      baseColumns
-      |> List.exists (fun col -> TypeGenerator.toPascalCase col.name = field.Name)
+      columns
+      |> List.exists (fun (col: ColumnDef) -> TypeGenerator.toPascalCase col.name = field.Name)
+
+    let pattern = LongIdentPat($"{typeName}.{caseName}", NamedPat("data"))
 
     if hasField then
       if field.InAllCases then
-        $"    | {typeName}.Base data -> data.{field.Name}"
+        MatchClauseExpr(pattern, ConstantExpr($"data.{field.Name}"))
       else
-        $"    | {typeName}.Base data -> Some data.{field.Name}"
+        MatchClauseExpr(pattern, AppExpr("Some", [ $"data.{field.Name}" ]))
     else
-      $"    | {typeName}.Base _ -> None"
+      MatchClauseExpr(LongIdentPat($"{typeName}.{caseName}", "_"), ConstantExpr("None"))
 
-  let extensionCases =
+  // Generate base case
+  let baseColumns = getBaseCaseColumns normalized.baseTable true
+  let baseClause = createMatchClause "Base" baseColumns
+
+  // Generate extension cases
+  let extensionClauses =
     normalized.extensions
     |> List.map (fun ext ->
       let caseName = $"With{aspectToPascalCase ext.aspectName}"
       let columns = getExtensionCaseColumns normalized.baseTable ext true
+      createMatchClause caseName columns)
 
-      let hasField =
-        columns
-        |> List.exists (fun col -> TypeGenerator.toPascalCase col.name = field.Name)
-
-      if hasField then
-        if field.InAllCases then
-          $"    | {typeName}.{caseName} data -> data.{field.Name}"
-        else
-          $"    | {typeName}.{caseName} data -> Some data.{field.Name}"
-      else
-        $"    | {typeName}.{caseName} _ -> None")
-
-  let allCases = baseCase :: extensionCases |> String.concat "\n"
-
-  $"  member this.{field.Name} : {returnType} =\n    match this with\n{allCases}"
+  Member($"this.{field.Name}", MatchExpr("this", baseClause :: extensionClauses)).returnType (returnType)
 
 /// Generate properties for the query type
 let private generateProperties (normalized: NormalizedTable) : string =
@@ -197,16 +221,53 @@ let private generateProperties (normalized: NormalizedTable) : string =
   if fields.IsEmpty then
     ""
   else
-    let properties =
+    // For now, generate type extension members using string since
+    // Fabulous.AST doesn't have a straightforward TypeExtension widget
+    let members =
       fields
-      |> List.map (fun field -> generateProperty typeName field normalized)
+      |> List.map (fun field ->
+        let returnType =
+          if field.InAllCases then
+            field.FSharpType
+          else
+            $"{field.FSharpType} option"
+
+        let createClause caseName columns =
+          let hasField =
+            columns
+            |> List.exists (fun (col: ColumnDef) -> TypeGenerator.toPascalCase col.name = field.Name)
+
+          if hasField then
+            if field.InAllCases then
+              $"    | {typeName}.{caseName} data -> data.{field.Name}"
+            else
+              $"    | {typeName}.{caseName} data -> Some data.{field.Name}"
+          else
+            $"    | {typeName}.{caseName} _ -> None"
+
+        let baseClause = createClause "Base" (getBaseCaseColumns normalized.baseTable true)
+
+        let extClauses =
+          normalized.extensions
+          |> List.map (fun ext ->
+            let caseName = $"With{aspectToPascalCase ext.aspectName}"
+            let columns = getExtensionCaseColumns normalized.baseTable ext true
+            createClause caseName columns)
+
+        let allClauses = baseClause :: extClauses |> String.concat "\n"
+
+        $"  member this.{field.Name} : {returnType} =\n    match this with\n{allClauses}")
       |> String.concat "\n\n"
 
-    $"\ntype {typeName} with\n{properties}"
+    $"\ntype {typeName} with\n{members}"
 
 /// Generate both DU types for a normalized table with properties
 let generateTypes (normalized: NormalizedTable) : string =
   let newType = generateNewType normalized
   let queryType = generateQueryType normalized
   let properties = generateProperties normalized
-  $"{newType}\n\n{queryType}{properties}"
+
+  if properties = "" then
+    $"{newType}\n\n{queryType}"
+  else
+    $"{newType}\n\n{queryType}\n{properties}"
