@@ -248,7 +248,7 @@ let private generateCaseSelection
     |> String.concat "\n          "
 
   // Generate base field reads
-  let baseFields = generateBaseFieldReads baseTable 0 |> String.concat "\n          "
+  let baseFields = generateBaseFieldReads baseTable 0 |> String.concat ",\n          "
 
   // Generate match patterns for each extension
   let matchPatterns =
@@ -267,7 +267,7 @@ let private generateCaseSelection
             ext
             (baseTable.columns.Length
              + (extensions |> List.take i |> List.sumBy (fun e -> e.table.columns.Length - 1)))
-        |> String.concat "\n          "
+        |> String.concat ",\n          "
 
       $"          | {pattern} ->
             {typeName}.With{caseName} ({allFields})")
