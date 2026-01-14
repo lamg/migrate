@@ -41,7 +41,7 @@ let private generateFieldPattern (columns: ColumnDef list) : string =
   |> String.concat "; "
 
 /// Generate parameter binding code for columns using variable names
-let private generateParamBindings (columns: ColumnDef list) : string list =
+let private generateParamBindings (columns: ColumnDef list) (cmdVarName: string) : string list =
   columns
   |> List.map (fun col ->
     let fieldName = TypeGenerator.toPascalCase col.name
@@ -53,9 +53,9 @@ let private generateParamBindings (columns: ColumnDef list) : string list =
     let isNullable = TypeGenerator.isColumnNullable col
 
     if isNullable then
-      $"cmd.Parameters.AddWithValue(\"@{col.name}\", match {varName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+      $"{cmdVarName}.Parameters.AddWithValue(\"@{col.name}\", match {varName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
     else
-      $"cmd.Parameters.AddWithValue(\"@{col.name}\", {varName}) |> ignore")
+      $"{cmdVarName}.Parameters.AddWithValue(\"@{col.name}\", {varName}) |> ignore")
 
 /// Generate the Base case insert (single table)
 let private generateBaseCase (baseTable: CreateTable) (typeName: string) : string =
@@ -64,7 +64,7 @@ let private generateBaseCase (baseTable: CreateTable) (typeName: string) : strin
   let fieldPattern = generateFieldPattern insertColumns
 
   let paramBindings =
-    generateParamBindings insertColumns |> String.concat "\n        "
+    generateParamBindings insertColumns "cmd" |> String.concat "\n        "
 
   $"""      | New{typeName}.Base({fieldPattern}) ->
         // Single INSERT into base table
@@ -94,10 +94,11 @@ let private generateExtensionCase (baseTable: CreateTable) (extension: Extension
   let fieldPattern = generateFieldPattern allColumns
 
   let baseParamBindings =
-    generateParamBindings baseInsertColumns |> String.concat "\n        "
+    generateParamBindings baseInsertColumns "cmd1" |> String.concat "\n        "
 
   let extensionParamBindings =
-    generateParamBindings extensionInsertColumns |> String.concat "\n        "
+    generateParamBindings extensionInsertColumns "cmd2"
+    |> String.concat "\n        "
 
   $"""      | New{typeName}.With{caseName}({fieldPattern}) ->
         // Two inserts in same transaction (atomic)
@@ -443,7 +444,7 @@ let private generateUpdateBaseCase
   let fieldPattern = generateFieldPattern baseTable.columns
 
   let paramBindings =
-    generateParamBindings baseTable.columns |> String.concat "\n        "
+    generateParamBindings baseTable.columns "cmd" |> String.concat "\n        "
 
   // Get the Id variable name for delete statements
   let idCol =
@@ -504,10 +505,11 @@ let private generateUpdateExtensionCase
   let fieldPattern = generateFieldPattern allColumns
 
   let baseParamBindings =
-    generateParamBindings baseTable.columns |> String.concat "\n        "
+    generateParamBindings baseTable.columns "cmd1" |> String.concat "\n        "
 
   let extensionParamBindings =
-    generateParamBindings extensionInsertColumns |> String.concat "\n        "
+    generateParamBindings extensionInsertColumns "cmd2"
+    |> String.concat "\n        "
 
   // Get the Id variable name for delete statements
   let idCol =
