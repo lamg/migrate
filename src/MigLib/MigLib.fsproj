@@ -51,6 +51,7 @@
   <ItemGroup>
     <PackageReference Include="dotenv.net" />
     <PackageReference Include="Fabulous.AST" />
+    <PackageReference Include="Fantomas.Core" />
     <PackageReference Include="FSharp.Core" />
     <PackageReference Include="FsToolkit.ErrorHandling" />
     <PackageReference Include="FParsec" />

@@ -265,15 +265,15 @@ let ``Generated code includes convenience properties`` () =
       Assert.Contains("type Student with", generatedCode)
 
       // Common properties (in all cases)
-      Assert.Contains("member this.Id : int64", generatedCode)
-      Assert.Contains("member this.Name : string", generatedCode)
+      Assert.Contains("member this.Id: int64", generatedCode)
+      Assert.Contains("member this.Name: string", generatedCode)
 
       // Partial properties (only in some cases)
-      Assert.Contains("member this.Address : string option", generatedCode)
+      Assert.Contains("member this.Address: string option", generatedCode)
 
-      // Verify pattern matching for partial property
+      // Verify pattern matching for partial property (positional patterns)
       Assert.Contains("| Student.Base _ -> None", generatedCode)
-      Assert.Contains("| Student.WithAddress(Address = address) -> Some address", generatedCode)
+      Assert.Contains("| Student.WithAddress(_, _, address) -> Some address", generatedCode)
 
     | Error e -> Assert.Fail $"Code generation failed: {e}"
 

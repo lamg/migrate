@@ -213,6 +213,28 @@ let private generateProperty (typeName: string) (field: FieldInfo) (normalized: 
 
   Member($"this.{field.Name}", MatchExpr("this", baseClause :: extensionClauses)).returnType (returnType)
 
+/// Generate a positional pattern to extract a specific field from columns
+/// Returns the pattern string where the target field gets a var name and others get _
+let private generatePositionalPattern (columns: ColumnDef list) (targetFieldName: string) : string * string =
+  let parts =
+    columns
+    |> List.map (fun col ->
+      let fieldName = TypeGenerator.toPascalCase col.name
+
+      if fieldName = targetFieldName then
+        let varName = fieldName.ToLower().[0..0] + (if fieldName.Length > 1 then fieldName.[1..] else "")
+        varName
+      else
+        "_")
+
+  let pattern = parts |> String.concat ", "
+
+  let varName =
+    let fieldName = targetFieldName
+    fieldName.ToLower().[0..0] + (if fieldName.Length > 1 then fieldName.[1..] else "")
+
+  (pattern, varName)
+
 /// Generate properties for the query type
 let private generateProperties (normalized: NormalizedTable) : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
@@ -221,8 +243,8 @@ let private generateProperties (normalized: NormalizedTable) : string =
   if fields.IsEmpty then
     ""
   else
-    // For now, generate type extension members using string since
-    // Fabulous.AST doesn't have a straightforward TypeExtension widget
+    // Generate type extension members using positional patterns
+    // (named patterns like `Field = var` are not supported by Fantomas parser)
     let members =
       fields
       |> List.map (fun field ->
@@ -238,12 +260,12 @@ let private generateProperties (normalized: NormalizedTable) : string =
             |> List.exists (fun (col: ColumnDef) -> TypeGenerator.toPascalCase col.name = field.Name)
 
           if hasField then
-            let varName = field.Name.ToLower().[0..0] + field.Name.[1..]
+            let (pattern, varName) = generatePositionalPattern columns field.Name
 
             if field.InAllCases then
-              $"    | {typeName}.{caseName}({field.Name} = {varName}) -> {varName}"
+              $"    | {typeName}.{caseName}({pattern}) -> {varName}"
             else
-              $"    | {typeName}.{caseName}({field.Name} = {varName}) -> Some {varName}"
+              $"    | {typeName}.{caseName}({pattern}) -> Some {varName}"
           else
             $"    | {typeName}.{caseName} _ -> None"
 
@@ -269,7 +291,11 @@ let generateTypes (normalized: NormalizedTable) : string =
   let queryType = generateQueryType normalized
   let properties = generateProperties normalized
 
-  if properties = "" then
-    $"{newType}\n\n{queryType}"
-  else
-    $"{newType}\n\n{queryType}\n{properties}"
+  let combined =
+    if properties = "" then
+      $"{newType}\n\n{queryType}"
+    else
+      $"{newType}\n\n{queryType}\n{properties}"
+
+  // Format with Fantomas to ensure 2-space indentation
+  FabulousAstHelpers.formatCode combined

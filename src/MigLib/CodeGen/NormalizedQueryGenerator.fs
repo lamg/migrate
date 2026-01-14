@@ -4,6 +4,10 @@ module internal migrate.CodeGen.NormalizedQueryGenerator
 
 open migrate.DeclarativeMigrations.Types
 
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
 /// Helper to get reader method name from F# type
 let private readerMethod (t: string) =
   t.Replace("int64", "Int64").Replace("string", "String").Replace("float", "Double").Replace("DateTime", "DateTime")
@@ -27,18 +31,48 @@ let private generateInsertSql (tableName: string) (columns: ColumnDef list) : st
   let paramNames = columns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "
   $"INSERT INTO {tableName} ({columnNames}) VALUES ({paramNames})"
 
-/// Generate named field pattern for pattern matching (e.g., "Name = name, Age = age")
+/// Generate positional pattern for pattern matching (e.g., "name, age")
+/// Note: Named patterns (Name = name) are F# 5+ and not supported by Fantomas parser
 let private generateFieldPattern (columns: ColumnDef list) : string =
   columns
   |> List.map (fun col ->
     let fieldName = TypeGenerator.toPascalCase col.name
 
-    let varName =
-      fieldName.ToLower().[0..0]
-      + (if fieldName.Length > 1 then fieldName.[1..] else "")
-
-    $"{fieldName} = {varName}")
+    fieldName.ToLower().[0..0]
+    + (if fieldName.Length > 1 then fieldName.[1..] else ""))
   |> String.concat ", "
+
+/// Generate positional pattern to extract a single field from a list of columns
+/// Returns (pattern, varName) where pattern uses _ for other positions
+let private generateSingleFieldPattern (columns: ColumnDef list) (targetColName: string) : string * string =
+  let targetColLower = targetColName.ToLowerInvariant()
+
+  let parts =
+    columns
+    |> List.map (fun col ->
+      if col.name.ToLowerInvariant() = targetColLower then
+        let fieldName = TypeGenerator.toPascalCase col.name
+
+        let varName =
+          fieldName.ToLower().[0..0]
+          + (if fieldName.Length > 1 then fieldName.[1..] else "")
+
+        varName
+      else
+        "_")
+
+  let pattern = parts |> String.concat ", "
+
+  let varName =
+    columns
+    |> List.find (fun c -> c.name.ToLowerInvariant() = targetColLower)
+    |> fun col ->
+        let fieldName = TypeGenerator.toPascalCase col.name
+
+        fieldName.ToLower().[0..0]
+        + (if fieldName.Length > 1 then fieldName.[1..] else "")
+
+  (pattern, varName)
 
 /// Generate parameter binding code for columns using variable names
 let private generateParamBindings (columns: ColumnDef list) (cmdVarName: string) : string list =
@@ -109,9 +143,7 @@ let private generateExtensionCase (baseTable: CreateTable) (extension: Extension
         use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
         let {baseTable.name}Id = lastIdCmd.ExecuteScalar() |> unbox<int64>
 
-        use cmd2 = new SqliteCommand("INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "}) VALUES (@{extension.fkColumn}, {extensionInsertColumns
-                                                                                                                                                                                                              |> List.map (fun c -> $"@{{c.name}}")
-                                                                                                                                                                                                              |> String.concat ", "})", tx.Connection, tx)
+        use cmd2 = new SqliteCommand("INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "}) VALUES (@{extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "})", tx.Connection, tx)
         cmd2.Parameters.AddWithValue("@{extension.fkColumn}", {baseTable.name}Id) |> ignore
         {extensionParamBindings}
         cmd2.ExecuteNonQuery() |> ignore
@@ -280,11 +312,15 @@ let private generateCaseSelection
     $"          | {basePattern} ->
             {typeName}.Base ({baseFields})"
 
-  // Default case (multiple extensions - choose first)
+  // Default case only needed when there are 2+ extensions (to handle unexpected combinations like true, true)
+  // With a single extension, true/false already covers all cases
   let defaultCase =
-    $"          | _ ->
+    if extensions.Length > 1 then
+      $"\n          | _ ->
             // Multiple extensions active - choosing Base case
             {typeName}.Base ({baseFields})"
+    else
+      ""
 
   $"""          {nullChecks}
 
@@ -292,8 +328,7 @@ let private generateCaseSelection
                  |> List.map (fun ext -> $"has{TypeGenerator.toPascalCase ext.aspectName}")
                  |> String.concat ", "} with
 {matchPatterns}
-{baseCaseMatch}
-{defaultCase}"""
+{baseCaseMatch}{defaultCase}"""
 
 /// Generate GetAll method for normalized table
 let generateGetAll (normalized: NormalizedTable) : string =
@@ -468,7 +503,8 @@ let private generateUpdateBaseCase
         {paramBindings}
         cmd.ExecuteNonQuery() |> ignore
 
-{deleteStatements}        Ok()"""
+{deleteStatements}
+        Ok()"""
 
 /// Generate extension case update (UPDATE base, INSERT OR REPLACE extension)
 let private generateUpdateExtensionCase
@@ -540,7 +576,8 @@ let private generateUpdateExtensionCase
         {extensionParamBindings}
         cmd2.ExecuteNonQuery() |> ignore
 
-{deleteOtherExtensions}        Ok()"""
+{deleteOtherExtensions}
+        Ok()"""
 
 /// Generate Update method for normalized table
 let generateUpdate (normalized: NormalizedTable) : string option =
@@ -790,30 +827,38 @@ let private generateNormalizedQueryByOrCreate
 
   // 2. Generate value extraction from NewType DU (pattern match on all cases)
   // All query fields must be in base table (validated earlier), so they exist in all DU cases
+  // Get base insert columns (excluding auto-increment PK)
+  let baseInsertColumns = getInsertColumns normalized.baseTable
+
   let valueExtractions =
     annotation.columns
     |> List.map (fun col ->
-      let fieldName = TypeGenerator.toPascalCase col
-
       // Generate pattern match to extract field from all DU cases
-      let baseCaseName = "Base"
+      // Base case pattern
+      let basePattern, baseVarName = generateSingleFieldPattern baseInsertColumns col
+      let baseMatch = $"        | {newTypeName}.Base({basePattern}) -> {baseVarName}"
 
-      let extensionCases =
+      // Extension case patterns
+      let extensionMatches =
         normalized.extensions
-        |> List.map (fun ext -> $"With{TypeGenerator.toPascalCase ext.aspectName}")
+        |> List.map (fun ext ->
+          let caseName = $"With{TypeGenerator.toPascalCase ext.aspectName}"
+          // Extension columns = base insert columns + extension columns (excluding FK)
+          let extensionCols =
+            ext.table.columns |> List.filter (fun c -> c.name <> ext.fkColumn)
 
-      let allCases = baseCaseName :: extensionCases
-
-      let varName =
-        fieldName.ToLower().[0..0]
-        + (if fieldName.Length > 1 then fieldName.[1..] else "")
-
-      let caseMatches =
-        allCases
-        |> List.map (fun caseName -> $"        | {newTypeName}.{caseName}({fieldName} = {varName}) -> {varName}")
+          let allCols = baseInsertColumns @ extensionCols
+          let pattern, varName = generateSingleFieldPattern allCols col
+          $"        | {newTypeName}.{caseName}({pattern}) -> {varName}")
         |> String.concat "\n"
 
-      $"      let {col} = \n        match newItem with\n{caseMatches}")
+      let allMatches =
+        if extensionMatches = "" then
+          baseMatch
+        else
+          $"{baseMatch}\n{extensionMatches}"
+
+      $"      let {col} = \n        match newItem with\n{allMatches}")
     |> String.concat "\n"
 
   // 3. Build WHERE clause
@@ -886,7 +931,7 @@ let private generateNormalizedQueryByOrCreate
     with
     | :? SqliteException as ex -> Error ex"""
 
-/// Generate all methods for a normalized table
+/// Generate all methods for a normalized table and format with Fantomas
 let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, string> =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
 
@@ -910,6 +955,7 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
   match firstError with
   | Some(Error msg) -> Error msg
   | _ ->
+    // Generate all method strings
     let insertMethod = generateInsert normalized
     let getAllMethod = generateGetAll normalized
     let getByIdMethod = generateGetById normalized
@@ -927,7 +973,8 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
       normalized.baseTable.queryByOrCreateAnnotations
       |> List.map (generateNormalizedQueryByOrCreate normalized)
 
-    let methods =
+    // Collect all methods
+    let allMethods =
       [ Some insertMethod
         Some getAllMethod
         getByIdMethod
@@ -939,6 +986,6 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
       |> List.choose id
       |> String.concat "\n\n"
 
-    Ok
-      $"""type {typeName} with
-{methods}"""
+    // Build the type extension and format with Fantomas
+    let code = $"type {typeName} with\n{allMethods}"
+    Ok(FabulousAstHelpers.formatCode code)

@@ -83,7 +83,8 @@ let ``Base case does single INSERT into base table`` () =
     | Ok code ->
       // Base case should have single INSERT
       Assert.Contains("INSERT INTO student (name) VALUES (@name)", code)
-      Assert.Contains("Name = name", code)
+      // Positional pattern matching (named patterns not supported by Fantomas parser)
+      Assert.Contains("NewStudent.Base(name)", code)
       // Should get last_insert_rowid
       Assert.Contains("SELECT last_insert_rowid()", code)
       Assert.Contains("Ok studentId", code)
@@ -117,9 +118,9 @@ let ``Extension case does two INSERTs in transaction`` () =
       // Should insert FK with ID from base table
       Assert.Contains("student_id", code)
       Assert.Contains("@student_id\", studentId", code)
-      // Should insert extension columns
+      // Should insert extension columns with positional pattern
       Assert.Contains("address", code)
-      Assert.Contains("Address = address", code)
+      Assert.Contains("NewStudent.WithAddress(name, address)", code)
     | Error e -> Assert.Fail $"Failed: {e}"
 
 [<Fact>]
@@ -235,7 +236,6 @@ let ``Extension case excludes FK column from extension INSERT`` () =
       // FK column should be in the INSERT but bound separately, not from data
       Assert.Contains("INSERT INTO student_address (student_id, address, city)", code)
       Assert.Contains("@student_id\", studentId", code)
-      // Extension fields should come from named field extraction
-      Assert.Contains("Address = address", code)
-      Assert.Contains("City = city", code)
+      // Extension fields should use positional pattern
+      Assert.Contains("WithAddress(name, address, city)", code)
     | Error e -> Assert.Fail $"Failed: {e}"

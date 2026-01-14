@@ -345,10 +345,12 @@ let ``QueryByOrCreate works with normalized tables`` () =
     | Ok code ->
       Assert.Contains("static member GetByNameOrCreate", code)
       Assert.Contains("(newItem: NewStudent)", code)
-      // Should extract name from NewStudent DU via pattern matching
+      // Should extract name from NewStudent DU via positional pattern matching
       Assert.Contains("match newItem with", code)
-      Assert.Contains("NewStudent.Base(Name = name) -> name", code)
-      Assert.Contains("NewStudent.WithAddress(Name = name) -> name", code)
+      // Base case has 'id, name' fields (id is not auto-increment) - extract name with wildcard for id
+      Assert.Contains("NewStudent.Base(_, name) -> name", code)
+      // WithAddress case has 'id, name, address' - extract name with wildcards for id and address
+      Assert.Contains("NewStudent.WithAddress(_, name, _) -> name", code)
       // Should NOT have name as separate parameter
       Assert.DoesNotContain("name: string, newItem", code)
     | Error e -> Assert.Fail $"Code generation failed: {e}"

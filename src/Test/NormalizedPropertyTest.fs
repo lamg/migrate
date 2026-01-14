@@ -29,14 +29,15 @@ let ``Properties are generated for common fields`` () =
   |> function
     | Ok code ->
       // Common fields (Id, Name) should have non-optional properties
-      Assert.Contains("member this.Id : int64", code)
-      Assert.Contains("member this.Name : string", code)
+      Assert.Contains("member this.Id: int64", code)
+      Assert.Contains("member this.Name: string", code)
 
-      // Pattern matching for common fields
-      Assert.Contains("| Student.Base(Id = id) -> id", code)
-      Assert.Contains("| Student.WithAddress(Id = id) -> id", code)
-      Assert.Contains("| Student.Base(Name = name) -> name", code)
-      Assert.Contains("| Student.WithAddress(Name = name) -> name", code)
+      // Pattern matching for common fields (positional patterns)
+      // Base has (id, name), WithAddress has (id, name, address)
+      Assert.Contains("| Student.Base(id, _) -> id", code)
+      Assert.Contains("| Student.WithAddress(id, _, _) -> id", code)
+      Assert.Contains("| Student.Base(_, name) -> name", code)
+      Assert.Contains("| Student.WithAddress(_, name, _) -> name", code)
 
     | Error e -> Assert.Fail $"Failed: {e}"
 
@@ -63,11 +64,11 @@ let ``Properties are generated for partial fields with option type`` () =
   |> function
     | Ok code ->
       // Partial field (Address) should have optional property
-      Assert.Contains("member this.Address : string option", code)
+      Assert.Contains("member this.Address: string option", code)
 
-      // Pattern matching for partial field
+      // Pattern matching for partial field (positional pattern)
       Assert.Contains("| Student.Base _ -> None", code)
-      Assert.Contains("| Student.WithAddress(Address = address) -> Some address", code)
+      Assert.Contains("| Student.WithAddress(_, _, address) -> Some address", code)
 
     | Error e -> Assert.Fail $"Failed: {e}"
 
@@ -100,21 +101,23 @@ let ``Properties work with multiple extensions`` () =
   |> function
     | Ok code ->
       // Common fields
-      Assert.Contains("member this.Id : int64", code)
-      Assert.Contains("member this.Name : string", code)
+      Assert.Contains("member this.Id: int64", code)
+      Assert.Contains("member this.Name: string", code)
 
       // Partial fields (only in specific extensions)
-      Assert.Contains("member this.Address : string option", code)
-      Assert.Contains("member this.Email : string option", code)
-      Assert.Contains("member this.Phone : string option", code)
+      Assert.Contains("member this.Address: string option", code)
+      Assert.Contains("member this.Email: string option", code)
+      Assert.Contains("member this.Phone: string option", code)
 
       // Address property should return None for Base and WithEmailPhone
       Assert.Contains("| Student.Base _ -> None", code)
       Assert.Contains("| Student.WithEmailPhone _ -> None", code)
-      Assert.Contains("| Student.WithAddress(Address = address) -> Some address", code)
+      // WithAddress has (id, name, address) so address is at position 3
+      Assert.Contains("| Student.WithAddress(_, _, address) -> Some address", code)
 
       // Email property pattern matching
-      Assert.Contains("| Student.WithEmailPhone(Email = email) -> Some email", code)
+      // WithEmailPhone has (id, name, email, phone) so email is at position 3
+      Assert.Contains("| Student.WithEmailPhone(_, _, email, _) -> Some email", code)
 
     | Error e -> Assert.Fail $"Failed: {e}"
 
@@ -143,13 +146,13 @@ let ``Properties handle different types correctly`` () =
   |> function
     | Ok code ->
       // Check types for common fields
-      Assert.Contains("member this.Id : int64", code)
-      Assert.Contains("member this.Name : string", code)
-      Assert.Contains("member this.Price : float", code)
+      Assert.Contains("member this.Id: int64", code)
+      Assert.Contains("member this.Name: string", code)
+      Assert.Contains("member this.Price: float", code)
 
       // Check types for partial fields
-      Assert.Contains("member this.Description : string option", code)
-      Assert.Contains("member this.Weight : float option", code)
+      Assert.Contains("member this.Description: string option", code)
+      Assert.Contains("member this.Weight: float option", code)
 
     | Error e -> Assert.Fail $"Failed: {e}"
 
