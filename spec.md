@@ -4,7 +4,7 @@
 
 Migrate is a declarative database migration tool and F# type generator for SQLite. It automatically generates and executes SQL statements to transform an actual database schema into an expected schema, and generates type-safe F# code for database access. Rather than requiring developers to write migration scripts or data access code manually, Migrate compares schemas, generates DDL statements, and produces F# types with CRUD operations.
 
-**Version:** 2.0.0 (planned - major feature: F# code generation)
+**Version:** 2.2.0
 **Target Framework:** .NET 10.0
 **Language:** F#
 **Database:** SQLite
