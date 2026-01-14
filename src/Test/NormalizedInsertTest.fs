@@ -200,7 +200,8 @@ let ``generateNormalizedTableCode produces type extension`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
-    return normalized |> List.head |> NormalizedQueryGenerator.generateNormalizedTableCode
+    let! code = normalized |> List.head |> NormalizedQueryGenerator.generateNormalizedTableCode
+    return code
   }
   |> function
     | Ok code ->

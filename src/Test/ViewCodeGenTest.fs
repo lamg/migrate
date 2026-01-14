@@ -30,7 +30,7 @@ let ``View type generation includes columns`` () =
     | Error e -> Assert.Fail $"Code generation failed: {e}"
 
 [<Fact>]
-let ``View GetAll method is generated`` () =
+let ``View query generation includes both GetAll and GetOne methods`` () =
   let sql =
     """
     CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL);
@@ -41,7 +41,7 @@ let ``View GetAll method is generated`` () =
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let view = parsed.views |> List.head
     let! columns = ViewIntrospection.getViewColumns parsed.tables view
-    let code = QueryGenerator.generateViewCode view.name columns
+    let! code = QueryGenerator.generateViewCode view columns
     return code
   }
   |> function
@@ -111,7 +111,7 @@ let ``View GetOne method is generated`` () =
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let view = parsed.views |> List.head
     let! columns = ViewIntrospection.getViewColumns parsed.tables view
-    let code = QueryGenerator.generateViewCode view.name columns
+    let! code = QueryGenerator.generateViewCode view columns
     return code
   }
   |> function

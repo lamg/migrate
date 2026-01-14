@@ -219,6 +219,23 @@ let tableConstraint: Parser<ColumnConstraint, unit> =
 
   choice [ attempt primaryKey; attempt foreignKey; unique ]
 
+// QueryBy annotation parsing
+let queryByAnnotation: Parser<QueryByAnnotation, unit> =
+  pstring "--"
+  >>. spaces
+  >>. pstringCI "QueryBy"
+  >>. spaces
+  >>. pchar '('
+  >>. spaces
+  >>. sepBy1 identifier (pchar ',' >>. spaces)
+  .>> spaces
+  .>> pchar ')'
+  .>> restOfLine false
+  |>> fun cols -> { columns = cols }
+
+let queryByAnnotations: Parser<QueryByAnnotation list, unit> =
+  many (attempt (ws >>. queryByAnnotation))
+
 // CREATE TABLE parsing
 let createTable: Parser<CreateTable, unit> =
   str_ws1 "CREATE"
@@ -229,7 +246,8 @@ let createTable: Parser<CreateTable, unit> =
         >>. sepBy1 (choice [ attempt (tableConstraint |>> Choice2Of2); columnDef |>> Choice1Of2 ]) comma
         .>> cpar
         .>> opt semi)
-  |>> fun (tableName, items) ->
+  .>>. queryByAnnotations
+  |>> fun ((tableName, items), annotations) ->
     let columns =
       items
       |> List.choose (function
@@ -244,7 +262,8 @@ let createTable: Parser<CreateTable, unit> =
 
     { name = tableName
       columns = columns
-      constraints = constraints }
+      constraints = constraints
+      queryByAnnotations = annotations }
 
 // CREATE VIEW parsing
 let createView: Parser<CreateView, unit> =
@@ -256,7 +275,8 @@ let createView: Parser<CreateView, unit> =
 
   createPart >>. identifier
   .>>. (str_ws1 "AS" >>. many1Satisfy (fun c -> c <> ';') .>> opt semi)
-  |>> fun (viewName, selectPart) ->
+  .>>. queryByAnnotations
+  |>> fun ((viewName, selectPart), annotations) ->
     // Build the full CREATE VIEW statement
     let fullStatement = $"CREATE VIEW {viewName} AS {selectPart.Trim()}"
 
@@ -275,7 +295,8 @@ let createView: Parser<CreateView, unit> =
 
     { name = viewName
       sqlTokens = [ fullStatement ]
-      dependencies = dependencies }
+      dependencies = dependencies
+      queryByAnnotations = annotations }
 
 // CREATE INDEX parsing
 let createIndex: Parser<CreateIndex, unit> =

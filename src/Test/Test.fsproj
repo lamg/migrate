@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -14,6 +14,7 @@
     <Compile Include="CompositePKTest.fs" />
     <Compile Include="TransactionTest.fs" />
     <Compile Include="ViewCodeGenTest.fs" />
+    <Compile Include="QueryByTest.fs" />
     <Compile Include="NormalizedSchemaTest.fs" />
     <Compile Include="NormalizedTypeGenTest.fs" />
     <Compile Include="NormalizedPropertyTest.fs" />

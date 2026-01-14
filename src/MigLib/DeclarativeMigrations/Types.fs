@@ -45,15 +45,19 @@ type internal ColumnDef =
     columnType: SqlType
     constraints: ColumnConstraint list }
 
+type internal QueryByAnnotation = { columns: string list }
+
 type internal CreateView =
   { name: string
     sqlTokens: string seq
-    dependencies: string list }
+    dependencies: string list
+    queryByAnnotations: QueryByAnnotation list }
 
 type internal CreateTable =
   { name: string
     columns: ColumnDef list
-    constraints: ColumnConstraint list }
+    constraints: ColumnConstraint list
+    queryByAnnotations: QueryByAnnotation list }
 
 type internal CreateIndex =
   { name: string

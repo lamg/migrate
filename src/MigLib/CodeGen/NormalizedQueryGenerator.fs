@@ -555,25 +555,168 @@ let generateDelete (normalized: NormalizedTable) : string option =
     with
     | :? SqliteException as ex -> Error ex"""
 
-/// Generate all methods for a normalized table
-let generateNormalizedTableCode (normalized: NormalizedTable) : string =
+/// Get all columns from normalized table (base + all extensions)
+let private getAllNormalizedColumns (normalized: NormalizedTable) : (string * ColumnDef) list =
+  let baseColumns = normalized.baseTable.columns |> List.map (fun c -> ("Base", c))
+
+  let extensionColumns =
+    normalized.extensions
+    |> List.collect (fun ext -> ext.table.columns |> List.map (fun c -> (ext.aspectName, c)))
+
+  baseColumns @ extensionColumns
+
+/// Validate QueryBy annotation for normalized table references existing columns (case-insensitive)
+let private validateNormalizedQueryByAnnotation
+  (normalized: NormalizedTable)
+  (annotation: QueryByAnnotation)
+  : Result<unit, string> =
+  let allColumns = getAllNormalizedColumns normalized
+
+  let columnNames =
+    allColumns |> List.map (fun (_, c) -> c.name.ToLowerInvariant()) |> Set.ofList
+
+  annotation.columns
+  |> List.tryFind (fun col -> not (columnNames.Contains(col.ToLowerInvariant())))
+  |> function
+    | Some invalidCol ->
+      let availableCols =
+        allColumns |> List.map (fun (_, c) -> c.name) |> String.concat ", "
+
+      Error
+        $"QueryBy annotation references non-existent column '{invalidCol}' in normalized table '{normalized.baseTable.name}'. Available columns: {availableCols}"
+    | None -> Ok()
+
+/// Find column in normalized table by name (case-insensitive)
+let private findNormalizedColumn (normalized: NormalizedTable) (colName: string) : (string * ColumnDef) option =
+  getAllNormalizedColumns normalized
+  |> List.tryFind (fun (_, c) -> c.name.ToLowerInvariant() = colName.ToLowerInvariant())
+
+/// Generate custom QueryBy method for normalized tables with tupled parameters
+let private generateNormalizedQueryBy (normalized: NormalizedTable) (annotation: QueryByAnnotation) : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
-  let insertMethod = generateInsert normalized
-  let getAllMethod = generateGetAll normalized
-  let getByIdMethod = generateGetById normalized
-  let getOneMethod = generateGetOne normalized
-  let updateMethod = generateUpdate normalized
-  let deleteMethod = generateDelete normalized
 
-  let methods =
-    [ Some insertMethod
-      Some getAllMethod
-      getByIdMethod
-      Some getOneMethod
-      updateMethod
-      deleteMethod ]
-    |> List.choose id
-    |> String.concat "\n\n"
+  // 1. Build method name: GetByIdName
+  let methodName =
+    annotation.columns
+    |> List.map TypeGenerator.toPascalCase
+    |> String.concat ""
+    |> sprintf "GetBy%s"
 
-  $"""type {typeName} with
+  // 2. Build tupled parameters with types (case-insensitive column lookup)
+  let parameters =
+    annotation.columns
+    |> List.map (fun col ->
+      let _, columnDef = findNormalizedColumn normalized col |> Option.get
+      let isNullable = TypeGenerator.isColumnNullable columnDef
+      let fsharpType = TypeGenerator.mapSqlType columnDef.columnType isNullable
+      $"{col}: {fsharpType}")
+    |> String.concat ", "
+
+  // 3. Build WHERE clause: id = @id AND name = @name
+  let whereClause =
+    annotation.columns
+    |> List.map (fun col -> $"{col} = @{col}")
+    |> String.concat " AND "
+
+  // 4. Build parameter bindings
+  let paramBindings =
+    annotation.columns
+    |> List.map (fun col ->
+      let _, columnDef = findNormalizedColumn normalized col |> Option.get
+      let isNullable = TypeGenerator.isColumnNullable columnDef
+
+      if isNullable then
+        $"      cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+      else
+        $"      cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+    |> String.concat "\n"
+
+  // 5. Generate LEFT JOIN SQL and column selections (same as generateGetAll)
+  let baseColumns = normalized.baseTable.columns |> List.map (fun c -> $"b.{c.name}")
+
+  let extensionSelects =
+    normalized.extensions
+    |> List.collect (fun ext -> ext.table.columns |> List.map (fun c -> $"e{ext.aspectName}.{c.name}"))
+
+  let allSelects = (baseColumns @ extensionSelects) |> String.concat ", "
+
+  let joins =
+    normalized.extensions
+    |> List.map (fun ext ->
+      let pk = getPrimaryKeyColumns normalized.baseTable |> List.head
+      $"LEFT JOIN {ext.table.name} AS e{ext.aspectName} ON b.{pk.name} = e{ext.aspectName}.{ext.fkColumn}")
+    |> String.concat "\n        "
+
+  let sql =
+    if normalized.extensions.IsEmpty then
+      $"SELECT {allSelects} FROM {normalized.baseTable.name} AS b WHERE {whereClause}"
+    else
+      $"""SELECT {allSelects}
+        FROM {normalized.baseTable.name} AS b
+        {joins}
+        WHERE {whereClause}"""
+
+  // 6. Generate case selection logic
+  let caseSelection =
+    generateCaseSelection normalized.baseTable normalized.extensions typeName
+
+  // 7. Generate full method with tupled parameters
+  $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
+    try
+      use cmd = new SqliteCommand("{sql}", tx.Connection, tx)
+{paramBindings}
+      use reader = cmd.ExecuteReader()
+      let results = ResizeArray<{typeName}>()
+      while reader.Read() do
+        let record =
+{caseSelection}
+        results.Add(record)
+      Ok(results |> Seq.toList)
+    with
+    | :? SqliteException as ex -> Error ex"""
+
+/// Generate all methods for a normalized table
+let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, string> =
+  let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
+
+  // Validate all QueryBy annotations
+  let validationResults =
+    normalized.baseTable.queryByAnnotations
+    |> List.map (validateNormalizedQueryByAnnotation normalized)
+
+  let firstError =
+    validationResults
+    |> List.tryFind (fun r ->
+      match r with
+      | Error _ -> true
+      | _ -> false)
+
+  match firstError with
+  | Some(Error msg) -> Error msg
+  | _ ->
+    let insertMethod = generateInsert normalized
+    let getAllMethod = generateGetAll normalized
+    let getByIdMethod = generateGetById normalized
+    let getOneMethod = generateGetOne normalized
+    let updateMethod = generateUpdate normalized
+    let deleteMethod = generateDelete normalized
+
+    // Generate QueryBy methods
+    let queryByMethods =
+      normalized.baseTable.queryByAnnotations
+      |> List.map (generateNormalizedQueryBy normalized)
+
+    let methods =
+      [ Some insertMethod
+        Some getAllMethod
+        getByIdMethod
+        Some getOneMethod
+        updateMethod
+        deleteMethod ]
+      @ (queryByMethods |> List.map Some)
+      |> List.choose id
+      |> String.concat "\n\n"
+
+    Ok
+      $"""type {typeName} with
 {methods}"""

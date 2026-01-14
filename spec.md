@@ -317,6 +317,153 @@ Db.txn conn {
 - `mig codegen` - Generate F# types from SQL schema files
 - `mig commit` - Execute migration and auto-regenerate types (when `-m` message flag is used)
 
+### 4. Custom Query Generation with QueryBy Annotations
+
+In addition to standard CRUD methods, Migrate supports custom query generation through `QueryBy` annotations. These SQL comments allow you to declaratively specify additional query methods based on specific column combinations.
+
+**Syntax:**
+```sql
+CREATE TABLE table_name (...);
+-- QueryBy(column1, column2, ...)
+```
+
+**Placement:** QueryBy annotations must appear on the line(s) immediately following a CREATE TABLE or CREATE VIEW statement.
+
+**Features:**
+- Multiple QueryBy annotations per table/view supported
+- Case-insensitive column name matching
+- Generates methods named `GetBy{Column1}{Column2}...`
+- Query parameters use **tupled syntax**: `(col1: type1, col2: type2)`
+- Transaction parameter remains curried (last parameter)
+- Returns `Result<T list, SqliteException>` (list of all matching records)
+- Validates column names at code generation time (halts with error if invalid)
+- Works with regular tables, normalized tables (discriminated unions), and views
+
+**SQL Example:**
+```sql
+CREATE TABLE students (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  email TEXT,
+  status TEXT NOT NULL,
+  enrollment_date TIMESTAMP NOT NULL
+);
+-- QueryBy(status)
+-- QueryBy(name, status)
+-- QueryBy(enrollment_date)
+```
+
+**Generated F# Code:**
+```fsharp
+type Student with
+  // ... standard CRUD methods (Insert, GetById, GetAll, Update, Delete) ...
+  
+  static member GetByStatus (status: string) (tx: SqliteTransaction) : Result<Student list, SqliteException> =
+    try
+      use cmd = new SqliteCommand("SELECT id, name, email, status, enrollment_date FROM students WHERE status = @status", tx.Connection, tx)
+      cmd.Parameters.AddWithValue("@status", status) |> ignore
+      use reader = cmd.ExecuteReader()
+      let results = ResizeArray<Student>()
+      while reader.Read() do
+        results.Add({
+          Id = reader.GetInt64(0)
+          Name = reader.GetString(1)
+          Email = if reader.IsDBNull(2) then None else Some(reader.GetString(2))
+          Status = reader.GetString(3)
+          EnrollmentDate = reader.GetDateTime(4)
+        })
+      Ok(results |> Seq.toList)
+    with
+    | :? SqliteException as ex -> Error ex
+  
+  static member GetByNameStatus (name: string, status: string) (tx: SqliteTransaction) : Result<Student list, SqliteException> =
+    try
+      use cmd = new SqliteCommand("SELECT id, name, email, status, enrollment_date FROM students WHERE name = @name AND status = @status", tx.Connection, tx)
+      cmd.Parameters.AddWithValue("@name", name) |> ignore
+      cmd.Parameters.AddWithValue("@status", status) |> ignore
+      // ... reader logic same as above ...
+    with
+    | :? SqliteException as ex -> Error ex
+  
+  static member GetByEnrollmentDate (enrollment_date: DateTime) (tx: SqliteTransaction) : Result<Student list, SqliteException> =
+    // ... similar implementation ...
+```
+
+**Usage Example:**
+```fsharp
+open migrate.Db
+
+// Query by single column
+Db.txn conn {
+  let! activeStudents = Student.GetByStatus "active"
+  return activeStudents
+}
+
+// Query by multiple columns (note the tupled parameters)
+Db.txn conn {
+  let! results = Student.GetByNameStatus ("Alice", "active")
+  return results
+}
+
+// Query by date
+Db.txn conn {
+  let enrollmentDate = DateTime(2024, 9, 1)
+  let! newStudents = Student.GetByEnrollmentDate enrollmentDate
+  return newStudents
+}
+
+// Partial application works
+let getActiveStudents = Student.GetByStatus "active"
+Db.txn conn {
+  let! students = getActiveStudents
+  return students
+}
+```
+
+**Behavior with Different Table Types:**
+
+1. **Regular Tables (Option-based):**
+   - Generates standard SELECT with WHERE clause
+   - Returns list of records with option types for nullable columns
+
+2. **Normalized Tables (Discriminated Union-based):**
+   - Uses LEFT JOINs to include extension tables
+   - Applies NULL checks to determine correct DU case
+   - Validates columns across base table AND all extension tables
+   - Returns list of discriminated union values
+
+3. **Views:**
+   - Generates read-only query methods (no Insert/Update/Delete)
+   - Useful for querying across joined data with custom filters
+
+**Validation:**
+- Column names are validated at code generation time
+- Code generation fails with clear error message if:
+  - Column doesn't exist in the table/view
+  - Column name is misspelled (case-insensitive matching applied)
+- Error message includes list of available columns for easy correction
+
+**Example Validation Error:**
+```sql
+CREATE TABLE students (id INTEGER, name TEXT);
+-- QueryBy(status)  -- ERROR: 'status' column doesn't exist
+```
+
+Error output:
+```
+QueryBy annotation references non-existent column 'status' in table 'students'. 
+Available columns: id, name
+```
+
+**Implementation Status:**
+✅ COMPLETE - Fully implemented and integrated (January 2025)
+- SQL comment parsing with FParsec
+- QueryBy annotation extraction
+- Code generation for all table types (regular, normalized, views)
+- Column validation with error reporting
+- Tupled parameter syntax for query columns
+- Integration with existing CRUD code generation pipeline
+
 ### 8. Normalized Schema Representation with Discriminated Unions
 
 For normalized database schemas (2NF) that eliminate NULLs by splitting optional fields into separate tables, Migrate generates F# discriminated unions instead of option types. This approach leverages F#'s type system to represent optional data through table relationships rather than nullable columns.
@@ -1266,9 +1413,9 @@ Complete F# Source Files
 
 ### Planned Features (Code Generation)
 1. **Many-to-Many Relationships** - Generate bridge table query helpers
-2. **Custom Query Generation** - Allow users to define additional queries in annotations
-3. **Async Database Operations** - Generate async/Task-based methods alongside synchronous ones
-4. **Connection String Management** - Helper functions for connection lifecycle
+2. **Async Database Operations** - Generate async/Task-based methods alongside synchronous ones
+3. **Connection String Management** - Helper functions for connection lifecycle
+4. **Advanced QueryBy Features** - Support for additional SQL clauses (ORDER BY, LIMIT, OFFSET)
 
 ### Planned Features (Migration)
 1. Support for PostgreSQL, MySQL/MariaDB

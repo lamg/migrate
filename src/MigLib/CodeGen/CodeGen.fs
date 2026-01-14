@@ -38,6 +38,36 @@ let generateCodeForSqlFile (sqlFilePath: string) : Result<string * int * int * i
     // Classify tables into normalized (DU-based) and regular (option-based)
     let normalizedTables, regularTables = NormalizedSchema.classifyTables sqlFile.tables
 
+    // Generate query methods for regular tables (with validation)
+    let! regularTableCodes =
+      regularTables
+      |> List.traverseResultM (fun table ->
+        result {
+          let! code = QueryGenerator.generateTableCode table
+          return [ code; "" ]
+        })
+      |> Result.map List.concat
+
+    // Generate query methods for normalized tables (with validation)
+    let! normalizedTableCodes =
+      normalizedTables
+      |> List.traverseResultM (fun normalized ->
+        result {
+          let! code = NormalizedQueryGenerator.generateNormalizedTableCode normalized
+          return [ code; "" ]
+        })
+      |> Result.map List.concat
+
+    // Generate query methods for views (with validation)
+    let! viewCodes =
+      viewsWithColumns
+      |> List.traverseResultM (fun (view, columns) ->
+        result {
+          let! code = QueryGenerator.generateViewCode view columns
+          return [ code; "" ]
+        })
+      |> Result.map List.concat
+
     // Generate module content
     let moduleContent =
       [ yield $"module {moduleName}"
@@ -63,19 +93,13 @@ let generateCodeForSqlFile (sqlFilePath: string) : Result<string * int * int * i
           |> List.collect (fun (view, columns) -> [ TypeGenerator.generateViewRecordType view.name columns; "" ])
 
         // Generate query methods for normalized tables (with DU pattern matching)
-        yield!
-          normalizedTables
-          |> List.collect (fun normalized -> [ NormalizedQueryGenerator.generateNormalizedTableCode normalized; "" ])
+        yield! normalizedTableCodes
 
         // Generate query methods for regular tables
-        yield!
-          regularTables
-          |> List.collect (fun table -> [ QueryGenerator.generateTableCode table; "" ])
+        yield! regularTableCodes
 
         // Generate query methods for views (read-only)
-        yield!
-          viewsWithColumns
-          |> List.collect (fun (view, columns) -> [ QueryGenerator.generateViewCode view.name columns; "" ]) ]
+        yield! viewCodes ]
       |> String.concat "\n"
       |> fun s -> s.TrimEnd() // Remove trailing newlines
 

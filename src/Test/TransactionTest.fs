@@ -95,7 +95,7 @@ let ``Generated table code uses curried signatures for all methods`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let code = QueryGenerator.generateTableCode table
+    let! code = QueryGenerator.generateTableCode table
     return code
   }
   |> function

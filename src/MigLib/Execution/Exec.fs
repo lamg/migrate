@@ -229,8 +229,7 @@ let seedStatements () =
     // Generate SQL in dependency order, including all inserts
     let statements =
       validInserts
-      |> List.sortBy (fun insert ->
-        sortedIndex |> Map.tryFind insert.table |> Option.defaultValue Int32.MaxValue)
+      |> List.sortBy (fun insert -> sortedIndex |> Map.tryFind insert.table |> Option.defaultValue Int32.MaxValue)
       |> List.map GenerateSql.Seed.upsertSql
 
     return statements
