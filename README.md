@@ -1,5 +1,8 @@
 [![logo][logo]][migtool]
 
+[![.NET][dotnet-badge]](https://dotnet.microsoft.com/)
+[![F#][fs-badge]](https://fsharp.org/)
+[![License: Apache2][apache-badge]][apache2]
 [![NuGet Version][nuget-version]][migtool]
 [![NuGet Downloads][nuget-downloads]][migtool]
 ![Tests][tests]
@@ -77,9 +80,13 @@ How to contribute:
 [Apache 2.0][apache2]
 
 [logo]: https://raw.githubusercontent.com/lamg/migrate/refs/heads/master/images/logo_small.png
-[dotnet]: https://dotnet.microsoft.com/en-us/download/dotnet/9.0
-[apache2]: https://www.apache.org/licenses/LICENSE-2.0
+[dotnet]: https://dotnet.microsoft.com/en-us/download/dotnet/10.0
+[apache2]: https://opensource.org/license/apache-2-0
 [migtool]: https://www.nuget.org/packages/migtool
 [nuget-version]: https://img.shields.io/nuget/v/migtool?style=flat-square
 [nuget-downloads]: https://img.shields.io/nuget/dt/migtool?style=flat-square
 [tests]: https://img.shields.io/github/actions/workflow/status/lamg/migrate/test.yml?style=flat-square&label=tests
+
+[dotnet-badge]: https://img.shields.io/badge/.NET-10.0-blue?style=flat-square
+[apache-badge]: https://img.shields.io/badge/License-Apache2-yellow.svg?style=flat-square
+[fs-badge]: https://img.shields.io/badge/Language-F%23-blue?style=flat-square
