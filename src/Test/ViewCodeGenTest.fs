@@ -41,7 +41,7 @@ let ``View query generation includes both GetAll and GetOne methods`` () =
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let view = parsed.views |> List.head
     let! columns = ViewIntrospection.getViewColumns parsed.tables view
-    let! code = QueryGenerator.generateViewCode view columns
+    let! code = QueryGenerator.generateViewCode false view columns
     return code
   }
   |> function
@@ -111,7 +111,7 @@ let ``View GetOne method is generated`` () =
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let view = parsed.views |> List.head
     let! columns = ViewIntrospection.getViewColumns parsed.tables view
-    let! code = QueryGenerator.generateViewCode view columns
+    let! code = QueryGenerator.generateViewCode false view columns
     return code
   }
   |> function

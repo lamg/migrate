@@ -58,11 +58,13 @@ and SchemaArgs =
 
 and CodegenArgs =
   | [<AltCommandLine("-d")>] Directory of string
+  | [<AltCommandLine("-a")>] Async
 
   interface IArgParserTemplate with
     member s.Usage =
       match s with
       | Directory _ -> "Directory containing SQL schema files (defaults to current directory)"
+      | Async -> "Generate async methods using Task and task computation expression"
 
 and LogArgs =
   | [<AltCommandLine("-s")>] StepsId of string
@@ -149,7 +151,9 @@ let codegen (flags: ParseResults<CodegenArgs>) =
     | Some dir -> dir
     | None -> "."
 
-  CodeGen.generateCode directory
+  let useAsync = flags.Contains Async
+
+  CodeGen.generateCode useAsync directory
   |> function
     | Ok stats ->
       printfn "Code generation complete!"

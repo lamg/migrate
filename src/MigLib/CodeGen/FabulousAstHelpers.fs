@@ -18,12 +18,12 @@ let constantExpr (value: string) =
 
 /// Fantomas configuration with 2-space indentation
 let private formatConfig =
-  { FormatConfig.Default with IndentSize = 2 }
+  { FormatConfig.Default with
+      IndentSize = 2 }
 
 /// Format an Oak AST to F# code string
 let formatOak (oak: Oak) : string =
-  CodeFormatter.FormatOakAsync(oak, formatConfig)
-  |> Async.RunSynchronously
+  CodeFormatter.FormatOakAsync(oak, formatConfig) |> Async.RunSynchronously
 
 /// Format F# code string using Fantomas
 let formatCode (code: string) : string =

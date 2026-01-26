@@ -92,7 +92,7 @@ let private generateParamBindings (columns: ColumnDef list) (cmdVarName: string)
       $"{cmdVarName}.Parameters.AddWithValue(\"@{col.name}\", {varName}) |> ignore")
 
 /// Generate the Base case insert (single table)
-let private generateBaseCase (baseTable: CreateTable) (typeName: string) : string =
+let private generateBaseCase (useAsync: bool) (baseTable: CreateTable) (typeName: string) : string =
   let insertColumns = getInsertColumns baseTable
   let insertSql = generateInsertSql baseTable.name insertColumns
   let fieldPattern = generateFieldPattern insertColumns
@@ -100,7 +100,21 @@ let private generateBaseCase (baseTable: CreateTable) (typeName: string) : strin
   let paramBindings =
     generateParamBindings insertColumns "cmd" |> String.concat "\n        "
 
-  $"""      | New{typeName}.Base({fieldPattern}) ->
+  if useAsync then
+    let asyncParamBindings =
+      generateParamBindings insertColumns "cmd" |> String.concat "\n          "
+
+    $"""        | New{typeName}.Base({fieldPattern}) ->
+          // Single INSERT into base table
+          use cmd = new SqliteCommand("{insertSql}", tx.Connection, tx)
+          {asyncParamBindings}
+          let! _ = cmd.ExecuteNonQueryAsync()
+          use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+          let! lastId = lastIdCmd.ExecuteScalarAsync()
+          let {baseTable.name}Id = lastId |> unbox<int64>
+          return Ok {baseTable.name}Id"""
+  else
+    $"""      | New{typeName}.Base({fieldPattern}) ->
         // Single INSERT into base table
         use cmd = new SqliteCommand("{insertSql}", tx.Connection, tx)
         {paramBindings}
@@ -110,7 +124,12 @@ let private generateBaseCase (baseTable: CreateTable) (typeName: string) : strin
         Ok {baseTable.name}Id"""
 
 /// Generate an extension case insert (multi-table)
-let private generateExtensionCase (baseTable: CreateTable) (extension: ExtensionTable) (typeName: string) : string =
+let private generateExtensionCase
+  (useAsync: bool)
+  (baseTable: CreateTable)
+  (extension: ExtensionTable)
+  (typeName: string)
+  : string =
   let caseName = TypeGenerator.toPascalCase extension.aspectName
   let baseInsertColumns = getInsertColumns baseTable
   let baseInsertSql = generateInsertSql baseTable.name baseInsertColumns
@@ -134,7 +153,31 @@ let private generateExtensionCase (baseTable: CreateTable) (extension: Extension
     generateParamBindings extensionInsertColumns "cmd2"
     |> String.concat "\n        "
 
-  $"""      | New{typeName}.With{caseName}({fieldPattern}) ->
+  if useAsync then
+    let asyncBaseParamBindings =
+      generateParamBindings baseInsertColumns "cmd1" |> String.concat "\n          "
+
+    let asyncExtensionParamBindings =
+      generateParamBindings extensionInsertColumns "cmd2"
+      |> String.concat "\n          "
+
+    $"""        | New{typeName}.With{caseName}({fieldPattern}) ->
+          // Two inserts in same transaction (atomic)
+          use cmd1 = new SqliteCommand("{baseInsertSql}", tx.Connection, tx)
+          {asyncBaseParamBindings}
+          let! _ = cmd1.ExecuteNonQueryAsync()
+
+          use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+          let! lastId = lastIdCmd.ExecuteScalarAsync()
+          let {baseTable.name}Id = lastId |> unbox<int64>
+
+          use cmd2 = new SqliteCommand("INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "}) VALUES (@{extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "})", tx.Connection, tx)
+          cmd2.Parameters.AddWithValue("@{extension.fkColumn}", {baseTable.name}Id) |> ignore
+          {asyncExtensionParamBindings}
+          let! _ = cmd2.ExecuteNonQueryAsync()
+          return Ok {baseTable.name}Id"""
+  else
+    $"""      | New{typeName}.With{caseName}({fieldPattern}) ->
         // Two inserts in same transaction (atomic)
         use cmd1 = new SqliteCommand("{baseInsertSql}", tx.Connection, tx)
         {baseParamBindings}
@@ -150,16 +193,16 @@ let private generateExtensionCase (baseTable: CreateTable) (extension: Extension
         Ok {baseTable.name}Id"""
 
 /// Generate the Insert method for a normalized table
-let generateInsert (normalized: NormalizedTable) : string =
+let generateInsert (useAsync: bool) (normalized: NormalizedTable) : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
 
   // Generate Base case
-  let baseCase = generateBaseCase normalized.baseTable typeName
+  let baseCase = generateBaseCase useAsync normalized.baseTable typeName
 
   // Generate extension cases
   let extensionCases =
     normalized.extensions
-    |> List.map (fun ext -> generateExtensionCase normalized.baseTable ext typeName)
+    |> List.map (fun ext -> generateExtensionCase useAsync normalized.baseTable ext typeName)
     |> String.concat "\n\n"
 
   let allCases =
@@ -168,7 +211,18 @@ let generateInsert (normalized: NormalizedTable) : string =
     else
       $"{baseCase}\n\n{extensionCases}"
 
-  $"""  static member Insert (item: New{typeName}) (tx: SqliteTransaction)
+  if useAsync then
+    $"""  static member Insert (item: New{typeName}) (tx: SqliteTransaction)
+    : Task<Result<int64, SqliteException>> =
+    task {{
+      try
+        match item with
+{allCases}
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+  else
+    $"""  static member Insert (item: New{typeName}) (tx: SqliteTransaction)
     : Result<int64, SqliteException> =
     try
       match item with
@@ -258,11 +312,17 @@ let private generateExtensionFieldReads (extension: ExtensionTable) (startIndex:
       $"{fieldName} = reader.Get{readerMethod} {colIndex}")
 
 /// Generate pattern matching for case selection based on NULL checks
+/// baseIndent is the number of spaces for the base indentation (10 for sync, 12 for async)
 let private generateCaseSelection
+  (baseIndent: int)
   (baseTable: CreateTable)
   (extensions: ExtensionTable list)
   (typeName: string)
   : string =
+  let indent = String.replicate baseIndent " "
+  let indent2 = String.replicate (baseIndent + 2) " "
+  let indent4 = String.replicate (baseIndent + 4) " "
+
   // Generate NULL check variables for each extension
   let nullChecks =
     extensions
@@ -277,10 +337,10 @@ let private generateCaseSelection
         + (extensions |> List.take i |> List.sumBy (fun e -> e.table.columns.Length - 1))
 
       $"let has{TypeGenerator.toPascalCase ext.aspectName} = not (reader.IsDBNull {colIndex})")
-    |> String.concat "\n          "
+    |> String.concat $"\n{indent}"
 
   // Generate base field reads
-  let baseFields = generateBaseFieldReads baseTable 0 |> String.concat ",\n          "
+  let baseFields = generateBaseFieldReads baseTable 0 |> String.concat $",\n{indent}"
 
   // Generate match patterns for each extension
   let matchPatterns =
@@ -299,39 +359,35 @@ let private generateCaseSelection
             ext
             (baseTable.columns.Length
              + (extensions |> List.take i |> List.sumBy (fun e -> e.table.columns.Length - 1)))
-        |> String.concat ",\n          "
+        |> String.concat $",\n{indent}"
 
-      $"          | {pattern} ->
-            {typeName}.With{caseName} ({allFields})")
+      $"{indent}| {pattern} ->\n{indent4}{typeName}.With{caseName} ({allFields})")
     |> String.concat "\n"
 
   // Base case pattern (all false)
   let basePattern = extensions |> List.map (fun _ -> "false") |> String.concat ", "
 
   let baseCaseMatch =
-    $"          | {basePattern} ->
-            {typeName}.Base ({baseFields})"
+    $"{indent}| {basePattern} ->\n{indent4}{typeName}.Base ({baseFields})"
 
   // Default case only needed when there are 2+ extensions (to handle unexpected combinations like true, true)
   // With a single extension, true/false already covers all cases
   let defaultCase =
     if extensions.Length > 1 then
-      $"\n          | _ ->
-            // Multiple extensions active - choosing Base case
-            {typeName}.Base ({baseFields})"
+      $"\n{indent}| _ ->\n{indent4}// Multiple extensions active - choosing Base case\n{indent4}{typeName}.Base ({baseFields})"
     else
       ""
 
-  $"""          {nullChecks}
+  $"""{indent}{nullChecks}
 
-          match {extensions
-                 |> List.map (fun ext -> $"has{TypeGenerator.toPascalCase ext.aspectName}")
-                 |> String.concat ", "} with
+{indent}match {extensions
+               |> List.map (fun ext -> $"has{TypeGenerator.toPascalCase ext.aspectName}")
+               |> String.concat ", "} with
 {matchPatterns}
 {baseCaseMatch}{defaultCase}"""
 
 /// Generate GetAll method for normalized table
-let generateGetAll (normalized: NormalizedTable) : string =
+let generateGetAll (useAsync: bool) (normalized: NormalizedTable) : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
   let selectColumns = generateSelectColumns normalized.baseTable normalized.extensions
 
@@ -344,10 +400,33 @@ let generateGetAll (normalized: NormalizedTable) : string =
   let getSql =
     $"SELECT {selectColumns}\n         FROM {normalized.baseTable.name}{leftJoins}"
 
-  let caseSelection =
-    generateCaseSelection normalized.baseTable normalized.extensions typeName
+  if useAsync then
+    let caseSelection =
+      generateCaseSelection 14 normalized.baseTable normalized.extensions typeName
 
-  $"""  static member GetAll (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
+    $"""  static member GetAll (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
+        use! reader = cmd.ExecuteReaderAsync()
+        let results = ResizeArray<{typeName}>()
+        let mutable hasMore = true
+        while hasMore do
+          let! next = reader.ReadAsync()
+          hasMore <- next
+          if hasMore then
+            let item =
+{caseSelection}
+            results.Add item
+        return Ok(results |> Seq.toList)
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+  else
+    let caseSelection =
+      generateCaseSelection 10 normalized.baseTable normalized.extensions typeName
+
+    $"""  static member GetAll (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
     try
       use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
       use reader = cmd.ExecuteReader()
@@ -361,7 +440,7 @@ let generateGetAll (normalized: NormalizedTable) : string =
     | :? SqliteException as ex -> Error ex"""
 
 /// Generate GetById method for normalized table
-let generateGetById (normalized: NormalizedTable) : string option =
+let generateGetById (useAsync: bool) (normalized: NormalizedTable) : string option =
   let pkCols = getPrimaryKeyColumns normalized.baseTable
 
   match pkCols with
@@ -396,11 +475,38 @@ let generateGetById (normalized: NormalizedTable) : string option =
       |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
       |> String.concat "\n      "
 
-    let caseSelection =
-      generateCaseSelection normalized.baseTable normalized.extensions typeName
+    if useAsync then
+      let asyncParamBindings =
+        pks
+        |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+        |> String.concat "\n        "
 
-    Some
-      $"""  static member GetById {paramList} (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
+      let caseSelection =
+        generateCaseSelection 12 normalized.baseTable normalized.extensions typeName
+
+      Some
+        $"""  static member GetById {paramList} (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
+        {asyncParamBindings}
+        use! reader = cmd.ExecuteReaderAsync()
+        let! hasRow = reader.ReadAsync()
+        if hasRow then
+          let item =
+{caseSelection}
+          return Ok(Some item)
+        else
+          return Ok None
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+    else
+      let caseSelection =
+        generateCaseSelection 10 normalized.baseTable normalized.extensions typeName
+
+      Some
+        $"""  static member GetById {paramList} (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
     try
       use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
       {paramBindings}
@@ -415,7 +521,7 @@ let generateGetById (normalized: NormalizedTable) : string option =
     | :? SqliteException as ex -> Error ex"""
 
 /// Generate GetOne method for normalized table
-let generateGetOne (normalized: NormalizedTable) : string =
+let generateGetOne (useAsync: bool) (normalized: NormalizedTable) : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
   let selectColumns = generateSelectColumns normalized.baseTable normalized.extensions
 
@@ -428,10 +534,30 @@ let generateGetOne (normalized: NormalizedTable) : string =
   let getSql =
     $"SELECT {selectColumns}\n         FROM {normalized.baseTable.name}{leftJoins}\n         LIMIT 1"
 
-  let caseSelection =
-    generateCaseSelection normalized.baseTable normalized.extensions typeName
+  if useAsync then
+    let caseSelection =
+      generateCaseSelection 12 normalized.baseTable normalized.extensions typeName
 
-  $"""  static member GetOne (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
+    $"""  static member GetOne (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
+        use! reader = cmd.ExecuteReaderAsync()
+        let! hasRow = reader.ReadAsync()
+        if hasRow then
+          let item =
+{caseSelection}
+          return Ok(Some item)
+        else
+          return Ok None
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+  else
+    let caseSelection =
+      generateCaseSelection 10 normalized.baseTable normalized.extensions typeName
+
+    $"""  static member GetOne (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
     try
       use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
       use reader = cmd.ExecuteReader()
@@ -465,6 +591,7 @@ let private generateUpdateBaseSql (baseTable: CreateTable) : string =
 
 /// Generate Base case update (UPDATE base, DELETE extensions)
 let private generateUpdateBaseCase
+  (useAsync: bool)
   (baseTable: CreateTable)
   (extensions: ExtensionTable list)
   (typeName: string)
@@ -491,13 +618,32 @@ let private generateUpdateBaseCase
     idFieldName.ToLower().[0..0]
     + (if idFieldName.Length > 1 then idFieldName.[1..] else "")
 
-  let deleteStatements =
-    extensions
-    |> List.map (fun ext ->
-      $"        use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n        delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", {idVarName}) |> ignore\n        delCmd{ext.aspectName}.ExecuteNonQuery() |> ignore")
-    |> String.concat "\n"
+  if useAsync then
+    let asyncParamBindings =
+      generateParamBindings baseTable.columns "cmd" |> String.concat "\n          "
 
-  $"""      | {typeName}.Base({fieldPattern}) ->
+    let deleteStatements =
+      extensions
+      |> List.map (fun ext ->
+        $"          use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n          delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", {idVarName}) |> ignore\n          let! _ = delCmd{ext.aspectName}.ExecuteNonQueryAsync()")
+      |> String.concat "\n"
+
+    $"""        | {typeName}.Base({fieldPattern}) ->
+          // Update base table, delete all extensions
+          use cmd = new SqliteCommand("{updateSql}", tx.Connection, tx)
+          {asyncParamBindings}
+          let! _ = cmd.ExecuteNonQueryAsync()
+
+{deleteStatements}
+          return Ok()"""
+  else
+    let deleteStatements =
+      extensions
+      |> List.map (fun ext ->
+        $"        use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n        delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", {idVarName}) |> ignore\n        delCmd{ext.aspectName}.ExecuteNonQuery() |> ignore")
+      |> String.concat "\n"
+
+    $"""      | {typeName}.Base({fieldPattern}) ->
         // Update base table, delete all extensions
         use cmd = new SqliteCommand("{updateSql}", tx.Connection, tx)
         {paramBindings}
@@ -508,6 +654,7 @@ let private generateUpdateBaseCase
 
 /// Generate extension case update (UPDATE base, INSERT OR REPLACE extension)
 let private generateUpdateExtensionCase
+  (useAsync: bool)
   (baseTable: CreateTable)
   (extension: ExtensionTable)
   (allExtensions: ExtensionTable list)
@@ -557,15 +704,45 @@ let private generateUpdateExtensionCase
     idFieldName.ToLower().[0..0]
     + (if idFieldName.Length > 1 then idFieldName.[1..] else "")
 
-  // Delete other extensions
-  let deleteOtherExtensions =
-    allExtensions
-    |> List.filter (fun e -> e.table.name <> extension.table.name)
-    |> List.map (fun ext ->
-      $"        use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n        delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", {idVarName}) |> ignore\n        delCmd{ext.aspectName}.ExecuteNonQuery() |> ignore")
-    |> String.concat "\n"
+  if useAsync then
+    let asyncBaseParamBindings =
+      generateParamBindings baseTable.columns "cmd1" |> String.concat "\n          "
 
-  $"""      | {typeName}.With{caseName}({fieldPattern}) ->
+    let asyncExtensionParamBindings =
+      generateParamBindings extensionInsertColumns "cmd2"
+      |> String.concat "\n          "
+
+    // Delete other extensions
+    let deleteOtherExtensions =
+      allExtensions
+      |> List.filter (fun e -> e.table.name <> extension.table.name)
+      |> List.map (fun ext ->
+        $"          use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n          delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", {idVarName}) |> ignore\n          let! _ = delCmd{ext.aspectName}.ExecuteNonQueryAsync()")
+      |> String.concat "\n"
+
+    $"""        | {typeName}.With{caseName}({fieldPattern}) ->
+          // Update base, INSERT OR REPLACE extension
+          use cmd1 = new SqliteCommand("{updateSql}", tx.Connection, tx)
+          {asyncBaseParamBindings}
+          let! _ = cmd1.ExecuteNonQueryAsync()
+
+          use cmd2 = new SqliteCommand("{insertOrReplaceSql}", tx.Connection, tx)
+          cmd2.Parameters.AddWithValue("@{extension.fkColumn}", {idVarName}) |> ignore
+          {asyncExtensionParamBindings}
+          let! _ = cmd2.ExecuteNonQueryAsync()
+
+{deleteOtherExtensions}
+          return Ok()"""
+  else
+    // Delete other extensions
+    let deleteOtherExtensions =
+      allExtensions
+      |> List.filter (fun e -> e.table.name <> extension.table.name)
+      |> List.map (fun ext ->
+        $"        use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n        delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", {idVarName}) |> ignore\n        delCmd{ext.aspectName}.ExecuteNonQuery() |> ignore")
+      |> String.concat "\n"
+
+    $"""      | {typeName}.With{caseName}({fieldPattern}) ->
         // Update base, INSERT OR REPLACE extension
         use cmd1 = new SqliteCommand("{updateSql}", tx.Connection, tx)
         {baseParamBindings}
@@ -580,7 +757,7 @@ let private generateUpdateExtensionCase
         Ok()"""
 
 /// Generate Update method for normalized table
-let generateUpdate (normalized: NormalizedTable) : string option =
+let generateUpdate (useAsync: bool) (normalized: NormalizedTable) : string option =
   let pkCols = getPrimaryKeyColumns normalized.baseTable
 
   match pkCols with
@@ -590,12 +767,13 @@ let generateUpdate (normalized: NormalizedTable) : string option =
 
     // Generate Base case
     let baseCase =
-      generateUpdateBaseCase normalized.baseTable normalized.extensions typeName
+      generateUpdateBaseCase useAsync normalized.baseTable normalized.extensions typeName
 
     // Generate extension cases
     let extensionCases =
       normalized.extensions
-      |> List.map (fun ext -> generateUpdateExtensionCase normalized.baseTable ext normalized.extensions typeName)
+      |> List.map (fun ext ->
+        generateUpdateExtensionCase useAsync normalized.baseTable ext normalized.extensions typeName)
       |> String.concat "\n\n"
 
     let allCases =
@@ -604,8 +782,20 @@ let generateUpdate (normalized: NormalizedTable) : string option =
       else
         $"{baseCase}\n\n{extensionCases}"
 
-    Some
-      $"""  static member Update (item: {typeName}) (tx: SqliteTransaction)
+    if useAsync then
+      Some
+        $"""  static member Update (item: {typeName}) (tx: SqliteTransaction)
+    : Task<Result<unit, SqliteException>> =
+    task {{
+      try
+        match item with
+{allCases}
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+    else
+      Some
+        $"""  static member Update (item: {typeName}) (tx: SqliteTransaction)
     : Result<unit, SqliteException> =
     try
       match item with
@@ -614,7 +804,7 @@ let generateUpdate (normalized: NormalizedTable) : string option =
     | :? SqliteException as ex -> Error ex"""
 
 /// Generate Delete method for normalized table
-let generateDelete (normalized: NormalizedTable) : string option =
+let generateDelete (useAsync: bool) (normalized: NormalizedTable) : string option =
   let pkCols = getPrimaryKeyColumns normalized.baseTable
 
   match pkCols with
@@ -639,8 +829,27 @@ let generateDelete (normalized: NormalizedTable) : string option =
       |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
       |> String.concat "\n      "
 
-    Some
-      $"""  static member Delete {paramList} (tx: SqliteTransaction)
+    if useAsync then
+      let asyncParamBindings =
+        pks
+        |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+        |> String.concat "\n        "
+
+      Some
+        $"""  static member Delete {paramList} (tx: SqliteTransaction)
+    : Task<Result<unit, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("{deleteSql}", tx.Connection, tx)
+        {asyncParamBindings}
+        let! _ = cmd.ExecuteNonQueryAsync()
+        return Ok()
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+    else
+      Some
+        $"""  static member Delete {paramList} (tx: SqliteTransaction)
     : Result<unit, SqliteException> =
     try
       use cmd = new SqliteCommand("{deleteSql}", tx.Connection, tx)
@@ -687,7 +896,11 @@ let private findNormalizedColumn (normalized: NormalizedTable) (colName: string)
   |> List.tryFind (fun (_, c) -> c.name.ToLowerInvariant() = colName.ToLowerInvariant())
 
 /// Generate custom QueryBy method for normalized tables with tupled parameters
-let private generateNormalizedQueryBy (normalized: NormalizedTable) (annotation: QueryByAnnotation) : string =
+let private generateNormalizedQueryBy
+  (useAsync: bool)
+  (normalized: NormalizedTable)
+  (annotation: QueryByAnnotation)
+  : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
 
   // 1. Build method name: GetByIdName
@@ -751,12 +964,49 @@ let private generateNormalizedQueryBy (normalized: NormalizedTable) (annotation:
         {joins}
         WHERE {whereClause}"""
 
-  // 6. Generate case selection logic
-  let caseSelection =
-    generateCaseSelection normalized.baseTable normalized.extensions typeName
-
   // 7. Generate full method with tupled parameters
-  $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
+  if useAsync then
+    let asyncParamBindings =
+      annotation.columns
+      |> List.map (fun col ->
+        let _, columnDef = findNormalizedColumn normalized col |> Option.get
+        let isNullable = TypeGenerator.isColumnNullable columnDef
+
+        if isNullable then
+          $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        else
+          $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+      |> String.concat "\n        "
+
+    // 6. Generate case selection logic (async needs 14-space indent)
+    let caseSelection =
+      generateCaseSelection 14 normalized.baseTable normalized.extensions typeName
+
+    $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("{sql}", tx.Connection, tx)
+        {asyncParamBindings}
+        use! reader = cmd.ExecuteReaderAsync()
+        let results = ResizeArray<{typeName}>()
+        let mutable hasMore = true
+        while hasMore do
+          let! next = reader.ReadAsync()
+          hasMore <- next
+          if hasMore then
+            let record =
+{caseSelection}
+            results.Add(record)
+        return Ok(results |> Seq.toList)
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+  else
+    // 6. Generate case selection logic (sync needs 10-space indent)
+    let caseSelection =
+      generateCaseSelection 10 normalized.baseTable normalized.extensions typeName
+
+    $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
     try
       use cmd = new SqliteCommand("{sql}", tx.Connection, tx)
       {paramBindings}
@@ -811,6 +1061,7 @@ let private validateNormalizedQueryByOrCreateAnnotation
 
 /// Generate custom QueryByOrCreate method for normalized tables that extracts query values from NewType DU
 let private generateNormalizedQueryByOrCreate
+  (useAsync: bool)
   (normalized: NormalizedTable)
   (annotation: QueryByOrCreateAnnotation)
   : string =
@@ -900,12 +1151,60 @@ let private generateNormalizedQueryByOrCreate
     else
       $"SELECT {allSelects} FROM {normalized.baseTable.name} b\n      {joins}\n      WHERE {whereClause} LIMIT 1"
 
-  // 7. Generate mapping logic (same as GetById)
-  let caseSelection =
-    generateCaseSelection normalized.baseTable normalized.extensions typeName
-
   // 5. Generate full method
-  $"""  static member {methodName} (newItem: {newTypeName}) (tx: SqliteTransaction) : Result<{typeName}, SqliteException> =
+  if useAsync then
+    let asyncParamBindings =
+      annotation.columns
+      |> List.map (fun col ->
+        let _, columnDef = findNormalizedColumn normalized col |> Option.get
+        let isNullable = TypeGenerator.isColumnNullable columnDef
+
+        if isNullable then
+          $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        else
+          $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+      |> String.concat "\n        "
+
+    // 7. Generate mapping logic (async needs 12-space indent)
+    let caseSelection =
+      generateCaseSelection 12 normalized.baseTable normalized.extensions typeName
+
+    $"""  static member {methodName} (newItem: {newTypeName}) (tx: SqliteTransaction) : Task<Result<{typeName}, SqliteException>> =
+    task {{
+      try
+        // Extract query values from NewType DU
+{valueExtractions}
+        // Try to find existing record
+        use cmd = new SqliteCommand("{selectSql}", tx.Connection, tx)
+        {asyncParamBindings}
+        use! reader = cmd.ExecuteReaderAsync()
+        let! hasRow = reader.ReadAsync()
+        if hasRow then
+          // Found existing record - return it
+          let item =
+{caseSelection}
+          return Ok item
+        else
+          // Not found - insert and fetch
+          reader.Close()
+          let! insertResult = {typeName}.Insert newItem tx
+          match insertResult with
+          | Ok newId ->
+            let! getResult = {typeName}.GetById newId tx
+            match getResult with
+            | Ok (Some item) -> return Ok item
+            | Ok None -> return Error (SqliteException("Failed to retrieve inserted record", 0))
+            | Error ex -> return Error ex
+          | Error ex -> return Error ex
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+  else
+    // 7. Generate mapping logic (sync needs 10-space indent)
+    let caseSelection =
+      generateCaseSelection 10 normalized.baseTable normalized.extensions typeName
+
+    $"""  static member {methodName} (newItem: {newTypeName}) (tx: SqliteTransaction) : Result<{typeName}, SqliteException> =
     try
       // Extract query values from NewType DU
 {valueExtractions}
@@ -932,7 +1231,7 @@ let private generateNormalizedQueryByOrCreate
     | :? SqliteException as ex -> Error ex"""
 
 /// Generate all methods for a normalized table and format with Fantomas
-let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, string> =
+let generateNormalizedTableCode (useAsync: bool) (normalized: NormalizedTable) : Result<string, string> =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
 
   // Validate all QueryBy annotations
@@ -956,22 +1255,22 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
   | Some(Error msg) -> Error msg
   | _ ->
     // Generate all method strings
-    let insertMethod = generateInsert normalized
-    let getAllMethod = generateGetAll normalized
-    let getByIdMethod = generateGetById normalized
-    let getOneMethod = generateGetOne normalized
-    let updateMethod = generateUpdate normalized
-    let deleteMethod = generateDelete normalized
+    let insertMethod = generateInsert useAsync normalized
+    let getAllMethod = generateGetAll useAsync normalized
+    let getByIdMethod = generateGetById useAsync normalized
+    let getOneMethod = generateGetOne useAsync normalized
+    let updateMethod = generateUpdate useAsync normalized
+    let deleteMethod = generateDelete useAsync normalized
 
     // Generate QueryBy methods
     let queryByMethods =
       normalized.baseTable.queryByAnnotations
-      |> List.map (generateNormalizedQueryBy normalized)
+      |> List.map (generateNormalizedQueryBy useAsync normalized)
 
     // Generate QueryByOrCreate methods
     let queryByOrCreateMethods =
       normalized.baseTable.queryByOrCreateAnnotations
-      |> List.map (generateNormalizedQueryByOrCreate normalized)
+      |> List.map (generateNormalizedQueryByOrCreate useAsync normalized)
 
     // Collect all methods
     let allMethods =

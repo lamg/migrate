@@ -30,7 +30,7 @@ let ``Generated GetById method handles composite PK with transaction`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    return QueryGenerator.generateGet table
+    return QueryGenerator.generateGet false table
   }
   |> function
     | Ok(Some code) ->
@@ -50,7 +50,7 @@ let ``Generated Delete method handles composite PK with transaction`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    return QueryGenerator.generateDelete table
+    return QueryGenerator.generateDelete false table
   }
   |> function
     | Ok(Some code) ->
@@ -70,7 +70,7 @@ let ``Generated Update method excludes all PK columns from SET with transaction`
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    return QueryGenerator.generateUpdate table
+    return QueryGenerator.generateUpdate false table
   }
   |> function
     | Ok(Some code) ->
@@ -91,7 +91,7 @@ let ``GetOne method is generated for tables`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let code = QueryGenerator.generateGetOne table
+    let code = QueryGenerator.generateGetOne false table
     return code
   }
   |> function

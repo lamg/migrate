@@ -368,6 +368,13 @@ let insertInto: Parser<InsertInto, unit> =
       columns = columnNames
       values = valueLists }
 
+// Standalone comment parsing (comments not associated with QueryBy annotations)
+let standaloneComment: Parser<unit, unit> = pstring "--" >>. restOfLine true >>% ()
+
+// Skip whitespace and comments (interleaved)
+let wsAndComments: Parser<unit, unit> =
+  spaces >>. skipMany (standaloneComment >>. spaces)
+
 // Statement parsing
 type Statement =
   | TableStmt of CreateTable
@@ -376,18 +383,37 @@ type Statement =
   | TriggerStmt of CreateTrigger
   | InsertStmt of InsertInto
 
-let statement: Parser<Statement, unit> =
-  ws
-  >>. choice
+let statementContent: Parser<Statement, unit> =
+  choice
     [ attempt createTable |>> TableStmt
       attempt createView |>> ViewStmt
       attempt createIndex |>> IndexStmt
       attempt createTrigger |>> TriggerStmt
       attempt insertInto |>> InsertStmt ]
-  .>> ws
+
+let statement: Parser<Statement, unit> = wsAndComments >>. statementContent .>> ws
 
 // Parse multiple statements
-let statements: Parser<Statement list, unit> = many statement .>> eof
+let statements: Parser<Statement list, unit> =
+  many (attempt statement) .>> wsAndComments .>> eof
+
+// Improve error messages for common mistakes
+let improveErrorMessage (sql: string) (errorMsg: string) : string =
+  // Detect trailing comma before closing parenthesis
+  if errorMsg.Contains "Expecting:" && errorMsg.Contains "')'" |> not then
+    // Look for pattern: comma followed by whitespace/newlines and then );
+    let trailingCommaPattern = System.Text.RegularExpressions.Regex @",\s*\);"
+    let matches = trailingCommaPattern.Matches sql
+
+    if matches.Count > 0 then
+      let firstMatch = matches.[0]
+      // Find line number
+      let lineNumber = sql.Substring(0, firstMatch.Index).Split('\n').Length
+      $"{errorMsg}\n\nHint: Found trailing comma before ');' near line {lineNumber}. Remove the comma before the closing parenthesis."
+    else
+      errorMsg
+  else
+    errorMsg
 
 // Main parse function
 let parseSqlFile (fileName: string, sql: string) : Result<SqlFile, string> =
@@ -413,4 +439,6 @@ let parseSqlFile (fileName: string, sql: string) : Result<SqlFile, string> =
               inserts = i :: file.inserts }
 
     Result.Ok file
-  | Failure(errorMsg, _, _) -> Result.Error $"Parse error in {fileName}: {errorMsg}"
+  | Failure(errorMsg, _, _) ->
+    let improvedMsg = improveErrorMessage sql errorMsg
+    Result.Error $"Parse error in {fileName}: {improvedMsg}"

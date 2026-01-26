@@ -5,6 +5,13 @@ open migrate.CodeGen.ViewIntrospection
 open Fabulous.AST
 open type Fabulous.AST.Ast
 
+/// Create indentation string with given number of spaces
+let indent n = String.replicate n " "
+
+/// Join lines with indentation
+let joinWithIndent (spaces: int) (lines: string list) =
+  lines |> String.concat $"\n{indent spaces}"
+
 /// Get the primary key column(s) from a table
 let getPrimaryKey (table: CreateTable) : ColumnDef list =
   // First check for column-level primary keys
@@ -73,7 +80,7 @@ let readerMethod (t: string) =
   t.Replace("int64", "Int64").Replace("string", "String").Replace("float", "Double").Replace("DateTime", "DateTime")
 
 /// Generate INSERT method
-let generateInsert (table: CreateTable) : string =
+let generateInsert (useAsync: bool) (table: CreateTable) : string =
   let typeName = capitalize table.name
   let pkCols = getPrimaryKey table
 
@@ -111,7 +118,33 @@ let generateInsert (table: CreateTable) : string =
         $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
     |> String.concat "\n      "
 
-  $"""  static member Insert (item: {typeName}) (tx: SqliteTransaction) : Result<int64, SqliteException> =
+  if useAsync then
+    let asyncParamBindings =
+      insertCols
+      |> List.map (fun col ->
+        let fieldName = capitalize col.name
+        let isNullable = TypeGenerator.isColumnNullable col
+
+        if isNullable then
+          $"cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        else
+          $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
+      |> String.concat "\n        "
+
+    $"""  static member Insert (item: {typeName}) (tx: SqliteTransaction) : Task<Result<int64, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("{insertSql}", tx.Connection, tx)
+        {asyncParamBindings}
+        let! _ = cmd.ExecuteNonQueryAsync()
+        use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+        let! lastId = lastIdCmd.ExecuteScalarAsync()
+        return Ok(lastId |> unbox<int64>)
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+  else
+    $"""  static member Insert (item: {typeName}) (tx: SqliteTransaction) : Result<int64, SqliteException> =
     try
       use cmd = new SqliteCommand("{insertSql}", tx.Connection, tx)
       {parameterBindings}
@@ -123,7 +156,7 @@ let generateInsert (table: CreateTable) : string =
     | :? SqliteException as ex -> Error ex"""
 
 /// Generate GET by ID method (transaction-only)
-let generateGet (table: CreateTable) : string option =
+let generateGet (useAsync: bool) (table: CreateTable) : string option =
   let typeName = capitalize table.name
   let pkCols = getPrimaryKey table
 
@@ -165,8 +198,45 @@ let generateGet (table: CreateTable) : string option =
           $"{fieldName} = reader.Get{method} {i}")
       |> String.concat "\n        "
 
-    Some
-      $"""  static member GetById {paramList} (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
+    if useAsync then
+      let asyncParamBindings =
+        pks
+        |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+        |> String.concat "\n        "
+
+      let asyncFieldMappings =
+        table.columns
+        |> List.mapi (fun i col ->
+          let fieldName = capitalize col.name
+          let isNullable = TypeGenerator.isColumnNullable col
+          let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+
+          if isNullable then
+            $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
+          else
+            $"{fieldName} = reader.Get{method} {i}")
+        |> String.concat "\n          "
+
+      Some
+        $"""  static member GetById {paramList} (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
+        {asyncParamBindings}
+        use! reader = cmd.ExecuteReaderAsync()
+        let! hasRow = reader.ReadAsync()
+        if hasRow then
+          return Ok(Some {{
+          {asyncFieldMappings}
+          }})
+        else
+          return Ok None
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+    else
+      Some
+        $"""  static member GetById {paramList} (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
     try
       use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
       {paramBindings}
@@ -181,7 +251,7 @@ let generateGet (table: CreateTable) : string option =
     | :? SqliteException as ex -> Error ex"""
 
 /// Generate GET ALL method (transaction-only)
-let generateGetAll (table: CreateTable) : string =
+let generateGetAll (useAsync: bool) (table: CreateTable) : string =
   let typeName = capitalize table.name
   let columnNames = table.columns |> List.map (fun c -> c.name) |> String.concat ", "
   let getSql = $"SELECT {columnNames} FROM {table.name}"
@@ -199,7 +269,40 @@ let generateGetAll (table: CreateTable) : string =
         $"{fieldName} = reader.Get{method} {i}")
     |> String.concat "\n          "
 
-  $"""  static member GetAll (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
+  if useAsync then
+    let asyncFieldMappings =
+      table.columns
+      |> List.mapi (fun i col ->
+        let fieldName = capitalize col.name
+        let isNullable = TypeGenerator.isColumnNullable col
+        let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+
+        if isNullable then
+          $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
+        else
+          $"{fieldName} = reader.Get{method} {i}")
+      |> String.concat "\n              "
+
+    $"""  static member GetAll (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
+        use! reader = cmd.ExecuteReaderAsync()
+        let results = ResizeArray<{typeName}>()
+        let mutable hasMore = true
+        while hasMore do
+          let! next = reader.ReadAsync()
+          hasMore <- next
+          if hasMore then
+            results.Add({{
+              {asyncFieldMappings}
+            }})
+        return Ok(results |> Seq.toList)
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+  else
+    $"""  static member GetAll (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
     try
       use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
       use reader = cmd.ExecuteReader()
@@ -213,7 +316,7 @@ let generateGetAll (table: CreateTable) : string =
     | :? SqliteException as ex -> Error ex"""
 
 /// Generate GET ONE method (transaction-only)
-let generateGetOne (table: CreateTable) : string =
+let generateGetOne (useAsync: bool) (table: CreateTable) : string =
   let typeName = capitalize table.name
   let columnNames = table.columns |> List.map (fun c -> c.name) |> String.concat ", "
   let getSql = $"SELECT {columnNames} FROM {table.name} LIMIT 1"
@@ -231,7 +334,37 @@ let generateGetOne (table: CreateTable) : string =
         $"{fieldName} = reader.Get{method} {i}")
     |> String.concat "\n        "
 
-  $"""  static member GetOne (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
+  if useAsync then
+    let asyncFieldMappings =
+      table.columns
+      |> List.mapi (fun i col ->
+        let fieldName = capitalize col.name
+        let isNullable = TypeGenerator.isColumnNullable col
+        let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+
+        if isNullable then
+          $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
+        else
+          $"{fieldName} = reader.Get{method} {i}")
+      |> String.concat "\n          "
+
+    $"""  static member GetOne (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
+        use! reader = cmd.ExecuteReaderAsync()
+        let! hasRow = reader.ReadAsync()
+        if hasRow then
+          return Ok(Some {{
+          {asyncFieldMappings}
+          }})
+        else
+          return Ok None
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+  else
+    $"""  static member GetOne (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
     try
       use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
       use reader = cmd.ExecuteReader()
@@ -245,7 +378,7 @@ let generateGetOne (table: CreateTable) : string =
     | :? SqliteException as ex -> Error ex"""
 
 /// Generate UPDATE method (transaction-only)
-let generateUpdate (table: CreateTable) : string option =
+let generateUpdate (useAsync: bool) (table: CreateTable) : string option =
   let typeName = capitalize table.name
   let pkCols = getPrimaryKey table
 
@@ -279,8 +412,33 @@ let generateUpdate (table: CreateTable) : string option =
           $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
       |> String.concat "\n      "
 
-    Some
-      $"""  static member Update (item: {typeName}) (tx: SqliteTransaction) : Result<unit, SqliteException> =
+    if useAsync then
+      let asyncParamBindings =
+        table.columns
+        |> List.map (fun col ->
+          let fieldName = capitalize col.name
+          let isNullable = TypeGenerator.isColumnNullable col
+
+          if isNullable then
+            $"cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+          else
+            $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
+        |> String.concat "\n        "
+
+      Some
+        $"""  static member Update (item: {typeName}) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("{updateSql}", tx.Connection, tx)
+        {asyncParamBindings}
+        let! _ = cmd.ExecuteNonQueryAsync()
+        return Ok()
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+    else
+      Some
+        $"""  static member Update (item: {typeName}) (tx: SqliteTransaction) : Result<unit, SqliteException> =
     try
       use cmd = new SqliteCommand("{updateSql}", tx.Connection, tx)
       {paramBindings}
@@ -290,7 +448,7 @@ let generateUpdate (table: CreateTable) : string option =
     | :? SqliteException as ex -> Error ex"""
 
 /// Generate DELETE method (transaction-only)
-let generateDelete (table: CreateTable) : string option =
+let generateDelete (useAsync: bool) (table: CreateTable) : string option =
   let pkCols = getPrimaryKey table
 
   match pkCols with
@@ -316,8 +474,26 @@ let generateDelete (table: CreateTable) : string option =
       |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
       |> String.concat "\n      "
 
-    Some
-      $"""  static member Delete {paramList} (tx: SqliteTransaction) : Result<unit, SqliteException> =
+    if useAsync then
+      let asyncParamBindings =
+        pks
+        |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+        |> String.concat "\n        "
+
+      Some
+        $"""  static member Delete {paramList} (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("{deleteSql}", tx.Connection, tx)
+        {asyncParamBindings}
+        let! _ = cmd.ExecuteNonQueryAsync()
+        return Ok()
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+    else
+      Some
+        $"""  static member Delete {paramList} (tx: SqliteTransaction) : Result<unit, SqliteException> =
     try
       use cmd = new SqliteCommand("{deleteSql}", tx.Connection, tx)
       {paramBindings}
@@ -348,7 +524,7 @@ let findColumn (table: CreateTable) (colName: string) : ColumnDef option =
   |> List.tryFind (fun c -> c.name.ToLowerInvariant() = colName.ToLowerInvariant())
 
 /// Generate custom QueryBy method with tupled parameters
-let generateQueryBy (table: CreateTable) (annotation: QueryByAnnotation) : string =
+let generateQueryBy (useAsync: bool) (table: CreateTable) (annotation: QueryByAnnotation) : string =
   let typeName = capitalize table.name
 
   // 1. Build method name: GetByIdName
@@ -405,7 +581,53 @@ let generateQueryBy (table: CreateTable) (annotation: QueryByAnnotation) : strin
     |> String.concat "\n          "
 
   // 7. Generate full method with tupled parameters
-  $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
+  if useAsync then
+    let asyncParamBindings =
+      annotation.columns
+      |> List.map (fun col ->
+        let columnDef = findColumn table col |> Option.get
+        let isNullable = TypeGenerator.isColumnNullable columnDef
+
+        if isNullable then
+          $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        else
+          $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+      |> String.concat "\n        "
+
+    let asyncFieldMappings =
+      table.columns
+      |> List.mapi (fun i col ->
+        let fieldName = capitalize col.name
+        let isNullable = TypeGenerator.isColumnNullable col
+        let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+
+        if isNullable then
+          $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
+        else
+          $"{fieldName} = reader.Get{method} {i}")
+      |> String.concat "\n              "
+
+    $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("SELECT {columnNames} FROM {table.name} WHERE {whereClause}", tx.Connection, tx)
+        {asyncParamBindings}
+        use! reader = cmd.ExecuteReaderAsync()
+        let results = ResizeArray<{typeName}>()
+        let mutable hasMore = true
+        while hasMore do
+          let! next = reader.ReadAsync()
+          hasMore <- next
+          if hasMore then
+            results.Add({{
+              {asyncFieldMappings}
+            }})
+        return Ok(results |> Seq.toList)
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+  else
+    $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
     try
       use cmd = new SqliteCommand("SELECT {columnNames} FROM {table.name} WHERE {whereClause}", tx.Connection, tx)
       {paramBindings}
@@ -441,7 +663,7 @@ let validateQueryByOrCreateAnnotation
       $"QueryByOrCreate annotation references non-existent column '{invalidCol}' in table '{table.name}'. Available columns: {availableCols}"
 
 /// Generate custom QueryByOrCreate method that extracts query values from newItem
-let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnnotation) : string =
+let generateQueryByOrCreate (useAsync: bool) (table: CreateTable) (annotation: QueryByOrCreateAnnotation) : string =
   let typeName = capitalize table.name
   let pkCols = getPrimaryKey table
 
@@ -496,35 +718,125 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
         $"{fieldName} = reader.Get{method} {i}")
     |> String.concat "\n          "
 
-  // 6. Build GetById call (handle composite PK or no PK)
-  let getByIdCall =
-    match pkCols with
-    | [] ->
-      // No primary key - re-query with WHERE clause (values already extracted above)
-      $"""
-      // No primary key - re-query to get inserted record
-      use cmd = new SqliteCommand("SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1", tx.Connection, tx)
-      {paramBindings}
-      use reader = cmd.ExecuteReader()
-      if reader.Read() then
-        Ok {{
-          {fieldMappings}
-        }}
-      else
-        Error (SqliteException("Failed to retrieve inserted record", 0))"""
-    | pks ->
-      // Has primary key - use GetById
-      let getByIdParams = pks |> List.map (fun pk -> "newId") |> String.concat " "
+  if useAsync then
+    // Async versions need extra indentation (8 spaces instead of 6)
+    let asyncValueExtractions =
+      annotation.columns
+      |> List.map (fun col ->
+        let fieldName = capitalize col
+        $"let {col} = newItem.{fieldName}")
+      |> String.concat "\n        "
 
-      $"""
-      // Fetch newly inserted record by ID
-      match {typeName}.GetById {getByIdParams} tx with
-      | Ok (Some item) -> Ok item
-      | Ok None -> Error (SqliteException("Failed to retrieve inserted record", 0))
-      | Error ex -> Error ex"""
+    let asyncParamBindings =
+      annotation.columns
+      |> List.map (fun col ->
+        let columnDef = findColumn table col |> Option.get
+        let isNullable = TypeGenerator.isColumnNullable columnDef
 
-  // 5. Generate full method
-  $"""  static member {methodName} (newItem: {typeName}) (tx: SqliteTransaction) : Result<{typeName}, SqliteException> =
+        if isNullable then
+          $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        else
+          $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+      |> String.concat "\n        "
+
+    let asyncFieldMappings =
+      table.columns
+      |> List.mapi (fun i col ->
+        let fieldName = capitalize col.name
+        let isNullable = TypeGenerator.isColumnNullable col
+        let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+
+        if isNullable then
+          $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
+        else
+          $"{fieldName} = reader.Get{method} {i}")
+      |> String.concat "\n            "
+
+    // 6. Build GetById call (handle composite PK or no PK) - async version
+    let getByIdCallAsync =
+      match pkCols with
+      | [] ->
+        // No primary key - re-query with WHERE clause (values already extracted above)
+        $"""
+            // No primary key - re-query to get inserted record
+            use cmd = new SqliteCommand("SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1", tx.Connection, tx)
+            {asyncParamBindings}
+            use! reader = cmd.ExecuteReaderAsync()
+            let! hasRow = reader.ReadAsync()
+            if hasRow then
+              return Ok {{
+                {asyncFieldMappings}
+              }}
+            else
+              return Error (SqliteException("Failed to retrieve inserted record", 0))"""
+      | pks ->
+        // Has primary key - use GetById
+        let getByIdParams = pks |> List.map (fun pk -> "newId") |> String.concat " "
+
+        $"""
+            // Fetch newly inserted record by ID
+            let! getResult = {typeName}.GetById {getByIdParams} tx
+            match getResult with
+            | Ok (Some item) -> return Ok item
+            | Ok None -> return Error (SqliteException("Failed to retrieve inserted record", 0))
+            | Error ex -> return Error ex"""
+
+    // 5. Generate full method - async version
+    $"""  static member {methodName} (newItem: {typeName}) (tx: SqliteTransaction) : Task<Result<{typeName}, SqliteException>> =
+    task {{
+      try
+        // Extract query values from newItem
+        {asyncValueExtractions}
+        // Try to find existing record
+        use cmd = new SqliteCommand("SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1", tx.Connection, tx)
+        {asyncParamBindings}
+        use! reader = cmd.ExecuteReaderAsync()
+        let! hasRow = reader.ReadAsync()
+        if hasRow then
+          // Found existing record - return it
+          return Ok {{
+            {asyncFieldMappings}
+          }}
+        else
+          // Not found - insert and fetch
+          reader.Close()
+          let! insertResult = {typeName}.Insert newItem tx
+          match insertResult with
+          | Ok newId ->{getByIdCallAsync}
+          | Error ex -> return Error ex
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+  else
+    // 6. Build GetById call (handle composite PK or no PK) - sync version
+    let getByIdCall =
+      match pkCols with
+      | [] ->
+        // No primary key - re-query with WHERE clause (values already extracted above)
+        $"""
+        // No primary key - re-query to get inserted record
+        use cmd = new SqliteCommand("SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1", tx.Connection, tx)
+        {paramBindings}
+        use reader = cmd.ExecuteReader()
+        if reader.Read() then
+          Ok {{
+            {fieldMappings}
+          }}
+        else
+          Error (SqliteException("Failed to retrieve inserted record", 0))"""
+      | pks ->
+        // Has primary key - use GetById
+        let getByIdParams = pks |> List.map (fun pk -> "newId") |> String.concat " "
+
+        $"""
+        // Fetch newly inserted record by ID
+        match {typeName}.GetById {getByIdParams} tx with
+        | Ok (Some item) -> Ok item
+        | Ok None -> Error (SqliteException("Failed to retrieve inserted record", 0))
+        | Error ex -> Error ex"""
+
+    // 5. Generate full method - sync version
+    $"""  static member {methodName} (newItem: {typeName}) (tx: SqliteTransaction) : Result<{typeName}, SqliteException> =
     try
       // Extract query values from newItem
       {valueExtractions}
@@ -547,7 +859,7 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
     | :? SqliteException as ex -> Error ex"""
 
 /// Generate code for a table
-let generateTableCode (table: CreateTable) : Result<string, string> =
+let generateTableCode (useAsync: bool) (table: CreateTable) : Result<string, string> =
   let typeName = capitalize table.name
 
   // Validate all QueryBy annotations
@@ -570,19 +882,21 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
   | Some(Error msg) -> Error msg
   | _ ->
     // CRUD methods with curried signatures
-    let insertMethod = generateInsert table
-    let getMethod = generateGet table
-    let getAllMethod = generateGetAll table
-    let getOneMethod = generateGetOne table
-    let updateMethod = generateUpdate table
-    let deleteMethod = generateDelete table
+    let insertMethod = generateInsert useAsync table
+    let getMethod = generateGet useAsync table
+    let getAllMethod = generateGetAll useAsync table
+    let getOneMethod = generateGetOne useAsync table
+    let updateMethod = generateUpdate useAsync table
+    let deleteMethod = generateDelete useAsync table
 
     // Generate QueryBy methods
-    let queryByMethods = table.queryByAnnotations |> List.map (generateQueryBy table)
+    let queryByMethods =
+      table.queryByAnnotations |> List.map (generateQueryBy useAsync table)
 
     // Generate QueryByOrCreate methods
     let queryByOrCreateMethods =
-      table.queryByOrCreateAnnotations |> List.map (generateQueryByOrCreate table)
+      table.queryByOrCreateAnnotations
+      |> List.map (generateQueryByOrCreate useAsync table)
 
     let allMethods =
       [ Some insertMethod
@@ -601,7 +915,7 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
 {allMethods}"""
 
 /// Generate GetAll method for a view (read-only)
-let generateViewGetAll (viewName: string) (columns: ViewColumn list) : string =
+let generateViewGetAll (useAsync: bool) (viewName: string) (columns: ViewColumn list) : string =
   let typeName = capitalize viewName
   let columnNames = columns |> List.map (fun c -> c.name) |> String.concat ", "
   let getSql = $"SELECT {columnNames} FROM {viewName}"
@@ -618,7 +932,39 @@ let generateViewGetAll (viewName: string) (columns: ViewColumn list) : string =
         $"{fieldName} = reader.Get{method} {i}")
     |> String.concat "\n          "
 
-  $"""  static member GetAll (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
+  if useAsync then
+    let asyncFieldMappings =
+      columns
+      |> List.mapi (fun i col ->
+        let fieldName = capitalize col.name
+        let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+
+        if col.isNullable then
+          $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
+        else
+          $"{fieldName} = reader.Get{method} {i}")
+      |> String.concat "\n              "
+
+    $"""  static member GetAll (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
+        use! reader = cmd.ExecuteReaderAsync()
+        let results = ResizeArray<{typeName}>()
+        let mutable hasMore = true
+        while hasMore do
+          let! next = reader.ReadAsync()
+          hasMore <- next
+          if hasMore then
+            results.Add({{
+              {asyncFieldMappings}
+            }})
+        return Ok(results |> Seq.toList)
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+  else
+    $"""  static member GetAll (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
     try
       use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
       use reader = cmd.ExecuteReader()
@@ -632,7 +978,7 @@ let generateViewGetAll (viewName: string) (columns: ViewColumn list) : string =
     | :? SqliteException as ex -> Error ex"""
 
 /// Generate GET ONE method for a view (read-only)
-let generateViewGetOne (viewName: string) (columns: ViewColumn list) : string =
+let generateViewGetOne (useAsync: bool) (viewName: string) (columns: ViewColumn list) : string =
   let typeName = capitalize viewName
   let columnNames = columns |> List.map (fun c -> c.name) |> String.concat ", "
   let getSql = $"SELECT {columnNames} FROM {viewName} LIMIT 1"
@@ -649,7 +995,36 @@ let generateViewGetOne (viewName: string) (columns: ViewColumn list) : string =
         $"{fieldName} = reader.Get{method} {i}")
     |> String.concat "\n        "
 
-  $"""  static member GetOne (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
+  if useAsync then
+    let asyncFieldMappings =
+      columns
+      |> List.mapi (fun i col ->
+        let fieldName = capitalize col.name
+        let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+
+        if col.isNullable then
+          $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
+        else
+          $"{fieldName} = reader.Get{method} {i}")
+      |> String.concat "\n          "
+
+    $"""  static member GetOne (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
+        use! reader = cmd.ExecuteReaderAsync()
+        let! hasRow = reader.ReadAsync()
+        if hasRow then
+          return Ok(Some {{
+          {asyncFieldMappings}
+          }})
+        else
+          return Ok None
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+  else
+    $"""  static member GetOne (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
     try
       use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
       use reader = cmd.ExecuteReader()
@@ -687,7 +1062,12 @@ let findViewColumn (columns: ViewColumn list) (colName: string) : ViewColumn opt
   |> List.tryFind (fun c -> c.name.ToLowerInvariant() = colName.ToLowerInvariant())
 
 /// Generate custom QueryBy method for views with tupled parameters
-let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotation: QueryByAnnotation) : string =
+let generateViewQueryBy
+  (useAsync: bool)
+  (viewName: string)
+  (columns: ViewColumn list)
+  (annotation: QueryByAnnotation)
+  : string =
   let typeName = capitalize viewName
 
   // 1. Build method name: GetByIdName
@@ -741,7 +1121,51 @@ let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotatio
     |> String.concat "\n          "
 
   // 7. Generate full method with tupled parameters
-  $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
+  if useAsync then
+    let asyncParamBindings =
+      annotation.columns
+      |> List.map (fun col ->
+        let columnDef = findViewColumn columns col |> Option.get
+
+        if columnDef.isNullable then
+          $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        else
+          $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+      |> String.concat "\n        "
+
+    let asyncFieldMappings =
+      columns
+      |> List.mapi (fun i col ->
+        let fieldName = capitalize col.name
+        let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+
+        if col.isNullable then
+          $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
+        else
+          $"{fieldName} = reader.Get{method} {i}")
+      |> String.concat "\n              "
+
+    $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("SELECT {columnNames} FROM {viewName} WHERE {whereClause}", tx.Connection, tx)
+        {asyncParamBindings}
+        use! reader = cmd.ExecuteReaderAsync()
+        let results = ResizeArray<{typeName}>()
+        let mutable hasMore = true
+        while hasMore do
+          let! next = reader.ReadAsync()
+          hasMore <- next
+          if hasMore then
+            results.Add({{
+              {asyncFieldMappings}
+            }})
+        return Ok(results |> Seq.toList)
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+  else
+    $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
     try
       use cmd = new SqliteCommand("SELECT {columnNames} FROM {viewName} WHERE {whereClause}", tx.Connection, tx)
       {paramBindings}
@@ -756,7 +1180,7 @@ let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotatio
     | :? SqliteException as ex -> Error ex"""
 
 /// Generate code for a view (read-only queries)
-let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<string, string> =
+let generateViewCode (useAsync: bool) (view: CreateView) (columns: ViewColumn list) : Result<string, string> =
   let typeName = capitalize view.name
 
   // Reject QueryByOrCreate annotations on views (views are read-only)
@@ -777,12 +1201,13 @@ let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<stri
     match firstError with
     | Some(Error msg) -> Error msg
     | _ ->
-      let getAllMethod = generateViewGetAll view.name columns
-      let getOneMethod = generateViewGetOne view.name columns
+      let getAllMethod = generateViewGetAll useAsync view.name columns
+      let getOneMethod = generateViewGetOne useAsync view.name columns
 
       // Generate QueryBy methods
       let queryByMethods =
-        view.queryByAnnotations |> List.map (generateViewQueryBy view.name columns)
+        view.queryByAnnotations
+        |> List.map (generateViewQueryBy useAsync view.name columns)
 
       let allMethods =
         [ getAllMethod; getOneMethod ] @ queryByMethods |> String.concat "\n\n"

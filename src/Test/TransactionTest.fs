@@ -14,7 +14,7 @@ let ``Insert method uses curried signature with tx last`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let code = QueryGenerator.generateInsert table
+    let code = QueryGenerator.generateInsert false table
     return code
   }
   |> function
@@ -30,7 +30,7 @@ let ``GetById method uses curried signature with tx last`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    return QueryGenerator.generateGet table
+    return QueryGenerator.generateGet false table
   }
   |> function
     | Ok(Some code) ->
@@ -46,7 +46,7 @@ let ``GetAll method uses curried signature`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let code = QueryGenerator.generateGetAll table
+    let code = QueryGenerator.generateGetAll false table
     return code
   }
   |> function
@@ -63,7 +63,7 @@ let ``Update method uses curried signature with tx last`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    return QueryGenerator.generateUpdate table
+    return QueryGenerator.generateUpdate false table
   }
   |> function
     | Ok(Some code) ->
@@ -79,7 +79,7 @@ let ``Delete method uses curried signature with tx last`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    return QueryGenerator.generateDelete table
+    return QueryGenerator.generateDelete false table
   }
   |> function
     | Ok(Some code) ->
@@ -95,7 +95,7 @@ let ``Generated table code uses curried signatures for all methods`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let! code = QueryGenerator.generateTableCode table
+    let! code = QueryGenerator.generateTableCode false table
     return code
   }
   |> function

@@ -129,3 +129,5 @@ type NormalizedSchemaError =
   | InvalidNaming of table: string * expected: string
   /// Extension table FK column is not the PK (must be 1:1 relationship)
   | ForeignKeyNotPrimaryKey of extension: string * fkColumn: string
+  /// Extension table has columns with same names as base table (excluding FK)
+  | DuplicateColumnNames of extension: string * baseTable: string * columns: string list

@@ -138,7 +138,7 @@ let ``QueryByOrCreate generates method with correct name for single column`` () 
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let! code = QueryGenerator.generateTableCode table
+    let! code = QueryGenerator.generateTableCode false table
     return code
   }
   |> function
@@ -163,7 +163,7 @@ let ``QueryByOrCreate generates method with tupled parameters for multiple colum
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let! code = QueryGenerator.generateTableCode table
+    let! code = QueryGenerator.generateTableCode false table
     return code
   }
   |> function
@@ -189,7 +189,7 @@ let ``QueryByOrCreate generates correct WHERE clause for single column`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let! code = QueryGenerator.generateTableCode table
+    let! code = QueryGenerator.generateTableCode false table
     return code
   }
   |> function
@@ -210,7 +210,7 @@ let ``QueryByOrCreate generates correct WHERE clause for multiple columns`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let! code = QueryGenerator.generateTableCode table
+    let! code = QueryGenerator.generateTableCode false table
     return code
   }
   |> function
@@ -232,7 +232,7 @@ let ``QueryByOrCreate returns Result of single item type`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let! code = QueryGenerator.generateTableCode table
+    let! code = QueryGenerator.generateTableCode false table
     return code
   }
   |> function
@@ -265,7 +265,7 @@ let ``QueryByOrCreate handles nullable columns with option types`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let! code = QueryGenerator.generateTableCode table
+    let! code = QueryGenerator.generateTableCode false table
     return code
   }
   |> function
@@ -289,7 +289,7 @@ let ``QueryByOrCreate includes Insert fallback logic`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let! code = QueryGenerator.generateTableCode table
+    let! code = QueryGenerator.generateTableCode false table
     return code
   }
   |> function
@@ -312,7 +312,7 @@ let ``QueryByOrCreate generates multiple methods when multiple annotations prese
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let! code = QueryGenerator.generateTableCode table
+    let! code = QueryGenerator.generateTableCode false table
     return code
   }
   |> function
@@ -338,7 +338,7 @@ let ``QueryByOrCreate works with normalized tables`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
-    let! code = normalized |> List.head |> NormalizedQueryGenerator.generateNormalizedTableCode
+    let! code = NormalizedQueryGenerator.generateNormalizedTableCode false (normalized |> List.head)
     return code
   }
   |> function
@@ -367,7 +367,7 @@ let ``QueryByOrCreate with normalized table uses NewType for insert`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
-    let! code = normalized |> List.head |> NormalizedQueryGenerator.generateNormalizedTableCode
+    let! code = NormalizedQueryGenerator.generateNormalizedTableCode false (normalized |> List.head)
     return code
   }
   |> function
@@ -389,7 +389,7 @@ let ``QueryByOrCreate with normalized table generates LEFT JOIN query`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
-    let! code = normalized |> List.head |> NormalizedQueryGenerator.generateNormalizedTableCode
+    let! code = NormalizedQueryGenerator.generateNormalizedTableCode false (normalized |> List.head)
     return code
   }
   |> function
@@ -415,7 +415,7 @@ let ``QueryByOrCreate on view fails validation`` () =
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let view = parsed.views |> List.head
     let! columns = ViewIntrospection.getViewColumns parsed.tables view
-    let! code = QueryGenerator.generateViewCode view columns
+    let! code = QueryGenerator.generateViewCode false view columns
     return code
   }
   |> function
@@ -439,7 +439,7 @@ let ``QueryByOrCreate with invalid column name fails validation`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let! code = QueryGenerator.generateTableCode table
+    let! code = QueryGenerator.generateTableCode false table
     return code
   }
   |> function
@@ -459,7 +459,7 @@ let ``QueryByOrCreate validation is case-insensitive`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let! code = QueryGenerator.generateTableCode table
+    let! code = QueryGenerator.generateTableCode false table
     return code
   }
   |> function
@@ -479,7 +479,7 @@ let ``QueryByOrCreate with multiple invalid columns shows first error`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    let! code = QueryGenerator.generateTableCode table
+    let! code = QueryGenerator.generateTableCode false table
     return code
   }
   |> function
@@ -500,7 +500,7 @@ let ``QueryByOrCreate validation error for normalized tables`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
-    let! code = normalized |> List.head |> NormalizedQueryGenerator.generateNormalizedTableCode
+    let! code = NormalizedQueryGenerator.generateNormalizedTableCode false (normalized |> List.head)
     return code
   }
   |> function

@@ -222,7 +222,10 @@ let private generatePositionalPattern (columns: ColumnDef list) (targetFieldName
       let fieldName = TypeGenerator.toPascalCase col.name
 
       if fieldName = targetFieldName then
-        let varName = fieldName.ToLower().[0..0] + (if fieldName.Length > 1 then fieldName.[1..] else "")
+        let varName =
+          fieldName.ToLower().[0..0]
+          + (if fieldName.Length > 1 then fieldName.[1..] else "")
+
         varName
       else
         "_")
@@ -231,7 +234,9 @@ let private generatePositionalPattern (columns: ColumnDef list) (targetFieldName
 
   let varName =
     let fieldName = targetFieldName
-    fieldName.ToLower().[0..0] + (if fieldName.Length > 1 then fieldName.[1..] else "")
+
+    fieldName.ToLower().[0..0]
+    + (if fieldName.Length > 1 then fieldName.[1..] else "")
 
   (pattern, varName)
 

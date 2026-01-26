@@ -13,7 +13,7 @@ type CodeGenStats =
     GeneratedFiles: string list }
 
 /// Generate F# code for a single SQL file and return statistics
-let generateCodeForSqlFile (sqlFilePath: string) : Result<string * int * int * int, string> =
+let generateCodeForSqlFile (useAsync: bool) (sqlFilePath: string) : Result<string * int * int * int, string> =
   result {
     let! sqlContent =
       try
@@ -43,7 +43,7 @@ let generateCodeForSqlFile (sqlFilePath: string) : Result<string * int * int * i
       regularTables
       |> List.traverseResultM (fun table ->
         result {
-          let! code = QueryGenerator.generateTableCode table
+          let! code = QueryGenerator.generateTableCode useAsync table
           return [ code; "" ]
         })
       |> Result.map List.concat
@@ -53,7 +53,7 @@ let generateCodeForSqlFile (sqlFilePath: string) : Result<string * int * int * i
       normalizedTables
       |> List.traverseResultM (fun normalized ->
         result {
-          let! code = NormalizedQueryGenerator.generateNormalizedTableCode normalized
+          let! code = NormalizedQueryGenerator.generateNormalizedTableCode useAsync normalized
           return [ code; "" ]
         })
       |> Result.map List.concat
@@ -63,7 +63,7 @@ let generateCodeForSqlFile (sqlFilePath: string) : Result<string * int * int * i
       viewsWithColumns
       |> List.traverseResultM (fun (view, columns) ->
         result {
-          let! code = QueryGenerator.generateViewCode view columns
+          let! code = QueryGenerator.generateViewCode useAsync view columns
           return [ code; "" ]
         })
       |> Result.map List.concat
@@ -73,6 +73,10 @@ let generateCodeForSqlFile (sqlFilePath: string) : Result<string * int * int * i
       [ yield $"module {moduleName}"
         yield ""
         yield "open System"
+
+        if useAsync then
+          yield "open System.Threading.Tasks"
+
         yield "open Microsoft.Data.Sqlite"
         yield "open FsToolkit.ErrorHandling"
         yield "open migrate.Db"
@@ -111,7 +115,7 @@ let generateCodeForSqlFile (sqlFilePath: string) : Result<string * int * int * i
   }
 
 /// Generate F# code for all SQL files in a directory
-let generateCode (schemaDirectory: string) : Result<CodeGenStats, string> =
+let generateCode (useAsync: bool) (schemaDirectory: string) : Result<CodeGenStats, string> =
   result {
     let! sqlFiles =
       try
@@ -122,7 +126,7 @@ let generateCode (schemaDirectory: string) : Result<CodeGenStats, string> =
     if sqlFiles.IsEmpty then
       return! Error $"No SQL files found in {schemaDirectory}"
 
-    let! results = sqlFiles |> List.traverseResultM generateCodeForSqlFile
+    let! results = sqlFiles |> List.traverseResultM (generateCodeForSqlFile useAsync)
 
     // Aggregate statistics
     let generatedFiles = results |> List.map (fun (file, _, _, _) -> file)

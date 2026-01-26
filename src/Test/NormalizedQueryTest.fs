@@ -24,7 +24,7 @@ let ``GetAll method is generated with correct signature`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
-    return normalized |> List.head |> NormalizedQueryGenerator.generateGetAll
+    return NormalizedQueryGenerator.generateGetAll false (normalized |> List.head)
   }
   |> function
     | Ok code ->
@@ -49,7 +49,7 @@ let ``GetAll uses LEFT JOIN for extension tables`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
-    return normalized |> List.head |> NormalizedQueryGenerator.generateGetAll
+    return NormalizedQueryGenerator.generateGetAll false (normalized |> List.head)
   }
   |> function
     | Ok code -> Assert.Contains("LEFT JOIN student_address ext0 ON student.id = ext0.student_id", code)
@@ -73,7 +73,7 @@ let ``GetAll has case selection logic with NULL checks`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
-    return normalized |> List.head |> NormalizedQueryGenerator.generateGetAll
+    return NormalizedQueryGenerator.generateGetAll false (normalized |> List.head)
   }
   |> function
     | Ok code ->
@@ -109,7 +109,7 @@ let ``GetAll with multiple extensions generates proper pattern matching`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
-    return normalized |> List.head |> NormalizedQueryGenerator.generateGetAll
+    return NormalizedQueryGenerator.generateGetAll false (normalized |> List.head)
   }
   |> function
     | Ok code ->
@@ -145,7 +145,7 @@ let ``GetById method is generated with WHERE clause`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
-    return normalized |> List.head |> NormalizedQueryGenerator.generateGetById
+    return NormalizedQueryGenerator.generateGetById false (normalized |> List.head)
   }
   |> function
     | Ok(Some code) ->
@@ -177,7 +177,7 @@ let ``GetById uses same LEFT JOIN and case selection as GetAll`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
-    return normalized |> List.head |> NormalizedQueryGenerator.generateGetById
+    return NormalizedQueryGenerator.generateGetById false (normalized |> List.head)
   }
   |> function
     | Ok(Some code) ->
@@ -206,7 +206,7 @@ let ``GetOne method is generated with LIMIT 1`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
-    return normalized |> List.head |> NormalizedQueryGenerator.generateGetOne
+    return NormalizedQueryGenerator.generateGetOne false (normalized |> List.head)
   }
   |> function
     | Ok code ->
@@ -232,7 +232,7 @@ let ``generateNormalizedTableCode includes all query methods`` () =
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
-    let! code = normalized |> List.head |> NormalizedQueryGenerator.generateNormalizedTableCode
+    let! code = NormalizedQueryGenerator.generateNormalizedTableCode false (normalized |> List.head)
     return code
   }
   |> function

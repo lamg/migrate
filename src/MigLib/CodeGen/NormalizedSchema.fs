@@ -182,6 +182,16 @@ let formatError (error: NormalizedSchemaError) : string =
     + "  For 1:1 relationships, the FK must also be the PK (enforces at most one extension per base record)\n"
     + $"  Suggestion: Make '{fkColumn}' the PRIMARY KEY of table '{extension}'"
 
+  | DuplicateColumnNames(extension, baseTable, columns) ->
+    let columnList = columns |> String.concat ", "
+
+    $"Extension table '{extension}' has columns with same names as base table '{baseTable}': {columnList}\n"
+    + "  F# discriminated unions cannot have duplicate field names in a single case.\n"
+    + $"  Suggestion: Rename the duplicate columns in '{extension}' to be unique, e.g.:\n"
+    + (columns
+       |> List.map (fun col -> $"    {col} -> {extension}_{col}")
+       |> String.concat "\n")
+
 /// Get all nullable columns from a table.
 let private getNullableColumns (table: CreateTable) : string list =
   table.columns
@@ -215,14 +225,7 @@ let private validateExtensionTable
         )
       | Some(fkCol, fk) ->
         // Check 4: FK should reference the base table
-        if fk.refTable = baseTable.name then
-          Ok(
-            Some
-              { table = potentialExtension
-                aspectName = aspectName
-                fkColumn = fkCol }
-          )
-        else
+        if fk.refTable <> baseTable.name then
           Error(
             InvalidForeignKey(
               potentialExtension.name,
@@ -230,6 +233,29 @@ let private validateExtensionTable
               $"FK references '{fk.refTable}' instead of '{baseTable.name}'"
             )
           )
+        else
+          // Check 5: Extension columns (excluding FK) should not have same names as base columns
+          let baseColumnNames =
+            baseTable.columns |> List.map (fun c -> c.name) |> Set.ofList
+
+          let extensionColumnNames =
+            potentialExtension.columns
+            |> List.filter (fun c -> c.name <> fkCol)
+            |> List.map (fun c -> c.name)
+
+          let duplicates =
+            extensionColumnNames
+            |> List.filter (fun name -> Set.contains name baseColumnNames)
+
+          if not (List.isEmpty duplicates) then
+            Error(DuplicateColumnNames(potentialExtension.name, baseTable.name, duplicates))
+          else
+            Ok(
+              Some
+                { table = potentialExtension
+                  aspectName = aspectName
+                  fkColumn = fkCol }
+            )
 
 /// Validate and find all extension tables for a given base table.
 /// Returns Ok(extensions) or Error(validation errors).

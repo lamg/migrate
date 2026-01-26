@@ -37,7 +37,7 @@ let ``End-to-end code generation with normalized schema`` () =
     File.WriteAllText(sqlFile, sqlContent)
 
     // Generate code
-    let result = CodeGen.generateCode tempDir
+    let result = CodeGen.generateCode false tempDir
 
     match result with
     | Ok stats ->
@@ -105,7 +105,7 @@ let ``Code generation with mixed normalized and regular tables`` () =
     let sqlFile = Path.Combine(tempDir, "schema.sql")
     File.WriteAllText(sqlFile, sqlContent)
 
-    let result = CodeGen.generateCode tempDir
+    let result = CodeGen.generateCode false tempDir
 
     match result with
     | Ok stats ->
@@ -155,7 +155,7 @@ let ``Code generation with multiple extensions`` () =
     let sqlFile = Path.Combine(tempDir, "schema.sql")
     File.WriteAllText(sqlFile, sqlContent)
 
-    let result = CodeGen.generateCode tempDir
+    let result = CodeGen.generateCode false tempDir
 
     match result with
     | Ok stats ->
@@ -217,7 +217,7 @@ let ``Code generation statistics are accurate`` () =
     File.WriteAllText(Path.Combine(tempDir, "students.sql"), sql1)
     File.WriteAllText(Path.Combine(tempDir, "staff.sql"), sql2)
 
-    let result = CodeGen.generateCode tempDir
+    let result = CodeGen.generateCode false tempDir
 
     match result with
     | Ok stats ->
@@ -254,7 +254,7 @@ let ``Generated code includes convenience properties`` () =
     let sqlFile = Path.Combine(tempDir, "schema.sql")
     File.WriteAllText(sqlFile, sqlContent)
 
-    let result = CodeGen.generateCode tempDir
+    let result = CodeGen.generateCode false tempDir
 
     match result with
     | Ok stats ->
