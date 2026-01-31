@@ -10,7 +10,7 @@ open type Fabulous.AST.Ast
 
 /// Build a try/with expression that catches SqliteException and returns Error ex.
 /// bodyExprs: sequence of computation expression statements (OtherExpr values)
-let trySqliteException (bodyExprs: WidgetBuilder<ComputationExpressionStatement> seq) =
+let trySqliteException (bodyExprs: WidgetBuilder<Expr> seq) =
   TryWithExpr(CompExprBodyExpr bodyExprs, [ MatchClauseExpr(":? SqliteException as ex", ConstantExpr "Error ex") ])
 
 /// Build a try/with expression for async code that catches SqliteException and returns Error ex.
@@ -46,7 +46,7 @@ let private formatConfig =
 /// body: the method body expression
 let generateStaticMemberCode typeName memberName returnType body =
   let oak =
-    Ast.Oak() { AnonymousModule() { Augmentation(typeName) { staticMember memberName body returnType } } }
+    Ast.Oak() { AnonymousModule() { Augmentation typeName { staticMember memberName body returnType } } }
     |> Gen.mkOak
     |> Gen.run
 
@@ -58,3 +58,6 @@ let generateStaticMemberCode typeName memberName returnType body =
   let lines = formatted.Code.Split '\n'
   let memberLines = lines |> Array.skip 1
   memberLines |> String.concat "\n"
+
+let pipeIgnore (expr: WidgetBuilder<Expr>) =
+  InfixAppExpr(expr, "|>", Constant "ignore")

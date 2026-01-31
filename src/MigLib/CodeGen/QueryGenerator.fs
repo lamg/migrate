@@ -5,6 +5,11 @@ open migrate.CodeGen.ViewIntrospection
 open migrate.CodeGen.AstExprBuilders
 open Fabulous.AST
 open type Fabulous.AST.Ast
+open Fabulous.AST
+open Microsoft.Data.Sqlite
+open Fabulous.AST
+open Fabulous.AST
+open Fabulous.AST
 
 /// Create indentation string with given number of spaces
 let indent n = String.replicate n " "
@@ -236,13 +241,13 @@ let generateGet (useAsync: bool) (table: CreateTable) : string option =
       // Generate parameter binding statements
       let paramBindingStmts =
         pks
-        |> List.map (fun pk -> OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+        |> List.map (fun pk -> ConstantExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
 
       let bodyExprs =
-        [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)" ]
+        [ ConstantExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)" ]
         @ paramBindingStmts
-        @ [ OtherExpr "use reader = cmd.ExecuteReader()"
-            OtherExpr $"if reader.Read() then Ok(Some {{ {fieldMappings} }}) else Ok None" ]
+        @ [ ConstantExpr "use reader = cmd.ExecuteReader()"
+            ConstantExpr $"if reader.Read() then Ok(Some {{ {fieldMappings} }}) else Ok None" ]
 
       let memberName = $"GetById {paramList} (tx: SqliteTransaction)"
       let returnType = $"Result<{typeName} option, SqliteException>"
@@ -306,11 +311,11 @@ let generateGetAll (useAsync: bool) (table: CreateTable) : string =
   else
     // Build the sync method body using AST
     let bodyExprs =
-      [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
-        OtherExpr "use reader = cmd.ExecuteReader()"
-        OtherExpr $"let results = ResizeArray<{typeName}>()"
-        OtherExpr $"while reader.Read() do results.Add({{ {fieldMappings} }})"
-        OtherExpr "Ok(results |> Seq.toList)" ]
+      [ ConstantExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
+        ConstantExpr "use reader = cmd.ExecuteReader()"
+        ConstantExpr $"let results = ResizeArray<{typeName}>()"
+        ConstantExpr $"while reader.Read() do results.Add({{ {fieldMappings} }})"
+        ConstantExpr "Ok(results |> Seq.toList)" ]
 
     let memberName = "GetAll (tx: SqliteTransaction)"
     let returnType = $"Result<{typeName} list, SqliteException>"
@@ -371,9 +376,9 @@ let generateGetOne (useAsync: bool) (table: CreateTable) : string =
   else
     // Build the sync method body using AST
     let bodyExprs =
-      [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
-        OtherExpr "use reader = cmd.ExecuteReader()"
-        OtherExpr $"if reader.Read() then Ok(Some {{ {fieldMappings} }}) else Ok None" ]
+      [ ConstantExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
+        ConstantExpr "use reader = cmd.ExecuteReader()"
+        ConstantExpr $"if reader.Read() then Ok(Some {{ {fieldMappings} }}) else Ok None" ]
 
     let memberName = "GetOne (tx: SqliteTransaction)"
     let returnType = $"Result<{typeName} option, SqliteException>"
@@ -411,10 +416,23 @@ let generateUpdate (useAsync: bool) (table: CreateTable) : string option =
         let isNullable = TypeGenerator.isColumnNullable col
 
         if isNullable then
-          $"cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+          let matchExpr =
+            ParenExpr(
+              MatchExpr(
+                ConstantExpr $"item.{fieldName}",
+                [ MatchClauseExpr("Some v", "box v"); MatchClauseExpr("None", "box DBNull.Value") ]
+              )
+            )
+
+          let addWithValue =
+            AppExpr("cmd.Parameters.AddWithValue", [ ConstantExpr $"\"@{col.name}\""; matchExpr ])
+
+          pipeIgnore addWithValue
         else
-          $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
-      |> String.concat "\n      "
+          let addWithValue =
+            AppExpr("cmd.Parameters.AddWithValue", [ ConstantExpr $"\"@{col.name}\""; ConstantExpr $"item.{fieldName}" ])
+
+          pipeIgnore addWithValue)
 
     if useAsync then
       let asyncParamBindings =
@@ -441,15 +459,15 @@ let generateUpdate (useAsync: bool) (table: CreateTable) : string option =
       | :? SqliteException as ex -> return Error ex
     }}"""
     else
-      Some
-        $"""  static member Update (item: {typeName}) (tx: SqliteTransaction) : Result<unit, SqliteException> =
-    try
-      use cmd = new SqliteCommand("{updateSql}", tx.Connection, tx)
-      {paramBindings}
-      cmd.ExecuteNonQuery() |> ignore
-      Ok()
-    with
-    | :? SqliteException as ex -> Error ex"""
+      let bodyExprs =
+        [ ConstantExpr $"use cmd = new SqliteCommand(\"{updateSql}\", tx.Connection, tx)" ]
+        @ paramBindings
+        @ [ ConstantExpr "cmd.ExecuteNonQuery() |> ignore"; ConstantExpr "Ok()" ]
+
+      let memberName = $"Update (item: {typeName}) (tx: SqliteTransaction)"
+      let returnType = "Result<unit, SqliteException>"
+      let body = trySqliteException bodyExprs
+      Some(generateStaticMemberCode typeName memberName returnType body)
 
 /// Generate DELETE method (transaction-only) using Fabulous.AST
 let generateDelete (useAsync: bool) (table: CreateTable) : string option =
@@ -476,7 +494,7 @@ let generateDelete (useAsync: bool) (table: CreateTable) : string option =
     // Generate parameter binding statements
     let paramBindingStmts =
       pks
-      |> List.map (fun pk -> OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+      |> List.map (fun pk -> ConstantExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
 
     if useAsync then
       // Keep async version as string template for now (task CE with try/with is complex)
@@ -499,9 +517,9 @@ let generateDelete (useAsync: bool) (table: CreateTable) : string option =
     else
       // Build the sync method body using AST
       let bodyExprs =
-        [ OtherExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)" ]
+        [ ConstantExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)" ]
         @ paramBindingStmts
-        @ [ OtherExpr "cmd.ExecuteNonQuery() |> ignore"; OtherExpr "Ok()" ]
+        @ [ ConstantExpr "cmd.ExecuteNonQuery() |> ignore"; ConstantExpr "Ok()" ]
 
       let memberName = $"Delete {paramList} (tx: SqliteTransaction)"
       let returnType = "Result<unit, SqliteException>"
