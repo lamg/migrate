@@ -11,6 +11,8 @@ Refactoring `QueryGenerator.fs` and `NormalizedQueryGenerator.fs` to use Fabulou
 | AstExprBuilders.fs | ✅ Complete | Helper module created |
 | generateDelete (sync) | ✅ Complete | Migrated to AST |
 | generateGetAll (sync) | ✅ Complete | Migrated to AST |
+| generateGetOne (sync) | ✅ Complete | Migrated to AST |
+| generateGet (sync) | ✅ Complete | Migrated to AST |
 | Async methods | ⏸️ Deferred | Task CE is complex; keeping string templates |
 | Remaining sync methods | 🔲 Pending | See list below |
 
@@ -85,8 +87,8 @@ let private formatConfig =
 | Method | Complexity | Pattern | Status |
 |--------|------------|---------|--------|
 | `generateInsert` | Medium | Insert + last_insert_rowid | 🔲 Pending |
-| `generateGet` | Medium | Single row reader | 🔲 Pending |
-| `generateGetOne` | Low | Single row reader (LIMIT 1) | 🔲 Pending |
+| `generateGet` | Medium | Single row reader | ✅ Complete |
+| `generateGetOne` | Low | Single row reader (LIMIT 1) | ✅ Complete |
 | `generateUpdate` | Medium | Parameter bindings | 🔲 Pending |
 | `generateQueryBy` | Medium | Reader loop with WHERE | 🔲 Pending |
 | `generateQueryByOrCreate` | High | Conditional insert/select | 🔲 Pending |

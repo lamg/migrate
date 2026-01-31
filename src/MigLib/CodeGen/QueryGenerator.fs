@@ -156,7 +156,7 @@ let generateInsert (useAsync: bool) (table: CreateTable) : string =
     with
     | :? SqliteException as ex -> Error ex"""
 
-/// Generate GET by ID method (transaction-only)
+/// Generate GET by ID method (transaction-only) using Fabulous.AST for sync version
 let generateGet (useAsync: bool) (table: CreateTable) : string option =
   let typeName = capitalize table.name
   let pkCols = getPrimaryKey table
@@ -180,12 +180,7 @@ let generateGet (useAsync: bool) (table: CreateTable) : string option =
         $"({pk.name}: {pkType})")
       |> String.concat " "
 
-    // Generate parameter bindings
-    let paramBindings =
-      pks
-      |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
-      |> String.concat "\n      "
-
+    // Generate field mappings for record literal: "Field1 = reader.GetType 0; Field2 = ..."
     let fieldMappings =
       table.columns
       |> List.mapi (fun i col ->
@@ -197,9 +192,10 @@ let generateGet (useAsync: bool) (table: CreateTable) : string option =
           $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
         else
           $"{fieldName} = reader.Get{method} {i}")
-      |> String.concat "\n        "
+      |> String.concat "; "
 
     if useAsync then
+      // Keep async version as string template for now (task CE is complex)
       let asyncParamBindings =
         pks
         |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
@@ -236,20 +232,23 @@ let generateGet (useAsync: bool) (table: CreateTable) : string option =
       | :? SqliteException as ex -> return Error ex
     }}"""
     else
-      Some
-        $"""  static member GetById {paramList} (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
-    try
-      use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
-      {paramBindings}
-      use reader = cmd.ExecuteReader()
-      if reader.Read() then
-        Ok(Some {{
-        {fieldMappings}
-        }})
-      else
-        Ok None
-    with
-    | :? SqliteException as ex -> Error ex"""
+      // Build the sync method body using AST
+      // Generate parameter binding statements
+      let paramBindingStmts =
+        pks
+        |> List.map (fun pk -> OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+
+      let bodyExprs =
+        [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)" ]
+        @ paramBindingStmts
+        @ [ OtherExpr "use reader = cmd.ExecuteReader()"
+            OtherExpr $"if reader.Read() then Ok(Some {{ {fieldMappings} }}) else Ok None" ]
+
+      let memberName = $"GetById {paramList} (tx: SqliteTransaction)"
+      let returnType = $"Result<{typeName} option, SqliteException>"
+      let body = trySqliteException bodyExprs
+
+      Some(generateStaticMemberCode typeName memberName returnType body)
 
 /// Generate GET ALL method (transaction-only) using Fabulous.AST for sync version
 let generateGetAll (useAsync: bool) (table: CreateTable) : string =
@@ -319,12 +318,13 @@ let generateGetAll (useAsync: bool) (table: CreateTable) : string =
 
     generateStaticMemberCode typeName memberName returnType body
 
-/// Generate GET ONE method (transaction-only)
+/// Generate GET ONE method (transaction-only) using Fabulous.AST for sync version
 let generateGetOne (useAsync: bool) (table: CreateTable) : string =
   let typeName = capitalize table.name
   let columnNames = table.columns |> List.map (fun c -> c.name) |> String.concat ", "
   let getSql = $"SELECT {columnNames} FROM {table.name} LIMIT 1"
 
+  // Generate field mappings for record literal: "Field1 = reader.GetType 0; Field2 = ..."
   let fieldMappings =
     table.columns
     |> List.mapi (fun i col ->
@@ -336,9 +336,10 @@ let generateGetOne (useAsync: bool) (table: CreateTable) : string =
         $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
       else
         $"{fieldName} = reader.Get{method} {i}")
-    |> String.concat "\n        "
+    |> String.concat "; "
 
   if useAsync then
+    // Keep async version as string template for now (task CE is complex)
     let asyncFieldMappings =
       table.columns
       |> List.mapi (fun i col ->
@@ -368,18 +369,17 @@ let generateGetOne (useAsync: bool) (table: CreateTable) : string =
       | :? SqliteException as ex -> return Error ex
     }}"""
   else
-    $"""  static member GetOne (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
-    try
-      use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
-      use reader = cmd.ExecuteReader()
-      if reader.Read() then
-        Ok(Some {{
-        {fieldMappings}
-        }})
-      else
-        Ok None
-    with
-    | :? SqliteException as ex -> Error ex"""
+    // Build the sync method body using AST
+    let bodyExprs =
+      [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
+        OtherExpr "use reader = cmd.ExecuteReader()"
+        OtherExpr $"if reader.Read() then Ok(Some {{ {fieldMappings} }}) else Ok None" ]
+
+    let memberName = "GetOne (tx: SqliteTransaction)"
+    let returnType = $"Result<{typeName} option, SqliteException>"
+    let body = trySqliteException bodyExprs
+
+    generateStaticMemberCode typeName memberName returnType body
 
 /// Generate UPDATE method (transaction-only)
 let generateUpdate (useAsync: bool) (table: CreateTable) : string option =
