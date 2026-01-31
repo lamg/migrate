@@ -4,23 +4,47 @@
 
 Refactoring `QueryGenerator.fs` and `NormalizedQueryGenerator.fs` to use Fabulous.AST v2's DSL instead of string templates for generating F# code. This provides type-safe code generation with automatic Fantomas formatting.
 
+## Key Accomplishments
+
+✅ **12 methods successfully migrated** (9 table methods + 3 view methods)
+- All sync CRUD operations (Insert, Get, GetAll, GetOne, Update, Delete)
+- Custom query methods (QueryBy, QueryByOrCreate)
+- All view read operations (GetAll, GetOne, QueryBy)
+
+✅ **Established consistent patterns** for AST-based code generation
+- Parameter bindings with `ParenExpr` + `MatchExpr` + `AppExpr` for nullable handling
+- Statement sequences using `ConstantExpr` and `trySqliteException`
+- Helper functions (`pipeIgnore`, `returnOk`) for common patterns
+
+✅ **Test compatibility maintained**
+- All 135 tests passing throughout migration
+- Updated test expectations for multi-line match expression formatting
+- Preserved functional behavior while improving code structure
+
 ## Status Summary
 
-| Component | Status | Notes |
-|-----------|--------|-------|
-| AstExprBuilders.fs | ✅ Complete | Helper module created with pipeIgnore |
-| generateDelete (sync) | ✅ Complete | Migrated to AST |
-| generateGetAll (sync) | ✅ Complete | Migrated to AST |
-| generateGetOne (sync) | ✅ Complete | Migrated to AST |
-| generateGet (sync) | ✅ Complete | Migrated to AST |
-| generateUpdate (sync) | ✅ Complete | Migrated to AST with ParenExpr for match |
-| generateInsert (sync) | ✅ Complete | Migrated to AST with match expressions |
-| generateQueryBy (sync) | ✅ Complete | Migrated to AST with match expressions |
-| generateQueryByOrCreate (sync) | ✅ Complete | Hybrid AST + ConstantExpr for complex logic |
-| Async methods | ⏸️ Deferred | Task CE is complex; keeping string templates |
-| Remaining sync methods | 🔲 Pending | See Phase 3 below |
+**Overall Progress:** 9/14 sync methods migrated (64%)
+
+| Phase | Component | Status | Notes |
+|-------|-----------|--------|-------|
+| 1 | AstExprBuilders.fs | ✅ Complete | Helper module with pipeIgnore, returnOk |
+| 2 | generateDelete (sync) | ✅ Complete | Migrated to AST |
+| 2 | generateGetAll (sync) | ✅ Complete | Migrated to AST |
+| 2 | generateGetOne (sync) | ✅ Complete | Migrated to AST |
+| 2 | generateGet (sync) | ✅ Complete | Migrated to AST |
+| 2 | generateUpdate (sync) | ✅ Complete | Migrated to AST with ParenExpr for match |
+| 2 | generateInsert (sync) | ✅ Complete | Migrated to AST with match expressions |
+| 2 | generateQueryBy (sync) | ✅ Complete | Migrated to AST with match expressions |
+| 2 | generateQueryByOrCreate (sync) | ✅ Complete | Hybrid AST + ConstantExpr for complex logic |
+| 3 | generateViewGetAll (sync) | ✅ Complete | Migrated to AST |
+| 3 | generateViewGetOne (sync) | ✅ Complete | Migrated to AST |
+| 3 | generateViewQueryBy (sync) | ✅ Complete | Migrated to AST with match expressions |
+| 4 | Normalized methods (5) | 🔲 Pending | High complexity multi-table operations |
+| 5 | Async methods | ⏸️ Deferred | Task CE is complex; keeping string templates |
 
 **Test Status:** All 135 tests passing
+
+**Phases Complete:** 3/5 (Phases 1-3 ✅, Phase 4 pending, Phase 5 deferred)
 
 ---
 
@@ -101,9 +125,9 @@ let private formatConfig =
 
 | Method | Complexity | Pattern | Status |
 |--------|------------|---------|--------|
-| `generateViewGetAll` | Low | Reader loop | 🔲 Pending |
-| `generateViewGetOne` | Low | Single row reader | 🔲 Pending |
-| `generateViewQueryBy` | Medium | Reader loop with WHERE | 🔲 Pending |
+| `generateViewGetAll` | Low | Reader loop | ✅ Complete |
+| `generateViewGetOne` | Low | Single row reader | ✅ Complete |
+| `generateViewQueryBy` | Medium | Reader loop with WHERE | ✅ Complete |
 
 ### Phase 4: NormalizedQueryGenerator.fs Sync Methods
 
@@ -166,6 +190,54 @@ Run `dotnet test` to verify output matches expected format.
 
 ---
 
+## Key Learnings
+
+### AST vs String Templates
+
+**When AST builders work well:**
+- Simple parameter bindings with `AppExpr` and `pipeIgnore`
+- Match expressions for nullable handling with `ParenExpr` + `MatchExpr`
+- Sequential statements with `ConstantExpr` lists
+- Try/with blocks with `trySqliteException`
+
+**When to use ConstantExpr with strings:**
+- Complex control flow (nested if/then/else with matches)
+- Very long single-line expressions that Fantomas would reformat anyway
+- When the AST structure becomes more complex than the code it represents
+
+**Hybrid approach:**
+For complex methods like `generateQueryByOrCreate`, use AST builders for repetitive patterns (parameter bindings) and `ConstantExpr` for complex control flow.
+
+### Formatting Changes
+
+**Multi-line match expressions:**
+Fabulous.AST + Fantomas formats match expressions across multiple lines, even when originally single-line. Tests need to check for component parts rather than exact strings.
+
+**Before (string template):**
+```fsharp
+"match email with Some v -> box v | None -> box DBNull.Value"
+```
+
+**After (AST generated):**
+```fsharp
+match email with
+| Some v -> box v
+| None -> box DBNull.Value
+```
+
+**Test updates required:**
+```fsharp
+// Old: Assert.Contains("match email with Some v -> box v | None -> box DBNull.Value", code)
+// New:
+Assert.Contains("match email with", code)
+Assert.Contains("Some v -> box v", code)
+Assert.Contains("None -> box DBNull.Value", code)
+```
+
+### Comments Not Preserved
+
+AST-generated code doesn't preserve comments from string templates. Tests checking for specific comments (e.g., "Not found - insert and fetch") need to be updated to check for functional code elements instead.
+
 ## Common Pitfalls
 
 1. **Type annotations** - `OtherExpr` returns `WidgetBuilder<ComputationExpressionStatement>`, not `WidgetBuilder<Expr>`
@@ -178,13 +250,37 @@ Run `dotnet test` to verify output matches expected format.
 
 5. **Record literals in loops** - Fantomas expands `{ A = x; B = y }` to multi-line format; this is acceptable
 
+6. **Field mapping separators** - Use semicolons (`;`) for inline record literals, not newlines (`\n`)
+
+---
+
+## Next Steps: Phase 4 - Normalized Schema Methods
+
+Phase 4 involves migrating methods in `NormalizedQueryGenerator.fs` that handle normalized schemas (2NF) with discriminated unions. These methods are significantly more complex:
+
+**Challenges:**
+- Multi-table operations (insert/query across linked tables)
+- Discriminated union construction from query results
+- Complex match expressions for union case handling
+- Cascading operations (e.g., delete with dependent tables)
+
+**Methods to migrate:**
+1. `generateInsert` - Multi-table insert with union construction
+2. `generateGetById` - Multi-table join with union matching
+3. `generateGetAll` - Multi-table reader loop with union construction
+4. `generateUpdate` - Multi-table update with union deconstruction
+5. `generateDelete` - Cascading delete across dependent tables
+
+**Recommendation:** These methods may benefit from continuing the hybrid approach (AST for repetitive patterns, ConstantExpr for complex logic) established in `generateQueryByOrCreate`.
+
 ---
 
 ## What Stays as Strings
 
-- **SQL queries** - Embedded in OtherExpr as interpolated strings
-- **Async methods** - Task CE with try/with is complex
+- **SQL queries** - Embedded in ConstantExpr as interpolated strings
+- **Async methods** - Task CE with try/with is complex; deferred to Phase 5
 - **ProjectGenerator.fs** - Generates XML, not F#
+- **Complex control flow** - Nested if/then/else with multiple match expressions
 
 ---
 

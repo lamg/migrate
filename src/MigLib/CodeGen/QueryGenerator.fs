@@ -977,12 +977,13 @@ let generateTableCode (useAsync: bool) (table: CreateTable) : Result<string, str
       $"""type {typeName} with
 {allMethods}"""
 
-/// Generate GetAll method for a view (read-only)
+/// Generate GetAll method for a view (read-only) using Fabulous.AST for sync version
 let generateViewGetAll (useAsync: bool) (viewName: string) (columns: ViewColumn list) : string =
   let typeName = capitalize viewName
   let columnNames = columns |> List.map (fun c -> c.name) |> String.concat ", "
   let getSql = $"SELECT {columnNames} FROM {viewName}"
 
+  // Generate field mappings for record literal (semicolon-separated for inline)
   let fieldMappings =
     columns
     |> List.mapi (fun i col ->
@@ -993,9 +994,10 @@ let generateViewGetAll (useAsync: bool) (viewName: string) (columns: ViewColumn 
         $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
       else
         $"{fieldName} = reader.Get{method} {i}")
-    |> String.concat "\n          "
+    |> String.concat "; "
 
   if useAsync then
+    // Keep async version as string template for now (task CE is complex)
     let asyncFieldMappings =
       columns
       |> List.mapi (fun i col ->
@@ -1027,25 +1029,27 @@ let generateViewGetAll (useAsync: bool) (viewName: string) (columns: ViewColumn 
       | :? SqliteException as ex -> return Error ex
     }}"""
   else
-    $"""  static member GetAll (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
-    try
-      use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
-      use reader = cmd.ExecuteReader()
-      let results = ResizeArray<{typeName}>()
-      while reader.Read() do
-        results.Add({{
-          {fieldMappings}
-        }})
-      Ok(results |> Seq.toList)
-    with
-    | :? SqliteException as ex -> Error ex"""
+    // Build the sync method body using AST
+    let bodyExprs =
+      [ ConstantExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
+        ConstantExpr "use reader = cmd.ExecuteReader()"
+        ConstantExpr $"let results = ResizeArray<{typeName}>()"
+        ConstantExpr $"while reader.Read() do results.Add({{ {fieldMappings} }})"
+        ConstantExpr "Ok(results |> Seq.toList)" ]
 
-/// Generate GET ONE method for a view (read-only)
+    let memberName = "GetAll (tx: SqliteTransaction)"
+    let returnType = $"Result<{typeName} list, SqliteException>"
+    let body = trySqliteException bodyExprs
+
+    generateStaticMemberCode typeName memberName returnType body
+
+/// Generate GET ONE method for a view (read-only) using Fabulous.AST for sync version
 let generateViewGetOne (useAsync: bool) (viewName: string) (columns: ViewColumn list) : string =
   let typeName = capitalize viewName
   let columnNames = columns |> List.map (fun c -> c.name) |> String.concat ", "
   let getSql = $"SELECT {columnNames} FROM {viewName} LIMIT 1"
 
+  // Generate field mappings for record literal (semicolon-separated for inline)
   let fieldMappings =
     columns
     |> List.mapi (fun i col ->
@@ -1056,9 +1060,10 @@ let generateViewGetOne (useAsync: bool) (viewName: string) (columns: ViewColumn 
         $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
       else
         $"{fieldName} = reader.Get{method} {i}")
-    |> String.concat "\n        "
+    |> String.concat "; "
 
   if useAsync then
+    // Keep async version as string template for now (task CE is complex)
     let asyncFieldMappings =
       columns
       |> List.mapi (fun i col ->
@@ -1087,18 +1092,17 @@ let generateViewGetOne (useAsync: bool) (viewName: string) (columns: ViewColumn 
       | :? SqliteException as ex -> return Error ex
     }}"""
   else
-    $"""  static member GetOne (tx: SqliteTransaction) : Result<{typeName} option, SqliteException> =
-    try
-      use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
-      use reader = cmd.ExecuteReader()
-      if reader.Read() then
-        Ok(Some {{
-        {fieldMappings}
-        }})
-      else
-        Ok None
-    with
-    | :? SqliteException as ex -> Error ex"""
+    // Build the sync method body using AST
+    let bodyExprs =
+      [ ConstantExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
+        ConstantExpr "use reader = cmd.ExecuteReader()"
+        ConstantExpr $"if reader.Read() then Ok(Some {{ {fieldMappings} }}) else Ok None" ]
+
+    let memberName = "GetOne (tx: SqliteTransaction)"
+    let returnType = $"Result<{typeName} option, SqliteException>"
+    let body = trySqliteException bodyExprs
+
+    generateStaticMemberCode typeName memberName returnType body
 
 /// Validate QueryBy annotation for view references existing columns (case-insensitive)
 let validateViewQueryByAnnotation
@@ -1124,7 +1128,7 @@ let findViewColumn (columns: ViewColumn list) (colName: string) : ViewColumn opt
   columns
   |> List.tryFind (fun c -> c.name.ToLowerInvariant() = colName.ToLowerInvariant())
 
-/// Generate custom QueryBy method for views with tupled parameters
+/// Generate custom QueryBy method for views with tupled parameters using Fabulous.AST for sync version
 let generateViewQueryBy
   (useAsync: bool)
   (viewName: string)
@@ -1155,22 +1159,10 @@ let generateViewQueryBy
     |> List.map (fun col -> $"{col} = @{col}")
     |> String.concat " AND "
 
-  // 4. Build parameter bindings
-  let paramBindings =
-    annotation.columns
-    |> List.map (fun col ->
-      let columnDef = findViewColumn columns col |> Option.get
-
-      if columnDef.isNullable then
-        $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
-      else
-        $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
-    |> String.concat "\n      "
-
   // 5. Get column names for SELECT
   let columnNames = columns |> List.map (fun c -> c.name) |> String.concat ", "
 
-  // 6. Generate field mappings for reader
+  // 6. Generate field mappings for reader (semicolon-separated for inline)
   let fieldMappings =
     columns
     |> List.mapi (fun i col ->
@@ -1181,10 +1173,11 @@ let generateViewQueryBy
         $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
       else
         $"{fieldName} = reader.Get{method} {i}")
-    |> String.concat "\n          "
+    |> String.concat "; "
 
   // 7. Generate full method with tupled parameters
   if useAsync then
+    // Keep async version as string template for now (task CE is complex)
     let asyncParamBindings =
       annotation.columns
       |> List.map (fun col ->
@@ -1228,19 +1221,46 @@ let generateViewQueryBy
       | :? SqliteException as ex -> return Error ex
     }}"""
   else
-    $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
-    try
-      use cmd = new SqliteCommand("SELECT {columnNames} FROM {viewName} WHERE {whereClause}", tx.Connection, tx)
-      {paramBindings}
-      use reader = cmd.ExecuteReader()
-      let results = ResizeArray<{typeName}>()
-      while reader.Read() do
-        results.Add({{
-          {fieldMappings}
-        }})
-      Ok(results |> Seq.toList)
-    with
-    | :? SqliteException as ex -> Error ex"""
+    // Build the sync method body using AST
+    let paramBindingStmts =
+      annotation.columns
+      |> List.map (fun col ->
+        let columnDef = findViewColumn columns col |> Option.get
+
+        if columnDef.isNullable then
+          let matchExpr =
+            ParenExpr(
+              MatchExpr(
+                ConstantExpr col,
+                [ MatchClauseExpr("Some v", "box v")
+                  MatchClauseExpr("None", "box DBNull.Value") ]
+              )
+            )
+
+          let addWithValue =
+            AppExpr("cmd.Parameters.AddWithValue", [ ConstantExpr $"\"@{col}\""; matchExpr ])
+
+          pipeIgnore addWithValue
+        else
+          let addWithValue =
+            AppExpr("cmd.Parameters.AddWithValue", [ ConstantExpr $"\"@{col}\""; ConstantExpr col ])
+
+          pipeIgnore addWithValue)
+
+    let bodyExprs =
+      ConstantExpr
+        $"use cmd = new SqliteCommand(\"SELECT {columnNames} FROM {viewName} WHERE {whereClause}\", tx.Connection, tx)"
+      :: paramBindingStmts
+      @ [ ConstantExpr "use reader = cmd.ExecuteReader()"
+          ConstantExpr $"let results = ResizeArray<{typeName}>()"
+          ConstantExpr $"while reader.Read() do results.Add({{ {fieldMappings} }})"
+          ConstantExpr "Ok(results |> Seq.toList)" ]
+
+    let memberName = $"{methodName} ({parameters}) (tx: SqliteTransaction)"
+    let returnType = $"Result<{typeName} list, SqliteException>"
+    let body = trySqliteException bodyExprs
+
+    generateStaticMemberCode typeName memberName returnType body
 
 /// Generate code for a view (read-only queries)
 let generateViewCode (useAsync: bool) (view: CreateView) (columns: ViewColumn list) : Result<string, string> =
