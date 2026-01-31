@@ -6,15 +6,17 @@ Refactoring `QueryGenerator.fs` and `NormalizedQueryGenerator.fs` to use Fabulou
 
 ## Key Accomplishments
 
-✅ **12 methods successfully migrated** (9 table methods + 3 view methods)
+✅ **18 methods successfully migrated** (9 table methods + 3 view methods + 6 normalized methods)
 - All sync CRUD operations (Insert, Get, GetAll, GetOne, Update, Delete)
 - Custom query methods (QueryBy, QueryByOrCreate)
 - All view read operations (GetAll, GetOne, QueryBy)
+- All normalized table sync methods (Insert, GetById, GetAll, GetOne, Update, Delete)
 
 ✅ **Established consistent patterns** for AST-based code generation
 - Parameter bindings with `ParenExpr` + `MatchExpr` + `AppExpr` for nullable handling
 - Statement sequences using `ConstantExpr` and `trySqliteException`
 - Helper functions (`pipeIgnore`, `returnOk`) for common patterns
+- Hybrid approach for complex normalized tables: AST for simple cases, string templates for extension tables
 
 ✅ **Test compatibility maintained**
 - All 135 tests passing throughout migration
@@ -23,7 +25,7 @@ Refactoring `QueryGenerator.fs` and `NormalizedQueryGenerator.fs` to use Fabulou
 
 ## Status Summary
 
-**Overall Progress:** 9/14 sync methods migrated (64%)
+**Overall Progress:** 18/18 sync methods migrated (100%)
 
 | Phase | Component | Status | Notes |
 |-------|-----------|--------|-------|
@@ -39,12 +41,17 @@ Refactoring `QueryGenerator.fs` and `NormalizedQueryGenerator.fs` to use Fabulou
 | 3 | generateViewGetAll (sync) | ✅ Complete | Migrated to AST |
 | 3 | generateViewGetOne (sync) | ✅ Complete | Migrated to AST |
 | 3 | generateViewQueryBy (sync) | ✅ Complete | Migrated to AST with match expressions |
-| 4 | Normalized methods (5) | 🔲 Pending | High complexity multi-table operations |
+| 4 | Normalized generateDelete | ✅ Complete | Full AST migration |
+| 4 | Normalized generateGetOne | ✅ Complete | Hybrid: AST for simple, string for extensions |
+| 4 | Normalized generateGetById | ✅ Complete | Hybrid: AST for simple, string for extensions |
+| 4 | Normalized generateGetAll | ✅ Complete | Hybrid: AST for simple, string for extensions |
+| 4 | Normalized generateInsert | ✅ Complete | Hybrid: AST for simple, string for extensions |
+| 4 | Normalized generateUpdate | ✅ Complete | Hybrid: AST for simple, string for extensions |
 | 5 | Async methods | ⏸️ Deferred | Task CE is complex; keeping string templates |
 
 **Test Status:** All 135 tests passing
 
-**Phases Complete:** 3/5 (Phases 1-3 ✅, Phase 4 pending, Phase 5 deferred)
+**Phases Complete:** 4/5 (Phases 1-4 ✅, Phase 5 deferred)
 
 ---
 
@@ -129,15 +136,20 @@ let private formatConfig =
 | `generateViewGetOne` | Low | Single row reader | ✅ Complete |
 | `generateViewQueryBy` | Medium | Reader loop with WHERE | ✅ Complete |
 
-### Phase 4: NormalizedQueryGenerator.fs Sync Methods
+### Phase 4: NormalizedQueryGenerator.fs Sync Methods (Complete)
 
 | Method | Complexity | Pattern | Status |
 |--------|------------|---------|--------|
-| `generateInsert` | High | Multi-table insert with match | 🔲 Pending |
-| `generateGetById` | High | Multi-table query with match | 🔲 Pending |
-| `generateGetAll` | High | Multi-table reader loop | 🔲 Pending |
-| `generateUpdate` | High | Multi-table update with match | 🔲 Pending |
-| `generateDelete` | Medium | Cascading delete | 🔲 Pending |
+| `generateDelete` | Medium | Simple DELETE with PK params | ✅ Complete (Full AST) |
+| `generateGetOne` | Medium | Case selection with extensions | ✅ Complete (Hybrid) |
+| `generateGetById` | Medium | Case selection with PK params | ✅ Complete (Hybrid) |
+| `generateGetAll` | Medium | While loop with case selection | ✅ Complete (Hybrid) |
+| `generateInsert` | High | Multi-table insert with match | ✅ Complete (Hybrid) |
+| `generateUpdate` | High | Multi-table update with match | ✅ Complete (Hybrid) |
+
+**Approach Used:** Hybrid strategy based on complexity:
+- **Simple case (no extensions):** Full AST migration using `trySqliteException`, `ConstantExpr`, `generateStaticMemberCode`
+- **Complex case (with extensions):** String template for body due to multi-line match expressions and `generateCaseSelection` logic
 
 ### Phase 5: Async Methods (Optional)
 
@@ -254,24 +266,27 @@ AST-generated code doesn't preserve comments from string templates. Tests checki
 
 ---
 
-## Next Steps: Phase 4 - Normalized Schema Methods
+## Phase 4 Complete: Normalized Schema Methods
 
-Phase 4 involves migrating methods in `NormalizedQueryGenerator.fs` that handle normalized schemas (2NF) with discriminated unions. These methods are significantly more complex:
+Phase 4 successfully migrated all 6 sync methods in `NormalizedQueryGenerator.fs` that handle normalized schemas (2NF) with discriminated unions.
 
-**Challenges:**
-- Multi-table operations (insert/query across linked tables)
-- Discriminated union construction from query results
-- Complex match expressions for union case handling
-- Cascading operations (e.g., delete with dependent tables)
+**Approach:** Hybrid strategy based on complexity:
 
-**Methods to migrate:**
-1. `generateInsert` - Multi-table insert with union construction
-2. `generateGetById` - Multi-table join with union matching
-3. `generateGetAll` - Multi-table reader loop with union construction
-4. `generateUpdate` - Multi-table update with union deconstruction
-5. `generateDelete` - Cascading delete across dependent tables
+| Scenario | Approach | Rationale |
+|----------|----------|-----------|
+| No extensions | Full AST | Simple base record, straightforward logic |
+| With extensions | String template for body | Complex `generateCaseSelection` with NULL checks, multi-line match patterns |
 
-**Recommendation:** These methods may benefit from continuing the hybrid approach (AST for repetitive patterns, ConstantExpr for complex logic) established in `generateQueryByOrCreate`.
+**Key Implementation Details:**
+
+1. **generateDelete** - Full AST migration (simplest method, no DU matching needed)
+2. **generateGetOne/GetById/GetAll** - Hybrid: AST for no-extension case, string template when extensions require `generateCaseSelection`
+3. **generateInsert/Update** - Hybrid: AST for base-only DU case with embedded match expression, string template for multi-table operations with extensions
+
+**What Stays as String Templates:**
+- `generateBaseCase` and `generateExtensionCase` helpers (produce match arms)
+- `generateCaseSelection` helper (NULL checks + match patterns for DU construction)
+- Complex control flow in extension table operations
 
 ---
 
@@ -281,6 +296,7 @@ Phase 4 involves migrating methods in `NormalizedQueryGenerator.fs` that handle 
 - **Async methods** - Task CE with try/with is complex; deferred to Phase 5
 - **ProjectGenerator.fs** - Generates XML, not F#
 - **Complex control flow** - Nested if/then/else with multiple match expressions
+- **Normalized table extension cases** - `generateCaseSelection`, `generateBaseCase`, `generateExtensionCase` helpers produce complex multi-line match arms that don't fit cleanly into AST builders
 
 ---
 
@@ -289,13 +305,13 @@ Phase 4 involves migrating methods in `NormalizedQueryGenerator.fs` that handle 
 ```
 src/MigLib/CodeGen/
 ├── FabulousAstHelpers.fs    # Low-level Oak AST helpers
-├── AstExprBuilders.fs       # High-level query generation helpers (NEW)
+├── AstExprBuilders.fs       # High-level query generation helpers
 ├── ViewIntrospection.fs
 ├── TypeGenerator.fs         # Already uses Fabulous.AST
 ├── NormalizedSchema.fs
 ├── NormalizedTypeGenerator.fs # Already uses Fabulous.AST
-├── NormalizedQueryGenerator.fs # Needs migration
-├── QueryGenerator.fs        # Partially migrated
+├── NormalizedQueryGenerator.fs # Sync methods migrated (hybrid approach)
+├── QueryGenerator.fs        # Sync methods migrated
 ├── FileMapper.fs
 ├── ProjectGenerator.fs      # Keep as strings (XML)
 └── CodeGen.fs
@@ -307,8 +323,10 @@ src/MigLib/CodeGen/
 
 Before marking a method as complete:
 
-- [ ] `dotnet build` succeeds
-- [ ] `dotnet test` passes (all 135 tests)
-- [ ] `dotnet fantomas .` produces no changes
-- [ ] Generated code compiles in target projects
-- [ ] Output format matches original (modulo acceptable Fantomas differences)
+- [x] `dotnet build` succeeds
+- [x] `dotnet test` passes (all 135 tests)
+- [x] `dotnet fantomas .` produces no changes
+- [x] Generated code compiles in target projects
+- [x] Output format matches original (modulo acceptable Fantomas differences)
+
+**Phase 4 Verification:** All checks passed on 2026-02-01

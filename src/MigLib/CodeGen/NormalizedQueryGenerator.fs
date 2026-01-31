@@ -3,6 +3,9 @@
 module internal migrate.CodeGen.NormalizedQueryGenerator
 
 open migrate.DeclarativeMigrations.Types
+open migrate.CodeGen.AstExprBuilders
+open Fabulous.AST
+open type Fabulous.AST.Ast
 
 // =============================================================================
 // Helper Functions
@@ -221,7 +224,44 @@ let generateInsert (useAsync: bool) (normalized: NormalizedTable) : string =
       with
       | :? SqliteException as ex -> return Error ex
     }}"""
+  else if normalized.extensions.IsEmpty then
+    // Simple case - no extensions, use AST with embedded match expression
+    let insertColumns = getInsertColumns normalized.baseTable
+    let insertSql = generateInsertSql normalized.baseTable.name insertColumns
+    let fieldPattern = generateFieldPattern insertColumns
+
+    let paramBindingStmts =
+      insertColumns
+      |> List.map (fun col ->
+        let fieldName = TypeGenerator.toPascalCase col.name
+
+        let varName =
+          fieldName.ToLower().[0..0]
+          + (if fieldName.Length > 1 then fieldName.[1..] else "")
+
+        let isNullable = TypeGenerator.isColumnNullable col
+
+        if isNullable then
+          ConstantExpr
+            $"cmd.Parameters.AddWithValue(\"@{col.name}\", match {varName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        else
+          ConstantExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", {varName}) |> ignore")
+
+    let bodyExprs =
+      [ ConstantExpr $"match item with New{typeName}.Base({fieldPattern}) ->" ]
+      @ [ ConstantExpr $"use cmd = new SqliteCommand(\"{insertSql}\", tx.Connection, tx)" ]
+      @ paramBindingStmts
+      @ [ pipeIgnore (ConstantExpr "cmd.ExecuteNonQuery()")
+          ConstantExpr "use lastIdCmd = new SqliteCommand(\"SELECT last_insert_rowid()\", tx.Connection, tx)"
+          ConstantExpr $"let {normalized.baseTable.name}Id = lastIdCmd.ExecuteScalar() |> unbox<int64>"
+          ConstantExpr $"Ok {normalized.baseTable.name}Id" ]
+
+    let memberName = $"Insert (item: New{typeName}) (tx: SqliteTransaction)"
+    let returnType = "Result<int64, SqliteException>"
+    let body = trySqliteException bodyExprs
+    generateStaticMemberCode typeName memberName returnType body
   else
+    // Complex case with extensions - keep as string template
     $"""  static member Insert (item: New{typeName}) (tx: SqliteTransaction)
     : Result<int64, SqliteException> =
     try
@@ -422,7 +462,23 @@ let generateGetAll (useAsync: bool) (normalized: NormalizedTable) : string =
       with
       | :? SqliteException as ex -> return Error ex
     }}"""
+  else if normalized.extensions.IsEmpty then
+    // Simple case - no extensions, use AST
+    let baseFields = generateBaseFieldReads normalized.baseTable 0 |> String.concat "; "
+
+    let bodyExprs =
+      [ ConstantExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
+        ConstantExpr "use reader = cmd.ExecuteReader()"
+        ConstantExpr $"let results = ResizeArray<{typeName}>()"
+        ConstantExpr $"while reader.Read() do results.Add({typeName}.Base({{ {baseFields} }}))"
+        ConstantExpr "Ok(results |> Seq.toList)" ]
+
+    let memberName = "GetAll (tx: SqliteTransaction)"
+    let returnType = $"Result<{typeName} list, SqliteException>"
+    let body = trySqliteException bodyExprs
+    generateStaticMemberCode typeName memberName returnType body
   else
+    // Complex case with extensions - keep as string template
     let caseSelection =
       generateCaseSelection 10 normalized.baseTable normalized.extensions typeName
 
@@ -501,7 +557,26 @@ let generateGetById (useAsync: bool) (normalized: NormalizedTable) : string opti
       with
       | :? SqliteException as ex -> return Error ex
     }}"""
+    else if normalized.extensions.IsEmpty then
+      // Simple case - no extensions, use AST
+      let paramBindingStmts =
+        pks
+        |> List.map (fun pk -> ConstantExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+
+      let baseFields = generateBaseFieldReads normalized.baseTable 0 |> String.concat "; "
+
+      let bodyExprs =
+        [ ConstantExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)" ]
+        @ paramBindingStmts
+        @ [ ConstantExpr "use reader = cmd.ExecuteReader()"
+            ConstantExpr $"if reader.Read() then Ok(Some({typeName}.Base({{ {baseFields} }}))) else Ok None" ]
+
+      let memberName = $"GetById {paramList} (tx: SqliteTransaction)"
+      let returnType = $"Result<{typeName} option, SqliteException>"
+      let body = trySqliteException bodyExprs
+      Some(generateStaticMemberCode typeName memberName returnType body)
     else
+      // Complex case with extensions - keep as string template
       let caseSelection =
         generateCaseSelection 10 normalized.baseTable normalized.extensions typeName
 
@@ -553,7 +628,25 @@ let generateGetOne (useAsync: bool) (normalized: NormalizedTable) : string =
       with
       | :? SqliteException as ex -> return Error ex
     }}"""
+  else if
+    // Build the sync method body using AST
+    // For normalized tables with extensions, embed entire if/else logic
+    normalized.extensions.IsEmpty
+  then
+    // Simple case - no extensions, use base record directly
+    let baseFields = generateBaseFieldReads normalized.baseTable 0 |> String.concat "; "
+
+    let bodyExprs =
+      [ ConstantExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
+        ConstantExpr "use reader = cmd.ExecuteReader()"
+        ConstantExpr $"if reader.Read() then Ok(Some({typeName}.Base({{ {baseFields} }}))) else Ok None" ]
+
+    let memberName = "GetOne (tx: SqliteTransaction)"
+    let returnType = $"Result<{typeName} option, SqliteException>"
+    let body = trySqliteException bodyExprs
+    generateStaticMemberCode typeName memberName returnType body
   else
+    // Complex case with extensions - keep as string template for the body
     let caseSelection =
       generateCaseSelection 10 normalized.baseTable normalized.extensions typeName
 
@@ -793,7 +886,40 @@ let generateUpdate (useAsync: bool) (normalized: NormalizedTable) : string optio
       with
       | :? SqliteException as ex -> return Error ex
     }}"""
+    else if normalized.extensions.IsEmpty then
+      // Simple case - no extensions, use AST
+      let updateSql = generateUpdateBaseSql normalized.baseTable
+      let fieldPattern = generateFieldPattern normalized.baseTable.columns
+
+      let paramBindingStmts =
+        normalized.baseTable.columns
+        |> List.map (fun col ->
+          let fieldName = TypeGenerator.toPascalCase col.name
+
+          let varName =
+            fieldName.ToLower().[0..0]
+            + (if fieldName.Length > 1 then fieldName.[1..] else "")
+
+          let isNullable = TypeGenerator.isColumnNullable col
+
+          if isNullable then
+            ConstantExpr
+              $"cmd.Parameters.AddWithValue(\"@{col.name}\", match {varName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+          else
+            ConstantExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", {varName}) |> ignore")
+
+      let bodyExprs =
+        [ ConstantExpr $"match item with {typeName}.Base({fieldPattern}) ->" ]
+        @ [ ConstantExpr $"use cmd = new SqliteCommand(\"{updateSql}\", tx.Connection, tx)" ]
+        @ paramBindingStmts
+        @ returnOk (ConstantExpr "cmd.ExecuteNonQuery()")
+
+      let memberName = $"Update (item: {typeName}) (tx: SqliteTransaction)"
+      let returnType = "Result<unit, SqliteException>"
+      let body = trySqliteException bodyExprs
+      Some(generateStaticMemberCode typeName memberName returnType body)
     else
+      // Complex case with extensions - keep as string template
       Some
         $"""  static member Update (item: {typeName}) (tx: SqliteTransaction)
     : Result<unit, SqliteException> =
@@ -824,11 +950,6 @@ let generateDelete (useAsync: bool) (normalized: NormalizedTable) : string optio
         $"({pk.name}: {pkType})")
       |> String.concat " "
 
-    let paramBindings =
-      pks
-      |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
-      |> String.concat "\n      "
-
     if useAsync then
       let asyncParamBindings =
         pks
@@ -848,16 +969,21 @@ let generateDelete (useAsync: bool) (normalized: NormalizedTable) : string optio
       | :? SqliteException as ex -> return Error ex
     }}"""
     else
-      Some
-        $"""  static member Delete {paramList} (tx: SqliteTransaction)
-    : Result<unit, SqliteException> =
-    try
-      use cmd = new SqliteCommand("{deleteSql}", tx.Connection, tx)
-      {paramBindings}
-      cmd.ExecuteNonQuery() |> ignore
-      Ok()
-    with
-    | :? SqliteException as ex -> Error ex"""
+      // Build the sync method body using AST
+      let paramBindingStmts =
+        pks
+        |> List.map (fun pk -> ConstantExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+
+      let bodyExprs =
+        ConstantExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)"
+        :: paramBindingStmts
+        @ returnOk (ConstantExpr "cmd.ExecuteNonQuery()")
+
+      let memberName = $"Delete {paramList} (tx: SqliteTransaction)"
+      let returnType = "Result<unit, SqliteException>"
+      let body = trySqliteException bodyExprs
+
+      Some(generateStaticMemberCode typeName memberName returnType body)
 
 /// Get all columns from normalized table (base + all extensions)
 let private getAllNormalizedColumns (normalized: NormalizedTable) : (string * ColumnDef) list =
