@@ -420,7 +420,8 @@ let generateUpdate (useAsync: bool) (table: CreateTable) : string option =
             ParenExpr(
               MatchExpr(
                 ConstantExpr $"item.{fieldName}",
-                [ MatchClauseExpr("Some v", "box v"); MatchClauseExpr("None", "box DBNull.Value") ]
+                [ MatchClauseExpr("Some v", "box v")
+                  MatchClauseExpr("None", "box DBNull.Value") ]
               )
             )
 
@@ -430,7 +431,10 @@ let generateUpdate (useAsync: bool) (table: CreateTable) : string option =
           pipeIgnore addWithValue
         else
           let addWithValue =
-            AppExpr("cmd.Parameters.AddWithValue", [ ConstantExpr $"\"@{col.name}\""; ConstantExpr $"item.{fieldName}" ])
+            AppExpr(
+              "cmd.Parameters.AddWithValue",
+              [ ConstantExpr $"\"@{col.name}\""; ConstantExpr $"item.{fieldName}" ]
+            )
 
           pipeIgnore addWithValue)
 
@@ -460,9 +464,9 @@ let generateUpdate (useAsync: bool) (table: CreateTable) : string option =
     }}"""
     else
       let bodyExprs =
-        [ ConstantExpr $"use cmd = new SqliteCommand(\"{updateSql}\", tx.Connection, tx)" ]
-        @ paramBindings
-        @ [ ConstantExpr "cmd.ExecuteNonQuery() |> ignore"; ConstantExpr "Ok()" ]
+        ConstantExpr $"use cmd = new SqliteCommand(\"{updateSql}\", tx.Connection, tx)"
+        :: paramBindings
+        @ returnOk (ConstantExpr "cmd.ExecuteNonQuery()")
 
       let memberName = $"Update (item: {typeName}) (tx: SqliteTransaction)"
       let returnType = "Result<unit, SqliteException>"
@@ -517,9 +521,9 @@ let generateDelete (useAsync: bool) (table: CreateTable) : string option =
     else
       // Build the sync method body using AST
       let bodyExprs =
-        [ ConstantExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)" ]
-        @ paramBindingStmts
-        @ [ ConstantExpr "cmd.ExecuteNonQuery() |> ignore"; ConstantExpr "Ok()" ]
+        ConstantExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)"
+        :: paramBindingStmts
+        @ returnOk (ConstantExpr "cmd.ExecuteNonQuery()")
 
       let memberName = $"Delete {paramList} (tx: SqliteTransaction)"
       let returnType = "Result<unit, SqliteException>"

@@ -61,3 +61,6 @@ let generateStaticMemberCode typeName memberName returnType body =
 
 let pipeIgnore (expr: WidgetBuilder<Expr>) =
   InfixAppExpr(expr, "|>", Constant "ignore")
+
+let returnOk (expr: WidgetBuilder<Expr>) =
+  [ pipeIgnore expr; ConstantExpr "Ok()" ]
