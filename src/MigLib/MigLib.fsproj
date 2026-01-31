@@ -35,6 +35,7 @@
     <Compile Include="Execution\Exec.fs" />
     <Compile Include="MigrationLog\ExecAndLog.fs" />
     <Compile Include="CodeGen\FabulousAstHelpers.fs" />
+    <Compile Include="CodeGen\AstExprBuilders.fs" />
     <Compile Include="CodeGen\ViewIntrospection.fs" />
     <Compile Include="CodeGen\TypeGenerator.fs" />
     <Compile Include="CodeGen\NormalizedSchema.fs" />

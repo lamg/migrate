@@ -235,8 +235,7 @@ let private validateExtensionTable
           )
         else
           // Check 5: Extension columns (excluding FK) should not have same names as base columns
-          let baseColumnNames =
-            baseTable.columns |> List.map (fun c -> c.name) |> Set.ofList
+          let baseColumnNames = baseTable.columns |> List.map (fun c -> c.name) |> Set.ofList
 
           let extensionColumnNames =
             potentialExtension.columns

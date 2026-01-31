@@ -2,6 +2,7 @@ module internal migrate.CodeGen.QueryGenerator
 
 open migrate.DeclarativeMigrations.Types
 open migrate.CodeGen.ViewIntrospection
+open migrate.CodeGen.AstExprBuilders
 open Fabulous.AST
 open type Fabulous.AST.Ast
 
@@ -250,12 +251,13 @@ let generateGet (useAsync: bool) (table: CreateTable) : string option =
     with
     | :? SqliteException as ex -> Error ex"""
 
-/// Generate GET ALL method (transaction-only)
+/// Generate GET ALL method (transaction-only) using Fabulous.AST for sync version
 let generateGetAll (useAsync: bool) (table: CreateTable) : string =
   let typeName = capitalize table.name
   let columnNames = table.columns |> List.map (fun c -> c.name) |> String.concat ", "
   let getSql = $"SELECT {columnNames} FROM {table.name}"
 
+  // Generate field mappings for record literal: "Field1 = reader.GetType 0; Field2 = ..."
   let fieldMappings =
     table.columns
     |> List.mapi (fun i col ->
@@ -267,9 +269,10 @@ let generateGetAll (useAsync: bool) (table: CreateTable) : string =
         $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
       else
         $"{fieldName} = reader.Get{method} {i}")
-    |> String.concat "\n          "
+    |> String.concat "; "
 
   if useAsync then
+    // Keep async version as string template for now (task CE is complex)
     let asyncFieldMappings =
       table.columns
       |> List.mapi (fun i col ->
@@ -302,18 +305,19 @@ let generateGetAll (useAsync: bool) (table: CreateTable) : string =
       | :? SqliteException as ex -> return Error ex
     }}"""
   else
-    $"""  static member GetAll (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
-    try
-      use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
-      use reader = cmd.ExecuteReader()
-      let results = ResizeArray<{typeName}>()
-      while reader.Read() do
-        results.Add({{
-          {fieldMappings}
-        }})
-      Ok(results |> Seq.toList)
-    with
-    | :? SqliteException as ex -> Error ex"""
+    // Build the sync method body using AST
+    let bodyExprs =
+      [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
+        OtherExpr "use reader = cmd.ExecuteReader()"
+        OtherExpr $"let results = ResizeArray<{typeName}>()"
+        OtherExpr $"while reader.Read() do results.Add({{ {fieldMappings} }})"
+        OtherExpr "Ok(results |> Seq.toList)" ]
+
+    let memberName = "GetAll (tx: SqliteTransaction)"
+    let returnType = $"Result<{typeName} list, SqliteException>"
+    let body = trySqliteException bodyExprs
+
+    generateStaticMemberCode typeName memberName returnType body
 
 /// Generate GET ONE method (transaction-only)
 let generateGetOne (useAsync: bool) (table: CreateTable) : string =
@@ -447,8 +451,9 @@ let generateUpdate (useAsync: bool) (table: CreateTable) : string option =
     with
     | :? SqliteException as ex -> Error ex"""
 
-/// Generate DELETE method (transaction-only)
+/// Generate DELETE method (transaction-only) using Fabulous.AST
 let generateDelete (useAsync: bool) (table: CreateTable) : string option =
+  let typeName = capitalize table.name
   let pkCols = getPrimaryKey table
 
   match pkCols with
@@ -468,13 +473,13 @@ let generateDelete (useAsync: bool) (table: CreateTable) : string option =
         $"({pk.name}: {pkType})")
       |> String.concat " "
 
-    // Generate parameter bindings
-    let paramBindings =
+    // Generate parameter binding statements
+    let paramBindingStmts =
       pks
-      |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
-      |> String.concat "\n      "
+      |> List.map (fun pk -> OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
 
     if useAsync then
+      // Keep async version as string template for now (task CE with try/with is complex)
       let asyncParamBindings =
         pks
         |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
@@ -492,15 +497,17 @@ let generateDelete (useAsync: bool) (table: CreateTable) : string option =
       | :? SqliteException as ex -> return Error ex
     }}"""
     else
-      Some
-        $"""  static member Delete {paramList} (tx: SqliteTransaction) : Result<unit, SqliteException> =
-    try
-      use cmd = new SqliteCommand("{deleteSql}", tx.Connection, tx)
-      {paramBindings}
-      cmd.ExecuteNonQuery() |> ignore
-      Ok()
-    with
-    | :? SqliteException as ex -> Error ex"""
+      // Build the sync method body using AST
+      let bodyExprs =
+        [ OtherExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)" ]
+        @ paramBindingStmts
+        @ [ OtherExpr "cmd.ExecuteNonQuery() |> ignore"; OtherExpr "Ok()" ]
+
+      let memberName = $"Delete {paramList} (tx: SqliteTransaction)"
+      let returnType = "Result<unit, SqliteException>"
+      let body = trySqliteException bodyExprs
+
+      Some(generateStaticMemberCode typeName memberName returnType body)
 
 /// Validate QueryBy annotation references existing columns (case-insensitive)
 let validateQueryByAnnotation (table: CreateTable) (annotation: QueryByAnnotation) : Result<unit, string> =

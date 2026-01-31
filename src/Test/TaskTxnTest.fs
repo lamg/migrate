@@ -9,7 +9,9 @@ open migrate.Db
 
 /// Helper to create a temp database file path
 let createTempDb () =
-  let tempPath = Path.Combine(Path.GetTempPath(), $"test_db_{System.Guid.NewGuid()}.db")
+  let tempPath =
+    Path.Combine(Path.GetTempPath(), $"test_db_{System.Guid.NewGuid()}.db")
+
   tempPath
 
 /// Helper to initialize a database with a test table
@@ -19,8 +21,7 @@ let initializeDb (dbPath: string) =
   conn.Open()
   use cmd = conn.CreateCommand()
 
-  cmd.CommandText <-
-    "CREATE TABLE test_table (id INTEGER PRIMARY KEY AUTOINCREMENT, value TEXT NOT NULL)"
+  cmd.CommandText <- "CREATE TABLE test_table (id INTEGER PRIMARY KEY AUTOINCREMENT, value TEXT NOT NULL)"
 
   cmd.ExecuteNonQuery() |> ignore
 
@@ -52,14 +53,15 @@ let ``taskTxn commits successful transaction`` () =
               return Ok rows
             }
 
-        return! fun (tx: SqliteTransaction) ->
-          task {
-            use cmd = tx.Connection.CreateCommand()
-            cmd.Transaction <- tx
-            cmd.CommandText <- "INSERT INTO test_table (value) VALUES ('test2')"
-            let! rows = cmd.ExecuteNonQueryAsync()
-            return Ok rows
-          }
+        return!
+          fun (tx: SqliteTransaction) ->
+            task {
+              use cmd = tx.Connection.CreateCommand()
+              cmd.Transaction <- tx
+              cmd.CommandText <- "INSERT INTO test_table (value) VALUES ('test2')"
+              let! rows = cmd.ExecuteNonQueryAsync()
+              return Ok rows
+            }
       }
 
     let result = insertTask.Result
@@ -95,19 +97,20 @@ let ``taskTxn rolls back on error`` () =
             }
 
         // This should fail due to constraint violation (inserting duplicate primary key)
-        return! fun (tx: SqliteTransaction) ->
-          task {
-            use cmd = tx.Connection.CreateCommand()
-            cmd.Transaction <- tx
-            // Force an error by inserting invalid SQL
-            cmd.CommandText <- "INSERT INTO nonexistent_table (value) VALUES ('test2')"
+        return!
+          fun (tx: SqliteTransaction) ->
+            task {
+              use cmd = tx.Connection.CreateCommand()
+              cmd.Transaction <- tx
+              // Force an error by inserting invalid SQL
+              cmd.CommandText <- "INSERT INTO nonexistent_table (value) VALUES ('test2')"
 
-            try
-              let! _ = cmd.ExecuteNonQueryAsync()
-              return Ok 1
-            with :? SqliteException as ex ->
-              return Error ex
-          }
+              try
+                let! _ = cmd.ExecuteNonQueryAsync()
+                return Ok 1
+              with :? SqliteException as ex ->
+                return Error ex
+            }
       }
 
     let result = insertTask.Result
@@ -202,9 +205,7 @@ let ``taskTxn handles database connection errors`` () =
   let dbPath = "/nonexistent/path/to/database.db"
 
   let insertTask =
-    taskTxn dbPath {
-      return! fun (tx: SqliteTransaction) -> task { return Ok "should not reach here" }
-    }
+    taskTxn dbPath { return! fun (tx: SqliteTransaction) -> task { return Ok "should not reach here" } }
 
   let result = insertTask.Result
 
