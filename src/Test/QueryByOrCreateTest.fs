@@ -273,7 +273,10 @@ let ``QueryByOrCreate handles nullable columns with option types`` () =
       Assert.Contains("(newItem: Student)", code)
       Assert.Contains("let email = newItem.Email", code)
       Assert.Contains("@email", code)
-      Assert.Contains("match email with Some v -> box v | None -> box DBNull.Value", code)
+      // After AST migration, match expressions are formatted across multiple lines
+      Assert.Contains("match email with", code)
+      Assert.Contains("Some v -> box v", code)
+      Assert.Contains("None -> box DBNull.Value", code)
       // Should NOT have email as separate parameter
       Assert.DoesNotContain("email: string option, newItem", code)
     | Error e -> Assert.Fail $"Code generation failed: {e}"
@@ -296,7 +299,8 @@ let ``QueryByOrCreate includes Insert fallback logic`` () =
     | Ok code ->
       Assert.Contains("Student.Insert newItem tx", code)
       Assert.Contains("Student.GetById", code)
-      Assert.Contains("Not found - insert and fetch", code)
+      // Comments are not preserved in AST-generated code
+      Assert.Contains("reader.Close()", code)
     | Error e -> Assert.Fail $"Code generation failed: {e}"
 
 [<Fact>]

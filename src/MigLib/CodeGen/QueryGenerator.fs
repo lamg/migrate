@@ -725,7 +725,7 @@ let validateQueryByOrCreateAnnotation
     Error
       $"QueryByOrCreate annotation references non-existent column '{invalidCol}' in table '{table.name}'. Available columns: {availableCols}"
 
-/// Generate custom QueryByOrCreate method that extracts query values from newItem
+/// Generate custom QueryByOrCreate method that extracts query values from newItem using Fabulous.AST for sync version
 let generateQueryByOrCreate (useAsync: bool) (table: CreateTable) (annotation: QueryByOrCreateAnnotation) : string =
   let typeName = capitalize table.name
   let pkCols = getPrimaryKey table
@@ -743,31 +743,10 @@ let generateQueryByOrCreate (useAsync: bool) (table: CreateTable) (annotation: Q
     |> List.map (fun col -> $"{col} = @{col}")
     |> String.concat " AND "
 
-  // 3. Generate value extraction from newItem
-  let valueExtractions =
-    annotation.columns
-    |> List.map (fun col ->
-      let fieldName = capitalize col
-      $"let {col} = newItem.{fieldName}")
-    |> String.concat "\n      "
-
-  // 4. Build parameter bindings (using extracted variables)
-  let paramBindings =
-    annotation.columns
-    |> List.map (fun col ->
-      let columnDef = findColumn table col |> Option.get
-      let isNullable = TypeGenerator.isColumnNullable columnDef
-
-      if isNullable then
-        $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
-      else
-        $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
-    |> String.concat "\n      "
-
   // 6. Get column names for SELECT
   let columnNames = table.columns |> List.map (fun c -> c.name) |> String.concat ", "
 
-  // 7. Generate field mappings for reader
+  // 7. Generate field mappings for reader (semicolon-separated for inline record)
   let fieldMappings =
     table.columns
     |> List.mapi (fun i col ->
@@ -779,10 +758,10 @@ let generateQueryByOrCreate (useAsync: bool) (table: CreateTable) (annotation: Q
         $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
       else
         $"{fieldName} = reader.Get{method} {i}")
-    |> String.concat "\n          "
+    |> String.concat "; "
 
   if useAsync then
-    // Async versions need extra indentation (8 spaces instead of 6)
+    // Keep async version as string template for now (task CE is complex)
     let asyncValueExtractions =
       annotation.columns
       |> List.map (fun col ->
@@ -815,11 +794,11 @@ let generateQueryByOrCreate (useAsync: bool) (table: CreateTable) (annotation: Q
           $"{fieldName} = reader.Get{method} {i}")
       |> String.concat "\n            "
 
-    // 6. Build GetById call (handle composite PK or no PK) - async version
+    // Build GetById call (handle composite PK or no PK) - async version
     let getByIdCallAsync =
       match pkCols with
       | [] ->
-        // No primary key - re-query with WHERE clause (values already extracted above)
+        // No primary key - re-query with WHERE clause
         $"""
             // No primary key - re-query to get inserted record
             use cmd = new SqliteCommand("SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1", tx.Connection, tx)
@@ -844,7 +823,7 @@ let generateQueryByOrCreate (useAsync: bool) (table: CreateTable) (annotation: Q
             | Ok None -> return Error (SqliteException("Failed to retrieve inserted record", 0))
             | Error ex -> return Error ex"""
 
-    // 5. Generate full method - async version
+    // Generate full method - async version
     $"""  static member {methodName} (newItem: {typeName}) (tx: SqliteTransaction) : Task<Result<{typeName}, SqliteException>> =
     task {{
       try
@@ -871,55 +850,76 @@ let generateQueryByOrCreate (useAsync: bool) (table: CreateTable) (annotation: Q
       | :? SqliteException as ex -> return Error ex
     }}"""
   else
-    // 6. Build GetById call (handle composite PK or no PK) - sync version
-    let getByIdCall =
+    // Build the sync method body using AST
+    // Value extractions from newItem
+    let valueExtractionStmts =
+      annotation.columns
+      |> List.map (fun col ->
+        let fieldName = capitalize col
+        ConstantExpr $"let {col} = newItem.{fieldName}")
+
+    // Parameter bindings with match expressions for nullable columns
+    let paramBindingStmts =
+      annotation.columns
+      |> List.map (fun col ->
+        let columnDef = findColumn table col |> Option.get
+        let isNullable = TypeGenerator.isColumnNullable columnDef
+
+        if isNullable then
+          let matchExpr =
+            ParenExpr(
+              MatchExpr(
+                ConstantExpr col,
+                [ MatchClauseExpr("Some v", "box v")
+                  MatchClauseExpr("None", "box DBNull.Value") ]
+              )
+            )
+
+          let addWithValue =
+            AppExpr("cmd.Parameters.AddWithValue", [ ConstantExpr $"\"@{col}\""; matchExpr ])
+
+          pipeIgnore addWithValue
+        else
+          let addWithValue =
+            AppExpr("cmd.Parameters.AddWithValue", [ ConstantExpr $"\"@{col}\""; ConstantExpr col ])
+
+          pipeIgnore addWithValue)
+
+    // Build the if/else logic for found vs insert
+    let ifElseLogic =
       match pkCols with
       | [] ->
-        // No primary key - re-query with WHERE clause (values already extracted above)
-        $"""
-        // No primary key - re-query to get inserted record
-        use cmd = new SqliteCommand("SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1", tx.Connection, tx)
-        {paramBindings}
-        use reader = cmd.ExecuteReader()
-        if reader.Read() then
-          Ok {{
-            {fieldMappings}
-          }}
-        else
-          Error (SqliteException("Failed to retrieve inserted record", 0))"""
+        // No primary key - re-query with WHERE clause
+        let nestedParamBindings =
+          annotation.columns
+          |> List.map (fun col ->
+            let columnDef = findColumn table col |> Option.get
+            let isNullable = TypeGenerator.isColumnNullable columnDef
+
+            if isNullable then
+              $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+            else
+              $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+          |> String.concat "; "
+
+        $"if reader.Read() then Ok {{ {fieldMappings} }} else (reader.Close(); match {typeName}.Insert newItem tx with | Ok newId -> (use cmd = new SqliteCommand(\"SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1\", tx.Connection, tx); {nestedParamBindings}; use reader = cmd.ExecuteReader(); if reader.Read() then Ok {{ {fieldMappings} }} else Error (SqliteException(\"Failed to retrieve inserted record\", 0))) | Error ex -> Error ex)"
       | pks ->
         // Has primary key - use GetById
         let getByIdParams = pks |> List.map (fun pk -> "newId") |> String.concat " "
+        $"if reader.Read() then Ok {{ {fieldMappings} }} else (reader.Close(); match {typeName}.Insert newItem tx with | Ok newId -> (match {typeName}.GetById {getByIdParams} tx with | Ok (Some item) -> Ok item | Ok None -> Error (SqliteException(\"Failed to retrieve inserted record\", 0)) | Error ex -> Error ex) | Error ex -> Error ex)"
 
-        $"""
-        // Fetch newly inserted record by ID
-        match {typeName}.GetById {getByIdParams} tx with
-        | Ok (Some item) -> Ok item
-        | Ok None -> Error (SqliteException("Failed to retrieve inserted record", 0))
-        | Error ex -> Error ex"""
+    let bodyExprs =
+      valueExtractionStmts
+      @ [ ConstantExpr
+            $"use cmd = new SqliteCommand(\"SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1\", tx.Connection, tx)" ]
+      @ paramBindingStmts
+      @ [ ConstantExpr "use reader = cmd.ExecuteReader()"; ConstantExpr ifElseLogic ]
 
-    // 5. Generate full method - sync version
-    $"""  static member {methodName} (newItem: {typeName}) (tx: SqliteTransaction) : Result<{typeName}, SqliteException> =
-    try
-      // Extract query values from newItem
-      {valueExtractions}
-      // Try to find existing record
-      use cmd = new SqliteCommand("SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1", tx.Connection, tx)
-      {paramBindings}
-      use reader = cmd.ExecuteReader()
-      if reader.Read() then
-        // Found existing record - return it
-        Ok {{
-          {fieldMappings}
-        }}
-      else
-        // Not found - insert and fetch
-        reader.Close()
-        match {typeName}.Insert newItem tx with
-        | Ok newId ->{getByIdCall}
-        | Error ex -> Error ex
-    with
-    | :? SqliteException as ex -> Error ex"""
+    let memberName = $"{methodName} (newItem: {typeName}) (tx: SqliteTransaction)"
+    let returnType = $"Result<{typeName}, SqliteException>"
+    let body = trySqliteException bodyExprs
+
+    generateStaticMemberCode typeName memberName returnType body
 
 /// Generate code for a table
 let generateTableCode (useAsync: bool) (table: CreateTable) : Result<string, string> =
