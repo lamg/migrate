@@ -5,11 +5,7 @@ open migrate.CodeGen.ViewIntrospection
 open migrate.CodeGen.AstExprBuilders
 open Fabulous.AST
 open type Fabulous.AST.Ast
-open Fabulous.AST
 open Microsoft.Data.Sqlite
-open Fabulous.AST
-open Fabulous.AST
-open Fabulous.AST
 
 /// Create indentation string with given number of spaces
 let indent n = String.replicate n " "
@@ -85,7 +81,7 @@ let capitalize (s: string) =
 let readerMethod (t: string) =
   t.Replace("int64", "Int64").Replace("string", "String").Replace("float", "Double").Replace("DateTime", "DateTime")
 
-/// Generate INSERT method
+/// Generate INSERT method using Fabulous.AST for sync version
 let generateInsert (useAsync: bool) (table: CreateTable) : string =
   let typeName = capitalize table.name
   let pkCols = getPrimaryKey table
@@ -112,19 +108,8 @@ let generateInsert (useAsync: bool) (table: CreateTable) : string =
 
   let insertSql = $"INSERT INTO {table.name} ({columnNames}) VALUES ({paramNames})"
 
-  let parameterBindings =
-    insertCols
-    |> List.map (fun col ->
-      let fieldName = capitalize col.name
-      let isNullable = TypeGenerator.isColumnNullable col
-
-      if isNullable then
-        $"cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
-      else
-        $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
-    |> String.concat "\n      "
-
   if useAsync then
+    // Keep async version as string template for now (task CE is complex)
     let asyncParamBindings =
       insertCols
       |> List.map (fun col ->
@@ -150,16 +135,49 @@ let generateInsert (useAsync: bool) (table: CreateTable) : string =
       | :? SqliteException as ex -> return Error ex
     }}"""
   else
-    $"""  static member Insert (item: {typeName}) (tx: SqliteTransaction) : Result<int64, SqliteException> =
-    try
-      use cmd = new SqliteCommand("{insertSql}", tx.Connection, tx)
-      {parameterBindings}
-      cmd.ExecuteNonQuery() |> ignore
-      use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
-      let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
-      Ok lastId
-    with
-    | :? SqliteException as ex -> Error ex"""
+    // Build the sync method body using AST
+    let paramBindingStmts =
+      insertCols
+      |> List.map (fun col ->
+        let fieldName = capitalize col.name
+        let isNullable = TypeGenerator.isColumnNullable col
+
+        if isNullable then
+          let matchExpr =
+            ParenExpr(
+              MatchExpr(
+                ConstantExpr $"item.{fieldName}",
+                [ MatchClauseExpr("Some v", "box v")
+                  MatchClauseExpr("None", "box DBNull.Value") ]
+              )
+            )
+
+          let addWithValue =
+            AppExpr("cmd.Parameters.AddWithValue", [ ConstantExpr $"\"@{col.name}\""; matchExpr ])
+
+          pipeIgnore addWithValue
+        else
+          let addWithValue =
+            AppExpr(
+              "cmd.Parameters.AddWithValue",
+              [ ConstantExpr $"\"@{col.name}\""; ConstantExpr $"item.{fieldName}" ]
+            )
+
+          pipeIgnore addWithValue)
+
+    let bodyExprs =
+      ConstantExpr $"use cmd = new SqliteCommand(\"{insertSql}\", tx.Connection, tx)"
+      :: paramBindingStmts
+      @ [ pipeIgnore (ConstantExpr "cmd.ExecuteNonQuery()")
+          ConstantExpr "use lastIdCmd = new SqliteCommand(\"SELECT last_insert_rowid()\", tx.Connection, tx)"
+          ConstantExpr "let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>"
+          ConstantExpr "Ok lastId" ]
+
+    let memberName = $"Insert (item: {typeName}) (tx: SqliteTransaction)"
+    let returnType = "Result<int64, SqliteException>"
+    let body = trySqliteException bodyExprs
+
+    generateStaticMemberCode typeName memberName returnType body
 
 /// Generate GET by ID method (transaction-only) using Fabulous.AST for sync version
 let generateGet (useAsync: bool) (table: CreateTable) : string option =
