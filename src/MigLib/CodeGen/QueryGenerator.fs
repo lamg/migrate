@@ -109,31 +109,32 @@ let generateInsert (useAsync: bool) (table: CreateTable) : string =
   let insertSql = $"INSERT INTO {table.name} ({columnNames}) VALUES ({paramNames})"
 
   if useAsync then
-    // Keep async version as string template for now (task CE is complex)
-    let asyncParamBindings =
+    // Build the async method body using AST with task CE
+    let asyncParamBindingExprs =
       insertCols
       |> List.map (fun col ->
         let fieldName = capitalize col.name
         let isNullable = TypeGenerator.isColumnNullable col
 
         if isNullable then
-          $"cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+          OtherExpr
+            $"cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
         else
-          $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
-      |> String.concat "\n        "
+          OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
 
-    $"""  static member Insert (item: {typeName}) (tx: SqliteTransaction) : Task<Result<int64, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("{insertSql}", tx.Connection, tx)
-        {asyncParamBindings}
-        let! _ = cmd.ExecuteNonQueryAsync()
-        use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
-        let! lastId = lastIdCmd.ExecuteScalarAsync()
-        return Ok(lastId |> unbox<int64>)
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+    let asyncBodyExprs =
+      [ OtherExpr $"use cmd = new SqliteCommand(\"{insertSql}\", tx.Connection, tx)" ]
+      @ asyncParamBindingExprs
+      @ [ OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"
+          OtherExpr "use lastIdCmd = new SqliteCommand(\"SELECT last_insert_rowid()\", tx.Connection, tx)"
+          OtherExpr "let! lastId = lastIdCmd.ExecuteScalarAsync()"
+          OtherExpr "return Ok(lastId |> unbox<int64>)" ]
+
+    let memberName = $"Insert (item: {typeName}) (tx: SqliteTransaction)"
+    let returnType = "Task<Result<int64, SqliteException>>"
+    let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
+
+    generateStaticMemberCode typeName memberName returnType body
   else
     // Build the sync method body using AST
     let paramBindingStmts =
@@ -218,42 +219,23 @@ let generateGet (useAsync: bool) (table: CreateTable) : string option =
       |> String.concat "; "
 
     if useAsync then
-      // Keep async version as string template for now (task CE is complex)
-      let asyncParamBindings =
+      // Build the async method body using AST with task CE
+      let asyncParamBindingExprs =
         pks
-        |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
-        |> String.concat "\n        "
+        |> List.map (fun pk -> OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
 
-      let asyncFieldMappings =
-        table.columns
-        |> List.mapi (fun i col ->
-          let fieldName = capitalize col.name
-          let isNullable = TypeGenerator.isColumnNullable col
-          let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+      let asyncBodyExprs =
+        [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)" ]
+        @ asyncParamBindingExprs
+        @ [ OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
+            OtherExpr "let! hasRow = reader.ReadAsync()"
+            OtherExpr $"if hasRow then return Ok(Some {{ {fieldMappings} }}) else return Ok None" ]
 
-          if isNullable then
-            $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
-          else
-            $"{fieldName} = reader.Get{method} {i}")
-        |> String.concat "\n          "
+      let memberName = $"GetById {paramList} (tx: SqliteTransaction)"
+      let returnType = $"Task<Result<{typeName} option, SqliteException>>"
+      let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
 
-      Some
-        $"""  static member GetById {paramList} (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
-        {asyncParamBindings}
-        use! reader = cmd.ExecuteReaderAsync()
-        let! hasRow = reader.ReadAsync()
-        if hasRow then
-          return Ok(Some {{
-          {asyncFieldMappings}
-          }})
-        else
-          return Ok None
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+      Some(generateStaticMemberCode typeName memberName returnType body)
     else
       // Build the sync method body using AST
       // Generate parameter binding statements
@@ -294,38 +276,23 @@ let generateGetAll (useAsync: bool) (table: CreateTable) : string =
     |> String.concat "; "
 
   if useAsync then
-    // Keep async version as string template for now (task CE is complex)
-    let asyncFieldMappings =
-      table.columns
-      |> List.mapi (fun i col ->
-        let fieldName = capitalize col.name
-        let isNullable = TypeGenerator.isColumnNullable col
-        let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+    // Build the async method body using AST with task CE
+    // The while loop pattern for async reading is embedded as a multi-statement expression
+    let whileLoopBody =
+      $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
 
-        if isNullable then
-          $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
-        else
-          $"{fieldName} = reader.Get{method} {i}")
-      |> String.concat "\n              "
+    let asyncBodyExprs =
+      [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
+        OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
+        OtherExpr $"let results = ResizeArray<{typeName}>()"
+        OtherExpr whileLoopBody
+        OtherExpr "return Ok(results |> Seq.toList)" ]
 
-    $"""  static member GetAll (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
-        use! reader = cmd.ExecuteReaderAsync()
-        let results = ResizeArray<{typeName}>()
-        let mutable hasMore = true
-        while hasMore do
-          let! next = reader.ReadAsync()
-          hasMore <- next
-          if hasMore then
-            results.Add({{
-              {asyncFieldMappings}
-            }})
-        return Ok(results |> Seq.toList)
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+    let memberName = "GetAll (tx: SqliteTransaction)"
+    let returnType = $"Task<Result<{typeName} list, SqliteException>>"
+    let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
+
+    generateStaticMemberCode typeName memberName returnType body
   else
     // Build the sync method body using AST
     let bodyExprs =
@@ -362,35 +329,18 @@ let generateGetOne (useAsync: bool) (table: CreateTable) : string =
     |> String.concat "; "
 
   if useAsync then
-    // Keep async version as string template for now (task CE is complex)
-    let asyncFieldMappings =
-      table.columns
-      |> List.mapi (fun i col ->
-        let fieldName = capitalize col.name
-        let isNullable = TypeGenerator.isColumnNullable col
-        let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+    // Build the async method body using AST with task CE
+    let asyncBodyExprs =
+      [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
+        OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
+        OtherExpr "let! hasRow = reader.ReadAsync()"
+        OtherExpr $"if hasRow then return Ok(Some {{ {fieldMappings} }}) else return Ok None" ]
 
-        if isNullable then
-          $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
-        else
-          $"{fieldName} = reader.Get{method} {i}")
-      |> String.concat "\n          "
+    let memberName = "GetOne (tx: SqliteTransaction)"
+    let returnType = $"Task<Result<{typeName} option, SqliteException>>"
+    let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
 
-    $"""  static member GetOne (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
-        use! reader = cmd.ExecuteReaderAsync()
-        let! hasRow = reader.ReadAsync()
-        if hasRow then
-          return Ok(Some {{
-          {asyncFieldMappings}
-          }})
-        else
-          return Ok None
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+    generateStaticMemberCode typeName memberName returnType body
   else
     // Build the sync method body using AST
     let bodyExprs =
@@ -457,29 +407,29 @@ let generateUpdate (useAsync: bool) (table: CreateTable) : string option =
           pipeIgnore addWithValue)
 
     if useAsync then
-      let asyncParamBindings =
+      // Build the async method body using AST with task CE
+      let asyncParamBindingExprs =
         table.columns
         |> List.map (fun col ->
           let fieldName = capitalize col.name
           let isNullable = TypeGenerator.isColumnNullable col
 
           if isNullable then
-            $"cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+            OtherExpr
+              $"cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
           else
-            $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
-        |> String.concat "\n        "
+            OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
 
-      Some
-        $"""  static member Update (item: {typeName}) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("{updateSql}", tx.Connection, tx)
-        {asyncParamBindings}
-        let! _ = cmd.ExecuteNonQueryAsync()
-        return Ok()
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+      let asyncBodyExprs =
+        [ OtherExpr $"use cmd = new SqliteCommand(\"{updateSql}\", tx.Connection, tx)" ]
+        @ asyncParamBindingExprs
+        @ [ OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"; OtherExpr "return Ok()" ]
+
+      let memberName = $"Update (item: {typeName}) (tx: SqliteTransaction)"
+      let returnType = "Task<Result<unit, SqliteException>>"
+      let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
+
+      Some(generateStaticMemberCode typeName memberName returnType body)
     else
       let bodyExprs =
         ConstantExpr $"use cmd = new SqliteCommand(\"{updateSql}\", tx.Connection, tx)"
@@ -519,23 +469,18 @@ let generateDelete (useAsync: bool) (table: CreateTable) : string option =
       |> List.map (fun pk -> ConstantExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
 
     if useAsync then
-      // Keep async version as string template for now (task CE with try/with is complex)
-      let asyncParamBindings =
-        pks
-        |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
-        |> String.concat "\n        "
+      // Build the async method body using AST with task CE
+      let asyncBodyExprs =
+        [ OtherExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)" ]
+        @ (pks
+           |> List.map (fun pk -> OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore"))
+        @ [ OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"; OtherExpr "return Ok()" ]
 
-      Some
-        $"""  static member Delete {paramList} (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("{deleteSql}", tx.Connection, tx)
-        {asyncParamBindings}
-        let! _ = cmd.ExecuteNonQueryAsync()
-        return Ok()
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+      let memberName = $"Delete {paramList} (tx: SqliteTransaction)"
+      let returnType = "Task<Result<unit, SqliteException>>"
+      let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
+
+      Some(generateStaticMemberCode typeName memberName returnType body)
     else
       // Build the sync method body using AST
       let bodyExprs =
@@ -616,51 +561,36 @@ let generateQueryBy (useAsync: bool) (table: CreateTable) (annotation: QueryByAn
 
   // 7. Generate full method with tupled parameters
   if useAsync then
-    // Keep async version as string template for now (task CE is complex)
-    let asyncParamBindings =
+    // Build the async method body using AST with task CE
+    let asyncParamBindingExprs =
       annotation.columns
       |> List.map (fun col ->
         let columnDef = findColumn table col |> Option.get
         let isNullable = TypeGenerator.isColumnNullable columnDef
 
         if isNullable then
-          $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+          OtherExpr
+            $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
         else
-          $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
-      |> String.concat "\n        "
+          OtherExpr $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
 
-    let asyncFieldMappings =
-      table.columns
-      |> List.mapi (fun i col ->
-        let fieldName = capitalize col.name
-        let isNullable = TypeGenerator.isColumnNullable col
-        let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+    let whileLoopBody =
+      $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
 
-        if isNullable then
-          $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
-        else
-          $"{fieldName} = reader.Get{method} {i}")
-      |> String.concat "\n              "
+    let asyncBodyExprs =
+      [ OtherExpr
+          $"use cmd = new SqliteCommand(\"SELECT {columnNames} FROM {table.name} WHERE {whereClause}\", tx.Connection, tx)" ]
+      @ asyncParamBindingExprs
+      @ [ OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
+          OtherExpr $"let results = ResizeArray<{typeName}>()"
+          OtherExpr whileLoopBody
+          OtherExpr "return Ok(results |> Seq.toList)" ]
 
-    $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("SELECT {columnNames} FROM {table.name} WHERE {whereClause}", tx.Connection, tx)
-        {asyncParamBindings}
-        use! reader = cmd.ExecuteReaderAsync()
-        let results = ResizeArray<{typeName}>()
-        let mutable hasMore = true
-        while hasMore do
-          let! next = reader.ReadAsync()
-          hasMore <- next
-          if hasMore then
-            results.Add({{
-              {asyncFieldMappings}
-            }})
-        return Ok(results |> Seq.toList)
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+    let memberName = $"{methodName} ({parameters}) (tx: SqliteTransaction)"
+    let returnType = $"Task<Result<{typeName} list, SqliteException>>"
+    let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
+
+    generateStaticMemberCode typeName memberName returnType body
   else
     // Build the sync method body using AST
     let paramBindingStmts =
@@ -997,37 +927,22 @@ let generateViewGetAll (useAsync: bool) (viewName: string) (columns: ViewColumn 
     |> String.concat "; "
 
   if useAsync then
-    // Keep async version as string template for now (task CE is complex)
-    let asyncFieldMappings =
-      columns
-      |> List.mapi (fun i col ->
-        let fieldName = capitalize col.name
-        let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+    // Build the async method body using AST with task CE
+    let whileLoopBody =
+      $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
 
-        if col.isNullable then
-          $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
-        else
-          $"{fieldName} = reader.Get{method} {i}")
-      |> String.concat "\n              "
+    let asyncBodyExprs =
+      [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
+        OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
+        OtherExpr $"let results = ResizeArray<{typeName}>()"
+        OtherExpr whileLoopBody
+        OtherExpr "return Ok(results |> Seq.toList)" ]
 
-    $"""  static member GetAll (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
-        use! reader = cmd.ExecuteReaderAsync()
-        let results = ResizeArray<{typeName}>()
-        let mutable hasMore = true
-        while hasMore do
-          let! next = reader.ReadAsync()
-          hasMore <- next
-          if hasMore then
-            results.Add({{
-              {asyncFieldMappings}
-            }})
-        return Ok(results |> Seq.toList)
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+    let memberName = "GetAll (tx: SqliteTransaction)"
+    let returnType = $"Task<Result<{typeName} list, SqliteException>>"
+    let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
+
+    generateStaticMemberCode typeName memberName returnType body
   else
     // Build the sync method body using AST
     let bodyExprs =
@@ -1063,34 +978,18 @@ let generateViewGetOne (useAsync: bool) (viewName: string) (columns: ViewColumn 
     |> String.concat "; "
 
   if useAsync then
-    // Keep async version as string template for now (task CE is complex)
-    let asyncFieldMappings =
-      columns
-      |> List.mapi (fun i col ->
-        let fieldName = capitalize col.name
-        let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+    // Build the async method body using AST with task CE
+    let asyncBodyExprs =
+      [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
+        OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
+        OtherExpr "let! hasRow = reader.ReadAsync()"
+        OtherExpr $"if hasRow then return Ok(Some {{ {fieldMappings} }}) else return Ok None" ]
 
-        if col.isNullable then
-          $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
-        else
-          $"{fieldName} = reader.Get{method} {i}")
-      |> String.concat "\n          "
+    let memberName = "GetOne (tx: SqliteTransaction)"
+    let returnType = $"Task<Result<{typeName} option, SqliteException>>"
+    let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
 
-    $"""  static member GetOne (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
-        use! reader = cmd.ExecuteReaderAsync()
-        let! hasRow = reader.ReadAsync()
-        if hasRow then
-          return Ok(Some {{
-          {asyncFieldMappings}
-          }})
-        else
-          return Ok None
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+    generateStaticMemberCode typeName memberName returnType body
   else
     // Build the sync method body using AST
     let bodyExprs =
@@ -1177,49 +1076,35 @@ let generateViewQueryBy
 
   // 7. Generate full method with tupled parameters
   if useAsync then
-    // Keep async version as string template for now (task CE is complex)
-    let asyncParamBindings =
+    // Build the async method body using AST with task CE
+    let asyncParamBindingExprs =
       annotation.columns
       |> List.map (fun col ->
         let columnDef = findViewColumn columns col |> Option.get
 
         if columnDef.isNullable then
-          $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+          OtherExpr
+            $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
         else
-          $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
-      |> String.concat "\n        "
+          OtherExpr $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
 
-    let asyncFieldMappings =
-      columns
-      |> List.mapi (fun i col ->
-        let fieldName = capitalize col.name
-        let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
+    let whileLoopBody =
+      $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
 
-        if col.isNullable then
-          $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
-        else
-          $"{fieldName} = reader.Get{method} {i}")
-      |> String.concat "\n              "
+    let asyncBodyExprs =
+      [ OtherExpr
+          $"use cmd = new SqliteCommand(\"SELECT {columnNames} FROM {viewName} WHERE {whereClause}\", tx.Connection, tx)" ]
+      @ asyncParamBindingExprs
+      @ [ OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
+          OtherExpr $"let results = ResizeArray<{typeName}>()"
+          OtherExpr whileLoopBody
+          OtherExpr "return Ok(results |> Seq.toList)" ]
 
-    $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("SELECT {columnNames} FROM {viewName} WHERE {whereClause}", tx.Connection, tx)
-        {asyncParamBindings}
-        use! reader = cmd.ExecuteReaderAsync()
-        let results = ResizeArray<{typeName}>()
-        let mutable hasMore = true
-        while hasMore do
-          let! next = reader.ReadAsync()
-          hasMore <- next
-          if hasMore then
-            results.Add({{
-              {asyncFieldMappings}
-            }})
-        return Ok(results |> Seq.toList)
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+    let memberName = $"{methodName} ({parameters}) (tx: SqliteTransaction)"
+    let returnType = $"Task<Result<{typeName} list, SqliteException>>"
+    let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
+
+    generateStaticMemberCode typeName memberName returnType body
   else
     // Build the sync method body using AST
     let paramBindingStmts =

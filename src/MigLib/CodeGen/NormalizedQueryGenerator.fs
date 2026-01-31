@@ -951,23 +951,18 @@ let generateDelete (useAsync: bool) (normalized: NormalizedTable) : string optio
       |> String.concat " "
 
     if useAsync then
-      let asyncParamBindings =
-        pks
-        |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
-        |> String.concat "\n        "
+      // Build the async method body using AST with task CE
+      let asyncBodyExprs =
+        [ OtherExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)" ]
+        @ (pks
+           |> List.map (fun pk -> OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore"))
+        @ [ OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"; OtherExpr "return Ok()" ]
 
-      Some
-        $"""  static member Delete {paramList} (tx: SqliteTransaction)
-    : Task<Result<unit, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("{deleteSql}", tx.Connection, tx)
-        {asyncParamBindings}
-        let! _ = cmd.ExecuteNonQueryAsync()
-        return Ok()
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+      let memberName = $"Delete {paramList} (tx: SqliteTransaction)"
+      let returnType = "Task<Result<unit, SqliteException>>"
+      let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
+
+      Some(generateStaticMemberCode typeName memberName returnType body)
     else
       // Build the sync method body using AST
       let paramBindingStmts =

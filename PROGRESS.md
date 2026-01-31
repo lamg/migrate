@@ -6,17 +6,20 @@ Refactoring `QueryGenerator.fs` and `NormalizedQueryGenerator.fs` to use Fabulou
 
 ## Key Accomplishments
 
-✅ **18 methods successfully migrated** (9 table methods + 3 view methods + 6 normalized methods)
+✅ **29 methods successfully migrated** (9 sync table + 10 async table + 3 sync view + 3 async view + 3 normalized sync + 1 normalized async)
 - All sync CRUD operations (Insert, Get, GetAll, GetOne, Update, Delete)
-- Custom query methods (QueryBy, QueryByOrCreate)
-- All view read operations (GetAll, GetOne, QueryBy)
-- All normalized table sync methods (Insert, GetById, GetAll, GetOne, Update, Delete)
+- All async CRUD operations (Insert, Get, GetAll, GetOne, Update, Delete)
+- Custom query methods (QueryBy sync/async, QueryByOrCreate sync only)
+- All view read operations (GetAll, GetOne, QueryBy - both sync and async)
+- Normalized table sync methods (Insert, GetById, GetAll, GetOne, Update, Delete)
+- Normalized Delete async method
 
 ✅ **Established consistent patterns** for AST-based code generation
 - Parameter bindings with `ParenExpr` + `MatchExpr` + `AppExpr` for nullable handling
 - Statement sequences using `ConstantExpr` and `trySqliteException`
 - Helper functions (`pipeIgnore`, `returnOk`) for common patterns
 - Hybrid approach for complex normalized tables: AST for simple cases, string templates for extension tables
+- **New:** Async pattern using `taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]`
 
 ✅ **Test compatibility maintained**
 - All 135 tests passing throughout migration
@@ -25,11 +28,11 @@ Refactoring `QueryGenerator.fs` and `NormalizedQueryGenerator.fs` to use Fabulou
 
 ## Status Summary
 
-**Overall Progress:** 18/18 sync methods migrated (100%)
+**Overall Progress:** 29 methods migrated (18 sync + 11 async)
 
 | Phase | Component | Status | Notes |
 |-------|-----------|--------|-------|
-| 1 | AstExprBuilders.fs | ✅ Complete | Helper module with pipeIgnore, returnOk |
+| 1 | AstExprBuilders.fs | ✅ Complete | Helper module with pipeIgnore, returnOk, taskExpr, trySqliteExceptionAsync |
 | 2 | generateDelete (sync) | ✅ Complete | Migrated to AST |
 | 2 | generateGetAll (sync) | ✅ Complete | Migrated to AST |
 | 2 | generateGetOne (sync) | ✅ Complete | Migrated to AST |
@@ -41,17 +44,29 @@ Refactoring `QueryGenerator.fs` and `NormalizedQueryGenerator.fs` to use Fabulou
 | 3 | generateViewGetAll (sync) | ✅ Complete | Migrated to AST |
 | 3 | generateViewGetOne (sync) | ✅ Complete | Migrated to AST |
 | 3 | generateViewQueryBy (sync) | ✅ Complete | Migrated to AST with match expressions |
-| 4 | Normalized generateDelete | ✅ Complete | Full AST migration |
-| 4 | Normalized generateGetOne | ✅ Complete | Hybrid: AST for simple, string for extensions |
-| 4 | Normalized generateGetById | ✅ Complete | Hybrid: AST for simple, string for extensions |
-| 4 | Normalized generateGetAll | ✅ Complete | Hybrid: AST for simple, string for extensions |
-| 4 | Normalized generateInsert | ✅ Complete | Hybrid: AST for simple, string for extensions |
-| 4 | Normalized generateUpdate | ✅ Complete | Hybrid: AST for simple, string for extensions |
-| 5 | Async methods | ⏸️ Deferred | Task CE is complex; keeping string templates |
+| 4 | Normalized generateDelete (sync) | ✅ Complete | Full AST migration |
+| 4 | Normalized generateGetOne (sync) | ✅ Complete | Hybrid: AST for simple, string for extensions |
+| 4 | Normalized generateGetById (sync) | ✅ Complete | Hybrid: AST for simple, string for extensions |
+| 4 | Normalized generateGetAll (sync) | ✅ Complete | Hybrid: AST for simple, string for extensions |
+| 4 | Normalized generateInsert (sync) | ✅ Complete | Hybrid: AST for simple, string for extensions |
+| 4 | Normalized generateUpdate (sync) | ✅ Complete | Hybrid: AST for simple, string for extensions |
+| 5 | generateDelete (async) | ✅ Complete | Migrated to AST with taskExpr |
+| 5 | generateUpdate (async) | ✅ Complete | Migrated to AST with taskExpr |
+| 5 | generateGetOne (async) | ✅ Complete | Migrated to AST with taskExpr |
+| 5 | generateGet (async) | ✅ Complete | Migrated to AST with taskExpr |
+| 5 | generateInsert (async) | ✅ Complete | Migrated to AST with taskExpr |
+| 5 | generateGetAll (async) | ✅ Complete | Migrated to AST with while loop pattern |
+| 5 | generateQueryBy (async) | ✅ Complete | Migrated to AST with while loop pattern |
+| 5 | generateViewGetAll (async) | ✅ Complete | Migrated to AST with while loop pattern |
+| 5 | generateViewGetOne (async) | ✅ Complete | Migrated to AST with taskExpr |
+| 5 | generateViewQueryBy (async) | ✅ Complete | Migrated to AST with while loop pattern |
+| 5 | Normalized generateDelete (async) | ✅ Complete | Migrated to AST with taskExpr |
+| 5 | generateQueryByOrCreate (async) | ⏸️ Kept as string | Complex nested async calls |
+| 5 | Normalized async (with extensions) | ⏸️ Kept as string | Complex match expressions + multi-table ops |
 
 **Test Status:** All 135 tests passing
 
-**Phases Complete:** 4/5 (Phases 1-4 ✅, Phase 5 deferred)
+**Phases Complete:** 5/5 ✅
 
 ---
 
@@ -151,13 +166,42 @@ let private formatConfig =
 - **Simple case (no extensions):** Full AST migration using `trySqliteException`, `ConstantExpr`, `generateStaticMemberCode`
 - **Complex case (with extensions):** String template for body due to multi-line match expressions and `generateCaseSelection` logic
 
-### Phase 5: Async Methods (Optional)
+### Phase 5: Async Methods (Complete)
 
-Async methods use `task { }` computation expressions with `try/with` inside, which is complex to express in Fabulous.AST. Options:
+**Status:** ✅ 11 async methods migrated, 2 kept as string templates (complex cases)
 
-1. **Keep as string templates** - Current approach, works well
-2. **Hybrid approach** - Use AST for structure, embed body as string
-3. **Full AST** - Requires building nested computation expressions
+Async methods use `task { }` computation expressions. Successfully migrated using the pattern:
+
+```fsharp
+let asyncBodyExprs = [ OtherExpr "..." ; ... ]
+let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
+generateStaticMemberCode typeName memberName returnType body
+```
+
+**Migrated Methods (QueryGenerator.fs):**
+- `generateDelete` (async) - Simple ExecuteNonQueryAsync
+- `generateUpdate` (async) - ExecuteNonQueryAsync with parameter bindings
+- `generateGetOne` (async) - Reader with if/else
+- `generateGet/GetById` (async) - Reader with parameter bindings and if/else
+- `generateInsert` (async) - ExecuteNonQueryAsync + last_insert_rowid
+- `generateGetAll` (async) - While loop for async reading
+- `generateQueryBy` (async) - While loop with parameter bindings
+- `generateViewGetAll` (async) - While loop for views
+- `generateViewGetOne` (async) - Reader with if/else for views
+- `generateViewQueryBy` (async) - While loop for views
+
+**Migrated Methods (NormalizedQueryGenerator.fs):**
+- `generateDelete` (async) - Simple ExecuteNonQueryAsync
+
+**Kept as String Templates (Category C - Complex):**
+- `generateQueryByOrCreate` (async) - Nested async calls with Insert + GetById
+- Normalized table methods with extensions (Insert, Update, GetAll, GetById, GetOne async) - Complex match expressions and multi-table operations
+
+**Key Pattern for While Loops:**
+```fsharp
+let whileLoopBody =
+  $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
+```
 
 ---
 
@@ -292,11 +336,12 @@ Phase 4 successfully migrated all 6 sync methods in `NormalizedQueryGenerator.fs
 
 ## What Stays as Strings
 
-- **SQL queries** - Embedded in ConstantExpr as interpolated strings
-- **Async methods** - Task CE with try/with is complex; deferred to Phase 5
+- **SQL queries** - Embedded in OtherExpr/ConstantExpr as interpolated strings
 - **ProjectGenerator.fs** - Generates XML, not F#
 - **Complex control flow** - Nested if/then/else with multiple match expressions
 - **Normalized table extension cases** - `generateCaseSelection`, `generateBaseCase`, `generateExtensionCase` helpers produce complex multi-line match arms that don't fit cleanly into AST builders
+- **generateQueryByOrCreate async** - Complex nested async calls (Insert, then GetById)
+- **Normalized async methods with extensions** - Complex match expressions + multi-table operations
 
 ---
 
@@ -330,3 +375,37 @@ Before marking a method as complete:
 - [x] Output format matches original (modulo acceptable Fantomas differences)
 
 **Phase 4 Verification:** All checks passed on 2026-02-01
+**Phase 5 Verification:** All checks passed on 2026-02-01
+
+---
+
+## Phase 5 Complete: Async Methods Migration
+
+Phase 5 successfully migrated 11 async methods to use Fabulous.AST with the `taskExpr` and `trySqliteExceptionAsync` helpers.
+
+**Key Implementation Pattern:**
+
+```fsharp
+// For simple async methods (Delete, Update, Insert, GetOne, GetById)
+let asyncBodyExprs =
+  [ OtherExpr $"use cmd = new SqliteCommand(\"{sql}\", tx.Connection, tx)" ]
+  @ paramBindingExprs
+  @ [ OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"; OtherExpr "return Ok()" ]
+
+let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
+generateStaticMemberCode typeName memberName returnType body
+
+// For while loop methods (GetAll, QueryBy)
+let whileLoopBody =
+  $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
+```
+
+**Understanding the Pattern:**
+1. `OtherExpr` converts a string to `WidgetBuilder<ComputationExpressionStatement>`
+2. `trySqliteExceptionAsync` wraps statements in `try/with` and returns `WidgetBuilder<Expr>`
+3. `OtherExpr(trySqliteExceptionAsync ...)` converts the Expr back to ComputationExpressionStatement
+4. `taskExpr` wraps everything in `task { }` computation expression
+
+**What Stays as String Templates:**
+- `generateQueryByOrCreate` async - Complex nested async calls with Insert + conditional GetById
+- Normalized async methods with extensions - Complex `generateCaseSelection` + multi-table operations
