@@ -211,7 +211,7 @@ let private generateProperty (typeName: string) (field: FieldInfo) (normalized: 
       let columns = getExtensionCaseColumns normalized.baseTable ext true
       createMatchClause caseName columns)
 
-  Member($"this.{field.Name}", MatchExpr("this", baseClause :: extensionClauses)).returnType (returnType)
+  Member($"this.{field.Name}", MatchExpr("this", baseClause :: extensionClauses), returnType)
 
 /// Generate a positional pattern to extract a specific field from columns
 /// Returns the pattern string where the target field gets a var name and others get _
