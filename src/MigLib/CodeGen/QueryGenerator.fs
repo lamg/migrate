@@ -570,7 +570,7 @@ let findColumn (table: CreateTable) (colName: string) : ColumnDef option =
   table.columns
   |> List.tryFind (fun c -> c.name.ToLowerInvariant() = colName.ToLowerInvariant())
 
-/// Generate custom QueryBy method with tupled parameters
+/// Generate custom QueryBy method with tupled parameters using Fabulous.AST for sync version
 let generateQueryBy (useAsync: bool) (table: CreateTable) (annotation: QueryByAnnotation) : string =
   let typeName = capitalize table.name
 
@@ -597,19 +597,6 @@ let generateQueryBy (useAsync: bool) (table: CreateTable) (annotation: QueryByAn
     |> List.map (fun col -> $"{col} = @{col}")
     |> String.concat " AND "
 
-  // 4. Build parameter bindings
-  let paramBindings =
-    annotation.columns
-    |> List.map (fun col ->
-      let columnDef = findColumn table col |> Option.get
-      let isNullable = TypeGenerator.isColumnNullable columnDef
-
-      if isNullable then
-        $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
-      else
-        $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
-    |> String.concat "\n      "
-
   // 5. Get column names for SELECT
   let columnNames = table.columns |> List.map (fun c -> c.name) |> String.concat ", "
 
@@ -625,10 +612,11 @@ let generateQueryBy (useAsync: bool) (table: CreateTable) (annotation: QueryByAn
         $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
       else
         $"{fieldName} = reader.Get{method} {i}")
-    |> String.concat "\n          "
+    |> String.concat "; "
 
   // 7. Generate full method with tupled parameters
   if useAsync then
+    // Keep async version as string template for now (task CE is complex)
     let asyncParamBindings =
       annotation.columns
       |> List.map (fun col ->
@@ -674,19 +662,47 @@ let generateQueryBy (useAsync: bool) (table: CreateTable) (annotation: QueryByAn
       | :? SqliteException as ex -> return Error ex
     }}"""
   else
-    $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
-    try
-      use cmd = new SqliteCommand("SELECT {columnNames} FROM {table.name} WHERE {whereClause}", tx.Connection, tx)
-      {paramBindings}
-      use reader = cmd.ExecuteReader()
-      let results = ResizeArray<{typeName}>()
-      while reader.Read() do
-        results.Add({{
-          {fieldMappings}
-        }})
-      Ok(results |> Seq.toList)
-    with
-    | :? SqliteException as ex -> Error ex"""
+    // Build the sync method body using AST
+    let paramBindingStmts =
+      annotation.columns
+      |> List.map (fun col ->
+        let columnDef = findColumn table col |> Option.get
+        let isNullable = TypeGenerator.isColumnNullable columnDef
+
+        if isNullable then
+          let matchExpr =
+            ParenExpr(
+              MatchExpr(
+                ConstantExpr col,
+                [ MatchClauseExpr("Some v", "box v")
+                  MatchClauseExpr("None", "box DBNull.Value") ]
+              )
+            )
+
+          let addWithValue =
+            AppExpr("cmd.Parameters.AddWithValue", [ ConstantExpr $"\"@{col}\""; matchExpr ])
+
+          pipeIgnore addWithValue
+        else
+          let addWithValue =
+            AppExpr("cmd.Parameters.AddWithValue", [ ConstantExpr $"\"@{col}\""; ConstantExpr col ])
+
+          pipeIgnore addWithValue)
+
+    let bodyExprs =
+      ConstantExpr
+        $"use cmd = new SqliteCommand(\"SELECT {columnNames} FROM {table.name} WHERE {whereClause}\", tx.Connection, tx)"
+      :: paramBindingStmts
+      @ [ ConstantExpr "use reader = cmd.ExecuteReader()"
+          ConstantExpr $"let results = ResizeArray<{typeName}>()"
+          ConstantExpr $"while reader.Read() do results.Add({{ {fieldMappings} }})"
+          ConstantExpr "Ok(results |> Seq.toList)" ]
+
+    let memberName = $"{methodName} ({parameters}) (tx: SqliteTransaction)"
+    let returnType = $"Result<{typeName} list, SqliteException>"
+    let body = trySqliteException bodyExprs
+
+    generateStaticMemberCode typeName memberName returnType body
 
 /// Validate QueryByOrCreate annotation references existing columns (case-insensitive)
 let validateQueryByOrCreateAnnotation

@@ -82,6 +82,8 @@ All changes should pass the existing test suite:
 cd src && dotnet test
 ```
 
+Consider that print debugging with `dotnet test` is not longer possible in Dotnet 10 because a the test output is captured.
+
 ## Code Generation Conventions
 
 ### Generated Project Files

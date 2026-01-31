@@ -15,6 +15,7 @@ Refactoring `QueryGenerator.fs` and `NormalizedQueryGenerator.fs` to use Fabulou
 | generateGet (sync) | ✅ Complete | Migrated to AST |
 | generateUpdate (sync) | ✅ Complete | Migrated to AST with ParenExpr for match |
 | generateInsert (sync) | ✅ Complete | Migrated to AST with match expressions |
+| generateQueryBy (sync) | ✅ Complete | Migrated to AST with match expressions |
 | Async methods | ⏸️ Deferred | Task CE is complex; keeping string templates |
 | Remaining sync methods | 🔲 Pending | See list below |
 
@@ -92,7 +93,7 @@ let private formatConfig =
 | `generateGet` | Medium | Single row reader | ✅ Complete |
 | `generateGetOne` | Low | Single row reader (LIMIT 1) | ✅ Complete |
 | `generateUpdate` | Medium | Parameter bindings with match expr | ✅ Complete |
-| `generateQueryBy` | Medium | Reader loop with WHERE | 🔲 Pending |
+| `generateQueryBy` | Medium | Reader loop with WHERE | ✅ Complete |
 | `generateQueryByOrCreate` | High | Conditional insert/select | 🔲 Pending |
 
 ### Phase 3: QueryGenerator.fs View Methods

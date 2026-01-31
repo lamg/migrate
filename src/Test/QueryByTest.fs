@@ -270,7 +270,10 @@ let ``QueryBy handles nullable columns with option types`` () =
     | Ok code ->
       Assert.Contains("email: string option", code)
       Assert.Contains("@email", code)
-      Assert.Contains("match email with Some v -> box v | None -> box DBNull.Value", code)
+      // After AST migration, match expressions are formatted across multiple lines
+      Assert.Contains("match email with", code)
+      Assert.Contains("Some v -> box v", code)
+      Assert.Contains("None -> box DBNull.Value", code)
     | Error e -> Assert.Fail $"Code generation failed: {e}"
 
 // ============================================================================
