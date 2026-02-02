@@ -75,6 +75,18 @@ How to contribute:
 - Create a pull request mentioning the issue and also including a summary of the problem and approach to solve it
 - Wait for the review
 
+## Acknowledgments
+
+This project wouldn't have been possible without the amazing open-source community. We're especially grateful to:
+
+- **[Fabulous.AST](https://github.com/edgarfgp/Fabulous.AST)** - An elegant F# DSL for code generation that made creating and manipulating F# AST a joy
+- **[Fantomas](https://github.com/fsprojects/fantomas)** - The excellent F# code formatter that ensures our generated code is beautiful and consistent
+
+If you find these projects valuable, please consider supporting them:
+- Star their repositories
+- Contribute to their projects
+- Donate to support their continued development
+
 ## License
 
 [Apache 2.0][apache2]
