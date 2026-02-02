@@ -105,11 +105,36 @@ let expression: Parser<Expr, unit> =
 
   let integer = pint32 |>> Integer
 
+  // Parse parenthesized expression with balanced parens (e.g., DEFAULT (strftime(...)))
+  let parenthesizedExpr: Parser<Expr, unit> =
+    let rec balancedContent depth acc =
+      parse {
+        let! c = anyChar
+
+        match c with
+        | '(' -> return! balancedContent (depth + 1) (acc + "(")
+        | ')' when depth > 1 -> return! balancedContent (depth - 1) (acc + ")")
+        | ')' -> return acc + ")"
+        | '\'' ->
+          // Handle quoted strings inside parens
+          let! quoted = manySatisfy (fun ch -> ch <> '\'')
+          do! pchar '\'' |>> ignore
+          return! balancedContent depth (acc + "'" + quoted + "'")
+        | _ -> return! balancedContent depth (acc + string c)
+      }
+
+    pchar '(' >>= fun _ -> balancedContent 1 "(" |>> Value
+
   let unquotedValue =
     manySatisfy (fun c -> c <> ',' && c <> ')' && c <> ';')
     |>> fun s -> Value(s.Trim())
 
-  choice [ attempt quotedString; attempt floatingPoint; attempt integer; unquotedValue ]
+  choice
+    [ attempt quotedString
+      attempt floatingPoint
+      attempt integer
+      attempt parenthesizedExpr
+      unquotedValue ]
   .>> ws
 
 // Column constraint parsing
