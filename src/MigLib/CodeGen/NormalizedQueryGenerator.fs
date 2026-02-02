@@ -1142,22 +1142,16 @@ let private generateNormalizedQueryBy
     | :? SqliteException as ex -> Error ex"""
 
 /// Validate QueryByOrCreate annotation for normalized table references existing columns (case-insensitive)
-/// AND ensures all query columns are in the base table (not extension-only)
 let private validateNormalizedQueryByOrCreateAnnotation
   (normalized: NormalizedTable)
   (annotation: QueryByOrCreateAnnotation)
   : Result<unit, string> =
   let allColumns = getAllNormalizedColumns normalized
 
-  let baseColumnNames =
-    normalized.baseTable.columns
-    |> List.map (fun c -> c.name.ToLowerInvariant())
-    |> Set.ofList
-
   let allColumnNames =
     allColumns |> List.map (fun (_, c) -> c.name.ToLowerInvariant()) |> Set.ofList
 
-  // First check if all columns exist somewhere
+  // Check if all columns exist somewhere (in base or any extension)
   annotation.columns
   |> List.tryFind (fun col -> not (allColumnNames.Contains(col.ToLowerInvariant())))
   |> function
@@ -1167,18 +1161,15 @@ let private validateNormalizedQueryByOrCreateAnnotation
 
       Error
         $"QueryByOrCreate annotation references non-existent column '{invalidCol}' in normalized table '{normalized.baseTable.name}'. Available columns: {availableCols}"
-    | None ->
-      // Then check if all query columns are in the base table
-      annotation.columns
-      |> List.tryFind (fun col -> not (baseColumnNames.Contains(col.ToLowerInvariant())))
-      |> function
-        | Some extensionCol ->
-          let baseCols =
-            normalized.baseTable.columns |> List.map (fun c -> c.name) |> String.concat ", "
+    | None -> Ok()
 
-          Error
-            $"QueryByOrCreate annotation on normalized table '{normalized.baseTable.name}' requires field '{extensionCol}' to be in base table. Extension-only fields are not supported. Base table columns: {baseCols}"
-        | None -> Ok()
+/// Check if a DU case (specified by its columns) has all the query columns
+let private caseHasAllQueryColumns (caseColumns: ColumnDef list) (queryColumns: string list) : bool =
+  let caseColumnNames =
+    caseColumns |> List.map (fun c -> c.name.ToLowerInvariant()) |> Set.ofList
+
+  queryColumns
+  |> List.forall (fun col -> caseColumnNames.Contains(col.ToLowerInvariant()))
 
 /// Generate custom QueryByOrCreate method for normalized tables that extracts query values from NewType DU
 let private generateNormalizedQueryByOrCreate
@@ -1198,40 +1189,75 @@ let private generateNormalizedQueryByOrCreate
     |> sprintf "GetBy%sOrCreate"
 
   // 2. Generate value extraction from NewType DU (pattern match on all cases)
-  // All query fields must be in base table (validated earlier), so they exist in all DU cases
+  // Cases that don't have all query columns will throw an exception
   // Get base insert columns (excluding auto-increment PK)
   let baseInsertColumns = getInsertColumns normalized.baseTable
 
-  let valueExtractions =
-    annotation.columns
-    |> List.map (fun col ->
-      // Generate pattern match to extract field from all DU cases
-      // Base case pattern
-      let basePattern, baseVarName = generateSingleFieldPattern baseInsertColumns col
-      let baseMatch = $"        | {newTypeName}.Base({basePattern}) -> {baseVarName}"
+  // Check which cases have all query columns
+  let baseHasAllColumns = caseHasAllQueryColumns baseInsertColumns annotation.columns
 
-      // Extension case patterns
-      let extensionMatches =
-        normalized.extensions
-        |> List.map (fun ext ->
-          let caseName = $"With{TypeGenerator.toPascalCase ext.aspectName}"
-          // Extension columns = base insert columns + extension columns (excluding FK)
-          let extensionCols =
-            ext.table.columns |> List.filter (fun c -> c.name <> ext.fkColumn)
+  // Generate match arms for value extraction with configurable indentation
+  // If a case doesn't have all query columns, generate an exception arm
+  let generateBaseMatch (indent: string) =
+    if baseHasAllColumns then
+      // Generate extraction pattern for all query columns
+      let extractions =
+        annotation.columns
+        |> List.map (fun col ->
+          let _, varName = generateSingleFieldPattern baseInsertColumns col
+          varName)
+        |> String.concat ", "
 
-          let allCols = baseInsertColumns @ extensionCols
-          let pattern, varName = generateSingleFieldPattern allCols col
-          $"        | {newTypeName}.{caseName}({pattern}) -> {varName}")
-        |> String.concat "\n"
+      let pattern = generateFieldPattern baseInsertColumns
+      $"{indent}| {newTypeName}.Base({pattern}) -> ({extractions})"
+    else
+      let pattern = generateFieldPattern baseInsertColumns
+      let missingCols = annotation.columns |> String.concat ", "
+      $"{indent}| {newTypeName}.Base({pattern}) -> invalidArg \"newItem\" \"Base case does not have the required fields ({missingCols}) for this QueryByOrCreate operation\""
 
-      let allMatches =
-        if extensionMatches = "" then
-          baseMatch
-        else
-          $"{baseMatch}\n{extensionMatches}"
+  let generateExtensionMatches (indent: string) =
+    normalized.extensions
+    |> List.map (fun ext ->
+      let caseName = $"With{TypeGenerator.toPascalCase ext.aspectName}"
+      // Extension columns = base insert columns + extension columns (excluding FK)
+      let extensionCols =
+        ext.table.columns |> List.filter (fun c -> c.name <> ext.fkColumn)
 
-      $"      let {col} = \n        match newItem with\n{allMatches}")
+      let allCols = baseInsertColumns @ extensionCols
+      let extHasAllColumns = caseHasAllQueryColumns allCols annotation.columns
+
+      if extHasAllColumns then
+        let extractions =
+          annotation.columns
+          |> List.map (fun col ->
+            let _, varName = generateSingleFieldPattern allCols col
+            varName)
+          |> String.concat ", "
+
+        let pattern = generateFieldPattern allCols
+        $"{indent}| {newTypeName}.{caseName}({pattern}) -> ({extractions})"
+      else
+        let pattern = generateFieldPattern allCols
+        let missingCols = annotation.columns |> String.concat ", "
+        $"{indent}| {newTypeName}.{caseName}({pattern}) -> invalidArg \"newItem\" \"{caseName} case does not have the required fields ({missingCols}) for this QueryByOrCreate operation\"")
     |> String.concat "\n"
+
+  // Generate variable bindings for extracted query columns
+  let varBindings =
+    annotation.columns |> List.map (fun col -> col) |> String.concat ", "
+
+  // Generate value extractions with proper indentation for sync (6 spaces for let, 8 for match arms)
+  let generateValueExtractions (letIndent: string) (matchIndent: string) =
+    let baseMatch = generateBaseMatch matchIndent
+    let extensionMatches = generateExtensionMatches matchIndent
+
+    let allMatches =
+      if extensionMatches = "" then
+        baseMatch
+      else
+        $"{baseMatch}\n{extensionMatches}"
+
+    $"{letIndent}let ({varBindings}) = \n{matchIndent}match newItem with\n{allMatches}"
 
   // 3. Build WHERE clause
   let whereClause =
@@ -1290,6 +1316,9 @@ let private generateNormalizedQueryByOrCreate
     let caseSelection =
       generateCaseSelection 12 normalized.baseTable normalized.extensions typeName
 
+    // Async: 8-space let indent, 10-space match arm indent
+    let valueExtractions = generateValueExtractions "        " "          "
+
     $"""  static member {methodName} (newItem: {newTypeName}) (tx: SqliteTransaction) : Task<Result<{typeName}, SqliteException>> =
     task {{
       try
@@ -1324,6 +1353,9 @@ let private generateNormalizedQueryByOrCreate
     // 7. Generate mapping logic (sync needs 10-space indent)
     let caseSelection =
       generateCaseSelection 10 normalized.baseTable normalized.extensions typeName
+
+    // Sync: 6-space let indent, 8-space match arm indent
+    let valueExtractions = generateValueExtractions "      " "        "
 
     $"""  static member {methodName} (newItem: {newTypeName}) (tx: SqliteTransaction) : Result<{typeName}, SqliteException> =
     try

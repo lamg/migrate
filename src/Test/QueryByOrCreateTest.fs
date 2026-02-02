@@ -351,10 +351,10 @@ let ``QueryByOrCreate works with normalized tables`` () =
       Assert.Contains("(newItem: NewStudent)", code)
       // Should extract name from NewStudent DU via positional pattern matching
       Assert.Contains("match newItem with", code)
-      // Base case has 'id, name' fields (id is not auto-increment) - extract name with wildcard for id
-      Assert.Contains("NewStudent.Base(_, name) -> name", code)
-      // WithAddress case has 'id, name, address' - extract name with wildcards for id and address
-      Assert.Contains("NewStudent.WithAddress(_, name, _) -> name", code)
+      // Base case has 'id, name' fields (id is not auto-increment) - extract name using full pattern
+      Assert.Contains("NewStudent.Base(id, name) -> (name)", code)
+      // WithAddress case has 'id, name, address' - extract name using full pattern
+      Assert.Contains("NewStudent.WithAddress(id, name, address) -> (name)", code)
       // Should NOT have name as separate parameter
       Assert.DoesNotContain("name: string, newItem", code)
     | Error e -> Assert.Fail $"Code generation failed: {e}"
@@ -400,6 +400,61 @@ let ``QueryByOrCreate with normalized table generates LEFT JOIN query`` () =
     | Ok code ->
       Assert.Contains("LEFT JOIN student_address", code)
       Assert.Contains("WHERE name = @name LIMIT 1", code)
+    | Error e -> Assert.Fail $"Code generation failed: {e}"
+
+[<Fact>]
+let ``QueryByOrCreate with extension-only fields generates invalidArg for incompatible cases`` () =
+  let sql =
+    """
+    CREATE TABLE user (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
+    -- QueryByOrCreate(auth_platform_id, foreign_id)
+    CREATE TABLE user_auth_platform (user_id INTEGER PRIMARY KEY REFERENCES user(id), auth_platform_id INTEGER NOT NULL, foreign_id TEXT NOT NULL);
+    CREATE TABLE user_email (user_id INTEGER PRIMARY KEY REFERENCES user(id), email TEXT NOT NULL);
+    """
+
+  result {
+    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
+    let! code = NormalizedQueryGenerator.generateNormalizedTableCode false (normalized |> List.head)
+    return code
+  }
+  |> function
+    | Ok code ->
+      Assert.Contains("static member GetByAuthPlatformIdForeignIdOrCreate", code)
+      // Base case should throw invalidArg because it doesn't have auth_platform_id or foreign_id
+      Assert.Contains("NewUser.Base(name)", code)
+      Assert.Contains("invalidArg", code)
+      Assert.Contains("Base case does not have the required fields", code)
+      // WithEmail case should also throw invalidArg
+      Assert.Contains("NewUser.WithEmail(name, email)", code)
+      Assert.Contains("WithEmail case does not have the required fields", code)
+      // Only WithAuthPlatform case should extract the values (authPlatformId, foreignId)
+      Assert.Contains("NewUser.WithAuthPlatform(name, authPlatformId, foreignId)", code)
+      Assert.Contains("(authPlatformId, foreignId)", code)
+    | Error e -> Assert.Fail $"Code generation failed: {e}"
+
+[<Fact>]
+let ``QueryByOrCreate with extension-only fields works with async`` () =
+  let sql =
+    """
+    CREATE TABLE user (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
+    -- QueryByOrCreate(auth_platform_id, foreign_id)
+    CREATE TABLE user_auth_platform (user_id INTEGER PRIMARY KEY REFERENCES user(id), auth_platform_id INTEGER NOT NULL, foreign_id TEXT NOT NULL);
+    """
+
+  result {
+    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
+    let! code = NormalizedQueryGenerator.generateNormalizedTableCode true (normalized |> List.head)
+    return code
+  }
+  |> function
+    | Ok code ->
+      Assert.Contains("Task<Result<User, SqliteException>>", code)
+      Assert.Contains("NewUser.Base(name)", code)
+      Assert.Contains("invalidArg", code)
+      Assert.Contains("NewUser.WithAuthPlatform(name, authPlatformId, foreignId)", code)
+      Assert.Contains("(authPlatformId, foreignId)", code)
     | Error e -> Assert.Fail $"Code generation failed: {e}"
 
 // ============================================================================

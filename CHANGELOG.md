@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2026-02-02
+
+Added:
+
+- **QueryByOrCreate on Extension-Only Fields**: QueryByOrCreate annotations can now reference columns that exist only in extension tables of normalized schemas
+  - When a DU case doesn't have the required query columns, generates `invalidArg` to throw at runtime
+  - Only DU cases with all required columns can be used with the generated method
+  - Example: `QueryByOrCreate(department_id, employee_id)` on a `person` table works when those columns are in `person_employment` extension
+
 ## [2.7.2] - 2026-02-02
 
 Fixed:
