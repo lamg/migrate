@@ -43,8 +43,10 @@ mig commit
 # generates and executes migration
 mig log
 # output shows migration metadata and a summary of executed steps
-mig codegen
-# generates type-safe F# code with CRUD operations
+mig codegen --async
+# generate type-safe F# code for CRUD operations returning a Task<Result<'T,SqliteException>> value
+mig seed
+# seed the database by executing insert statements in SQL code
 ```
 
 ## Features
@@ -79,8 +81,8 @@ How to contribute:
 
 This project wouldn't have been possible without the amazing open-source community. We're especially grateful to:
 
-- **[Fabulous.AST](https://github.com/edgarfgp/Fabulous.AST)** - An elegant F# DSL for code generation that made creating and manipulating F# AST a joy
-- **[Fantomas](https://github.com/fsprojects/fantomas)** - The excellent F# code formatter that ensures our generated code is beautiful and consistent
+- **[Fabulous.AST][fabulous-ast]** - An elegant F# DSL for code generation that made creating and manipulating F# AST a joy
+- **[Fantomas][fantomas]** - The excellent F# code formatter that ensures our generated code is beautiful and consistent
 
 If you find these projects valuable, please consider supporting them:
 - Star their repositories
@@ -102,3 +104,6 @@ If you find these projects valuable, please consider supporting them:
 [dotnet-badge]: https://img.shields.io/badge/.NET-10.0-blue?style=flat-square
 [apache-badge]: https://img.shields.io/badge/License-Apache2-yellow.svg?style=flat-square
 [fs-badge]: https://img.shields.io/badge/Language-F%23-blue?style=flat-square
+
+[fabulous-ast]: https://github.com/edgarfgp/Fabulous.AST
+[fantomas]: https://github.com/fsprojects/fantomas
