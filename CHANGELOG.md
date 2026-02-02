@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.1] - 2026-02-02
+
+Fixed:
+
+- **QueryByOrCreate Code Generation**: Fixed indentation bug in async value extraction for normalized tables with multiple extensions
+  - Async methods now correctly indent `let` bindings (8 spaces in `task { try` blocks)
+  - Sync methods correctly indent `let` bindings (6 spaces in `try` blocks)
+- **Annotation Parser Order**: Fixed parser to handle `-- QueryBy` and `-- QueryByOrCreate` annotations in any order
+  - Previously, `-- QueryByOrCreate` annotations appearing before `-- QueryBy` would prevent the latter from being parsed
+  - Now both annotation types are parsed correctly regardless of their order in the SQL file
+
 ## [2.7.0] - 2026-02-01
 
 Changed:
