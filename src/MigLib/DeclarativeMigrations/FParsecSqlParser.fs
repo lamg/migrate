@@ -278,6 +278,77 @@ let queryByOrCreateAnnotation: Parser<QueryByOrCreateAnnotation, unit> =
 let queryByOrCreateAnnotations: Parser<QueryByOrCreateAnnotation list, unit> =
   many (attempt (ws >>. queryByOrCreateAnnotation))
 
+// IgnoreNonUnique annotation parsing
+let ignoreNonUniqueAnnotation: Parser<IgnoreNonUniqueAnnotation, unit> =
+  pstring "--"
+  >>. spaces
+  >>. pstringCI "IgnoreNonUnique"
+  >>. spaces
+  >>. opt (pchar '(' >>. spaces >>. pchar ')')
+  .>> restOfLine false
+  >>% IgnoreNonUniqueAnnotation
+
+let ignoreNonUniqueAnnotations: Parser<IgnoreNonUniqueAnnotation list, unit> =
+  many (attempt (ws >>. ignoreNonUniqueAnnotation))
+
+type Annotation =
+  | QueryByAnno of QueryByAnnotation
+  | QueryByOrCreateAnno of QueryByOrCreateAnnotation
+  | IgnoreNonUniqueAnno of IgnoreNonUniqueAnnotation
+
+let annotation: Parser<Annotation, unit> =
+  choice
+    [ attempt (queryByAnnotation |>> QueryByAnno)
+      attempt (queryByOrCreateAnnotation |>> QueryByOrCreateAnno)
+      ignoreNonUniqueAnnotation |>> IgnoreNonUniqueAnno ]
+
+let annotations: Parser<Annotation list, unit> =
+  many (attempt (ws >>. annotation))
+
+let commentLine: Parser<string, unit> =
+  pstring "--" >>. restOfLine false
+
+let commentLines: Parser<string list, unit> =
+  many (attempt (ws >>. commentLine))
+
+let parseAnnotationsFromComments (comments: string list) =
+  let queryBy = ResizeArray<QueryByAnnotation>()
+  let queryByOrCreate = ResizeArray<QueryByOrCreateAnnotation>()
+  let ignoreNonUnique = ResizeArray<IgnoreNonUniqueAnnotation>()
+
+  let parseColumns (cols: string) =
+    cols.Split(',')
+    |> Array.map (fun c -> c.Trim())
+    |> Array.filter (fun c -> c <> "")
+    |> Array.toList
+
+  let tryMatch (pattern: string) (line: string) =
+    let m =
+      System.Text.RegularExpressions.Regex.Match(
+        line.Trim(),
+        pattern,
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase
+      )
+
+    if m.Success then Some m else None
+
+  for line in comments do
+    match tryMatch @"^QueryBy\s*\((.*)\)\s*$" line with
+    | Some m ->
+      let cols = parseColumns m.Groups.[1].Value
+      if cols.Length > 0 then queryBy.Add({ columns = cols })
+    | None ->
+      match tryMatch @"^QueryByOrCreate\s*\((.*)\)\s*$" line with
+      | Some m ->
+        let cols = parseColumns m.Groups.[1].Value
+        if cols.Length > 0 then queryByOrCreate.Add({ columns = cols })
+      | None ->
+        match tryMatch @"^IgnoreNonUnique(?:\s*\(\s*\))?\s*$" line with
+        | Some _ -> ignoreNonUnique.Add(IgnoreNonUniqueAnnotation)
+        | None -> ()
+
+  (List.ofSeq queryBy, List.ofSeq queryByOrCreate, List.ofSeq ignoreNonUnique)
+
 // CREATE TABLE parsing
 let createTable: Parser<CreateTable, unit> =
   str_ws1 "CREATE"
@@ -288,9 +359,8 @@ let createTable: Parser<CreateTable, unit> =
         >>. sepBy1 (choice [ attempt (tableConstraint |>> Choice2Of2); columnDef |>> Choice1Of2 ]) comma
         .>> cpar
         .>> opt semi)
-  .>>. queryByAnnotations
-  .>>. queryByOrCreateAnnotations
-  |>> fun (((tableName, items), queryByAnnos), queryByOrCreateAnnos) ->
+  .>>. commentLines
+  |>> fun (((tableName, items), comments)) ->
     let columns =
       items
       |> List.choose (function
@@ -303,11 +373,15 @@ let createTable: Parser<CreateTable, unit> =
         | Choice2Of2 c -> Some c
         | _ -> None)
 
+    let queryByAnnos, queryByOrCreateAnnos, ignoreNonUniqueAnnos =
+      parseAnnotationsFromComments comments
+
     { name = tableName
       columns = columns
       constraints = constraints
       queryByAnnotations = queryByAnnos
-      queryByOrCreateAnnotations = queryByOrCreateAnnos }
+      queryByOrCreateAnnotations = queryByOrCreateAnnos
+      ignoreNonUniqueAnnotations = ignoreNonUniqueAnnos }
 
 // CREATE VIEW parsing
 let createView: Parser<CreateView, unit> =
@@ -319,9 +393,8 @@ let createView: Parser<CreateView, unit> =
 
   createPart >>. identifier
   .>>. (str_ws1 "AS" >>. many1Satisfy (fun c -> c <> ';') .>> opt semi)
-  .>>. queryByAnnotations
-  .>>. queryByOrCreateAnnotations
-  |>> fun (((viewName, selectPart), queryByAnnos), queryByOrCreateAnnos) ->
+  .>>. commentLines
+  |>> fun (((viewName, selectPart), comments)) ->
     // Build the full CREATE VIEW statement
     let fullStatement = $"CREATE VIEW {viewName} AS {selectPart.Trim()}"
 
@@ -338,11 +411,15 @@ let createView: Parser<CreateView, unit> =
           yield m.Groups.[1].Value ]
       |> List.distinct
 
+    let queryByAnnos, queryByOrCreateAnnos, ignoreNonUniqueAnnos =
+      parseAnnotationsFromComments comments
+
     { name = viewName
       sqlTokens = [ fullStatement ]
       dependencies = dependencies
       queryByAnnotations = queryByAnnos
-      queryByOrCreateAnnotations = queryByOrCreateAnnos }
+      queryByOrCreateAnnotations = queryByOrCreateAnnos
+      ignoreNonUniqueAnnotations = ignoreNonUniqueAnnos }
 
 // CREATE INDEX parsing
 let createIndex: Parser<CreateIndex, unit> =

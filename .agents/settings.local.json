@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(dotnet test:*)",
+      "Bash(git checkout:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:edgarfgp.github.io)",
+      "Bash(dotnet clean:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(dotnet fantomas:*)",
+      "Bash(dotnet tool install:*)",
+      "Bash(git merge:*)",
+      "Bash(ls:*)",
+      "Bash(dotnet:*)",
+      "Bash(sqlite3:*)",
+      "Bash(bash:*)",
+      "Bash(git tag:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:fsprojects.github.io)",
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}

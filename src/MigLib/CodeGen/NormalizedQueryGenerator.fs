@@ -34,6 +34,12 @@ let private generateInsertSql (tableName: string) (columns: ColumnDef list) : st
   let paramNames = columns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "
   $"INSERT INTO {tableName} ({columnNames}) VALUES ({paramNames})"
 
+/// Generate SQL INSERT OR IGNORE statement for a table with specific columns
+let private generateInsertOrIgnoreSql (tableName: string) (columns: ColumnDef list) : string =
+  let columnNames = columns |> List.map (fun c -> c.name) |> String.concat ", "
+  let paramNames = columns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "
+  $"INSERT OR IGNORE INTO {tableName} ({columnNames}) VALUES ({paramNames})"
+
 /// Generate positional pattern for pattern matching (e.g., "name, age")
 /// Note: Named patterns (Name = name) are F# 5+ and not supported by Fantomas parser
 let private generateFieldPattern (columns: ColumnDef list) : string =
@@ -126,6 +132,44 @@ let private generateBaseCase (useAsync: bool) (baseTable: CreateTable) (typeName
         let {baseTable.name}Id = lastIdCmd.ExecuteScalar() |> unbox<int64>
         Ok {baseTable.name}Id"""
 
+/// Generate the Base case insert-or-ignore (single table)
+let private generateBaseCaseInsertOrIgnore (useAsync: bool) (baseTable: CreateTable) (typeName: string) : string =
+  let insertColumns = getInsertColumns baseTable
+  let insertSql = generateInsertOrIgnoreSql baseTable.name insertColumns
+  let fieldPattern = generateFieldPattern insertColumns
+
+  let paramBindings =
+    generateParamBindings insertColumns "cmd" |> String.concat "\n        "
+
+  if useAsync then
+    let asyncParamBindings =
+      generateParamBindings insertColumns "cmd" |> String.concat "\n          "
+
+    $"""        | New{typeName}.Base({fieldPattern}) ->
+          // Single INSERT OR IGNORE into base table
+          use cmd = new SqliteCommand("{insertSql}", tx.Connection, tx)
+          {asyncParamBindings}
+          let! rows = cmd.ExecuteNonQueryAsync()
+          if rows = 0 then
+            return Ok None
+          else
+            use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+            let! lastId = lastIdCmd.ExecuteScalarAsync()
+            let {baseTable.name}Id = lastId |> unbox<int64>
+            return Ok (Some {baseTable.name}Id)"""
+  else
+    $"""      | New{typeName}.Base({fieldPattern}) ->
+        // Single INSERT OR IGNORE into base table
+        use cmd = new SqliteCommand("{insertSql}", tx.Connection, tx)
+        {paramBindings}
+        let rows = cmd.ExecuteNonQuery()
+        if rows = 0 then
+          Ok None
+        else
+          use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+          let {baseTable.name}Id = lastIdCmd.ExecuteScalar() |> unbox<int64>
+          Ok (Some {baseTable.name}Id)"""
+
 /// Generate an extension case insert (multi-table)
 let private generateExtensionCase
   (useAsync: bool)
@@ -194,6 +238,76 @@ let private generateExtensionCase
         {extensionParamBindings}
         cmd2.ExecuteNonQuery() |> ignore
         Ok {baseTable.name}Id"""
+
+/// Generate an extension case insert-or-ignore (multi-table)
+let private generateExtensionCaseInsertOrIgnore
+  (useAsync: bool)
+  (baseTable: CreateTable)
+  (extension: ExtensionTable)
+  (typeName: string)
+  : string =
+  let caseName = TypeGenerator.toPascalCase extension.aspectName
+  let baseInsertColumns = getInsertColumns baseTable
+  let baseInsertSql = generateInsertOrIgnoreSql baseTable.name baseInsertColumns
+
+  // Extension columns excluding the FK column
+  let extensionInsertColumns =
+    extension.table.columns
+    |> List.filter (fun col -> col.name <> extension.fkColumn)
+
+  // Combine all columns for the field pattern
+  let allColumns = baseInsertColumns @ extensionInsertColumns
+  let fieldPattern = generateFieldPattern allColumns
+
+  let baseParamBindings =
+    generateParamBindings baseInsertColumns "cmd1" |> String.concat "\n        "
+
+  let extensionParamBindings =
+    generateParamBindings extensionInsertColumns "cmd2"
+    |> String.concat "\n        "
+
+  if useAsync then
+    let asyncBaseParamBindings =
+      generateParamBindings baseInsertColumns "cmd1" |> String.concat "\n          "
+
+    let asyncExtensionParamBindings =
+      generateParamBindings extensionInsertColumns "cmd2"
+      |> String.concat "\n          "
+
+    $"""        | New{typeName}.With{caseName}({fieldPattern}) ->
+          // Base INSERT OR IGNORE then extension INSERT
+          use cmd1 = new SqliteCommand("{baseInsertSql}", tx.Connection, tx)
+          {asyncBaseParamBindings}
+          let! rows = cmd1.ExecuteNonQueryAsync()
+          if rows = 0 then
+            return Ok None
+          else
+            use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+            let! lastId = lastIdCmd.ExecuteScalarAsync()
+            let {baseTable.name}Id = lastId |> unbox<int64>
+
+            use cmd2 = new SqliteCommand("INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "}) VALUES (@{extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "})", tx.Connection, tx)
+            cmd2.Parameters.AddWithValue("@{extension.fkColumn}", {baseTable.name}Id) |> ignore
+            {asyncExtensionParamBindings}
+            let! _ = cmd2.ExecuteNonQueryAsync()
+            return Ok (Some {baseTable.name}Id)"""
+  else
+    $"""      | New{typeName}.With{caseName}({fieldPattern}) ->
+        // Base INSERT OR IGNORE then extension INSERT
+        use cmd1 = new SqliteCommand("{baseInsertSql}", tx.Connection, tx)
+        {baseParamBindings}
+        let rows = cmd1.ExecuteNonQuery()
+        if rows = 0 then
+          Ok None
+        else
+          use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+          let {baseTable.name}Id = lastIdCmd.ExecuteScalar() |> unbox<int64>
+
+          use cmd2 = new SqliteCommand("INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "}) VALUES (@{extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "})", tx.Connection, tx)
+          cmd2.Parameters.AddWithValue("@{extension.fkColumn}", {baseTable.name}Id) |> ignore
+          {extensionParamBindings}
+          cmd2.ExecuteNonQuery() |> ignore
+          Ok (Some {baseTable.name}Id)"""
 
 /// Generate the Insert method for a normalized table
 let generateInsert (useAsync: bool) (normalized: NormalizedTable) : string =
@@ -264,6 +378,44 @@ let generateInsert (useAsync: bool) (normalized: NormalizedTable) : string =
     // Complex case with extensions - keep as string template
     $"""  static member Insert (item: New{typeName}) (tx: SqliteTransaction)
     : Result<int64, SqliteException> =
+    try
+      match item with
+{allCases}
+    with
+    | :? SqliteException as ex -> Error ex"""
+
+/// Generate the InsertOrIgnore method for a normalized table
+let generateInsertOrIgnore (useAsync: bool) (normalized: NormalizedTable) : string =
+  let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
+
+  // Generate Base case
+  let baseCase = generateBaseCaseInsertOrIgnore useAsync normalized.baseTable typeName
+
+  // Generate extension cases
+  let extensionCases =
+    normalized.extensions
+    |> List.map (fun ext -> generateExtensionCaseInsertOrIgnore useAsync normalized.baseTable ext typeName)
+    |> String.concat "\n\n"
+
+  let allCases =
+    if normalized.extensions.IsEmpty then
+      baseCase
+    else
+      $"{baseCase}\n\n{extensionCases}"
+
+  if useAsync then
+    $"""  static member InsertOrIgnore (item: New{typeName}) (tx: SqliteTransaction)
+    : Task<Result<int64 option, SqliteException>> =
+    task {{
+      try
+        match item with
+{allCases}
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+  else
+    $"""  static member InsertOrIgnore (item: New{typeName}) (tx: SqliteTransaction)
+    : Result<int64 option, SqliteException> =
     try
       match item with
 {allCases}
@@ -1409,6 +1561,11 @@ let generateNormalizedTableCode (useAsync: bool) (normalized: NormalizedTable) :
   | _ ->
     // Generate all method strings
     let insertMethod = generateInsert useAsync normalized
+    let insertOrIgnoreMethod =
+      if normalized.baseTable.ignoreNonUniqueAnnotations.IsEmpty then
+        None
+      else
+        Some(generateInsertOrIgnore useAsync normalized)
     let getAllMethod = generateGetAll useAsync normalized
     let getByIdMethod = generateGetById useAsync normalized
     let getOneMethod = generateGetOne useAsync normalized
@@ -1428,6 +1585,7 @@ let generateNormalizedTableCode (useAsync: bool) (normalized: NormalizedTable) :
     // Collect all methods
     let allMethods =
       [ Some insertMethod
+        insertOrIgnoreMethod
         Some getAllMethod
         getByIdMethod
         Some getOneMethod

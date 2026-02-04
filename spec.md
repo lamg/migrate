@@ -701,6 +701,72 @@ Available columns: id, name
 - Integration with Insert and GetById methods
 - Comprehensive test coverage (22 tests)
 
+### 6. Insert-or-Ignore Generation with IgnoreNonUnique Annotations
+
+Migrate supports `IgnoreNonUnique` annotations to generate an `InsertOrIgnore` method that performs an `INSERT OR IGNORE` and skips insertion when a unique constraint is violated.
+
+**Syntax:**
+```sql
+CREATE TABLE table_name (...);
+-- IgnoreNonUnique
+```
+
+**Placement:** IgnoreNonUnique annotations must appear on the line(s) immediately following a CREATE TABLE statement (not supported on views).
+
+**Features:**
+- Generates a method named `InsertOrIgnore`
+- Uses `INSERT OR IGNORE` SQL to avoid unique constraint failures
+- Returns `Result<int64 option, SqliteException>` (`None` if insert was ignored)
+- Works with regular tables and normalized tables (discriminated unions)
+- **Not supported on views** (views are read-only, will fail validation with clear error)
+
+**Behavior:**
+1. Executes `INSERT OR IGNORE` for the table
+2. If the insert is ignored (0 rows affected), returns `Ok None`
+3. If inserted, returns `Ok (Some id)` with the new row ID
+
+**SQL Example:**
+```sql
+CREATE TABLE students (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT UNIQUE,
+  name TEXT NOT NULL
+);
+-- IgnoreNonUnique
+```
+
+**Generated F# Code:**
+```fsharp
+type Student with
+  static member InsertOrIgnore (item: Student) (tx: SqliteTransaction) : Result<int64 option, SqliteException> =
+    try
+      use cmd = new SqliteCommand("INSERT OR IGNORE INTO students (email, name) VALUES (@email, @name)", tx.Connection, tx)
+      // ... parameter bindings ...
+      let rows = cmd.ExecuteNonQuery()
+      if rows = 0 then Ok None
+      else
+        use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+        let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>
+        Ok (Some lastId)
+    with
+    | :? SqliteException as ex -> Error ex
+```
+
+**Views:**
+- **NOT SUPPORTED** - Views are read-only
+- Annotation will fail validation with error:
+```
+IgnoreNonUnique annotation is not supported on views (view 'view_name' is read-only).
+```
+
+**Implementation Status:**
+✅ COMPLETE - Fully implemented and integrated (February 2026)
+- SQL comment parsing with FParsec
+- IgnoreNonUnique annotation extraction
+- Code generation for regular tables and normalized tables
+- View validation rejection (clear error message)
+- Integration with existing CRUD generation pipeline
+
 ### 8. Normalized Schema Representation with Discriminated Unions
 
 For normalized database schemas (2NF) that eliminate NULLs by splitting optional fields into separate tables, Migrate generates F# discriminated unions instead of option types. This approach leverages F#'s type system to represent optional data through table relationships rather than nullable columns.

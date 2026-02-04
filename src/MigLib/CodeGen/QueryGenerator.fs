@@ -180,6 +180,105 @@ let generateInsert (useAsync: bool) (table: CreateTable) : string =
 
     generateStaticMemberCode typeName memberName returnType body
 
+/// Generate INSERT OR IGNORE method using Fabulous.AST for sync version
+let generateInsertOrIgnore (useAsync: bool) (table: CreateTable) : string =
+  let typeName = capitalize table.name
+  let pkCols = getPrimaryKey table
+
+  // Exclude auto-increment primary keys from insert
+  let insertCols =
+    table.columns
+    |> List.filter (fun col ->
+      not (
+        pkCols
+        |> List.exists (fun pk ->
+          pk.name = col.name
+          && pk.constraints
+             |> List.exists (fun c ->
+               match c with
+               | PrimaryKey pk -> pk.isAutoincrement
+               | _ -> false))
+      ))
+
+  let columnNames = insertCols |> List.map (fun c -> c.name) |> String.concat ", "
+
+  let paramNames =
+    insertCols |> List.map (fun c -> $"@{c.name}") |> String.concat ", "
+
+  let insertSql = $"INSERT OR IGNORE INTO {table.name} ({columnNames}) VALUES ({paramNames})"
+
+  if useAsync then
+    // Build the async method body using AST with task CE
+    let asyncParamBindingExprs =
+      insertCols
+      |> List.map (fun col ->
+        let fieldName = capitalize col.name
+        let isNullable = TypeGenerator.isColumnNullable col
+
+        if isNullable then
+          OtherExpr
+            $"cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        else
+          OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
+
+    let asyncBodyExprs =
+      [ OtherExpr $"use cmd = new SqliteCommand(\"{insertSql}\", tx.Connection, tx)" ]
+      @ asyncParamBindingExprs
+      @ [ OtherExpr "let! rows = cmd.ExecuteNonQueryAsync()"
+          OtherExpr "if rows = 0 then return Ok None else"
+          OtherExpr "  use lastIdCmd = new SqliteCommand(\"SELECT last_insert_rowid()\", tx.Connection, tx)"
+          OtherExpr "  let! lastId = lastIdCmd.ExecuteScalarAsync()"
+          OtherExpr "  return Ok (Some(lastId |> unbox<int64>))" ]
+
+    let memberName = $"InsertOrIgnore (item: {typeName}) (tx: SqliteTransaction)"
+    let returnType = "Task<Result<int64 option, SqliteException>>"
+    let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
+
+    generateStaticMemberCode typeName memberName returnType body
+  else
+    // Build the sync method body using AST
+    let paramBindingStmts =
+      insertCols
+      |> List.map (fun col ->
+        let fieldName = capitalize col.name
+        let isNullable = TypeGenerator.isColumnNullable col
+
+        if isNullable then
+          let matchExpr =
+            ParenExpr(
+              MatchExpr(
+                ConstantExpr $"item.{fieldName}",
+                [ MatchClauseExpr("Some v", "box v")
+                  MatchClauseExpr("None", "box DBNull.Value") ]
+              )
+            )
+
+          let addWithValue =
+            AppExpr("cmd.Parameters.AddWithValue", [ ConstantExpr $"\"@{col.name}\""; matchExpr ])
+
+          pipeIgnore addWithValue
+        else
+          let addWithValue =
+            AppExpr(
+              "cmd.Parameters.AddWithValue",
+              [ ConstantExpr $"\"@{col.name}\""; ConstantExpr $"item.{fieldName}" ]
+            )
+
+          pipeIgnore addWithValue)
+
+    let bodyExprs =
+      ConstantExpr $"use cmd = new SqliteCommand(\"{insertSql}\", tx.Connection, tx)"
+      :: paramBindingStmts
+      @ [ ConstantExpr "let rows = cmd.ExecuteNonQuery()"
+          ConstantExpr
+            "if rows = 0 then Ok None else (use lastIdCmd = new SqliteCommand(\"SELECT last_insert_rowid()\", tx.Connection, tx); let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>; Ok (Some lastId))" ]
+
+    let memberName = $"InsertOrIgnore (item: {typeName}) (tx: SqliteTransaction)"
+    let returnType = "Result<int64 option, SqliteException>"
+    let body = trySqliteException bodyExprs
+
+    generateStaticMemberCode typeName memberName returnType body
+
 /// Generate GET by ID method (transaction-only) using Fabulous.AST for sync version
 let generateGet (useAsync: bool) (table: CreateTable) : string option =
   let typeName = capitalize table.name
@@ -876,6 +975,11 @@ let generateTableCode (useAsync: bool) (table: CreateTable) : Result<string, str
   | _ ->
     // CRUD methods with curried signatures
     let insertMethod = generateInsert useAsync table
+    let insertOrIgnoreMethod =
+      if table.ignoreNonUniqueAnnotations.IsEmpty then
+        None
+      else
+        Some(generateInsertOrIgnore useAsync table)
     let getMethod = generateGet useAsync table
     let getAllMethod = generateGetAll useAsync table
     let getOneMethod = generateGetOne useAsync table
@@ -893,6 +997,7 @@ let generateTableCode (useAsync: bool) (table: CreateTable) : Result<string, str
 
     let allMethods =
       [ Some insertMethod
+        insertOrIgnoreMethod
         getMethod
         Some getAllMethod
         Some getOneMethod
@@ -1151,9 +1256,9 @@ let generateViewQueryBy
 let generateViewCode (useAsync: bool) (view: CreateView) (columns: ViewColumn list) : Result<string, string> =
   let typeName = capitalize view.name
 
-  // Reject QueryByOrCreate annotations on views (views are read-only)
-  match view.queryByOrCreateAnnotations with
-  | [] ->
+  // Reject QueryByOrCreate and IgnoreNonUnique annotations on views (views are read-only)
+  match view.queryByOrCreateAnnotations, view.ignoreNonUniqueAnnotations with
+  | [], [] ->
     // Validate all QueryBy annotations
     let validationResults =
       view.queryByAnnotations
@@ -1183,6 +1288,9 @@ let generateViewCode (useAsync: bool) (view: CreateView) (columns: ViewColumn li
       Ok
         $"""type {typeName} with
 {allMethods}"""
-  | _ ->
+  | _ :: _, _ ->
     Error
       $"QueryByOrCreate annotation is not supported on views (view '{view.name}' is read-only). Use QueryBy instead."
+  | [], _ :: _ ->
+    Error
+      $"IgnoreNonUnique annotation is not supported on views (view '{view.name}' is read-only)."
