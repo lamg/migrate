@@ -49,7 +49,7 @@ type internal QueryByAnnotation = { columns: string list }
 
 type internal QueryByOrCreateAnnotation = { columns: string list }
 
-type internal IgnoreNonUniqueAnnotation = IgnoreNonUniqueAnnotation
+type internal InsertOrIgnoreAnnotation = InsertOrIgnoreAnnotation
 
 type internal CreateView =
   { name: string
@@ -57,7 +57,7 @@ type internal CreateView =
     dependencies: string list
     queryByAnnotations: QueryByAnnotation list
     queryByOrCreateAnnotations: QueryByOrCreateAnnotation list
-    ignoreNonUniqueAnnotations: IgnoreNonUniqueAnnotation list }
+    insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list }
 
 type internal CreateTable =
   { name: string
@@ -65,7 +65,7 @@ type internal CreateTable =
     constraints: ColumnConstraint list
     queryByAnnotations: QueryByAnnotation list
     queryByOrCreateAnnotations: QueryByOrCreateAnnotation list
-    ignoreNonUniqueAnnotations: IgnoreNonUniqueAnnotation list }
+    insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list }
 
 type internal CreateIndex =
   { name: string

@@ -701,17 +701,17 @@ Available columns: id, name
 - Integration with Insert and GetById methods
 - Comprehensive test coverage (22 tests)
 
-### 6. Insert-or-Ignore Generation with IgnoreNonUnique Annotations
+### 6. Insert-or-Ignore Generation with InsertOrIgnore Annotations
 
-Migrate supports `IgnoreNonUnique` annotations to generate an `InsertOrIgnore` method that performs an `INSERT OR IGNORE` and skips insertion when a unique constraint is violated.
+Migrate supports `InsertOrIgnore` annotations to generate an `InsertOrIgnore` method that performs an `INSERT OR IGNORE` and skips insertion when a unique constraint is violated.
 
 **Syntax:**
 ```sql
 CREATE TABLE table_name (...);
--- IgnoreNonUnique
+-- InsertOrIgnore
 ```
 
-**Placement:** IgnoreNonUnique annotations must appear on the line(s) immediately following a CREATE TABLE statement (not supported on views).
+**Placement:** InsertOrIgnore annotations must appear on the line(s) immediately following a CREATE TABLE statement (not supported on views).
 
 **Features:**
 - Generates a method named `InsertOrIgnore`
@@ -732,7 +732,7 @@ CREATE TABLE students (
   email TEXT UNIQUE,
   name TEXT NOT NULL
 );
--- IgnoreNonUnique
+-- InsertOrIgnore
 ```
 
 **Generated F# Code:**
@@ -756,13 +756,13 @@ type Student with
 - **NOT SUPPORTED** - Views are read-only
 - Annotation will fail validation with error:
 ```
-IgnoreNonUnique annotation is not supported on views (view 'view_name' is read-only).
+InsertOrIgnore annotation is not supported on views (view 'view_name' is read-only).
 ```
 
 **Implementation Status:**
 ✅ COMPLETE - Fully implemented and integrated (February 2026)
 - SQL comment parsing with FParsec
-- IgnoreNonUnique annotation extraction
+- InsertOrIgnore annotation extraction
 - Code generation for regular tables and normalized tables
 - View validation rejection (clear error message)
 - Integration with existing CRUD generation pipeline

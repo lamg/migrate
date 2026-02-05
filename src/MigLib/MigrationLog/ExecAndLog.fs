@@ -26,7 +26,7 @@ let internal migrationLog: Types.CreateTable =
     constraints = []
     queryByAnnotations = []
     queryByOrCreateAnnotations = []
-    ignoreNonUniqueAnnotations = [] }
+    insertOrIgnoreAnnotations = [] }
 
 let private nowRFC3339 () =
   DateTimeOffset.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fffK")
@@ -47,7 +47,7 @@ let internal migrationSteps: Types.CreateTable =
             refColumns = [ "created_at" ] } ]
     queryByAnnotations = []
     queryByOrCreateAnnotations = []
-    ignoreNonUniqueAnnotations = [] }
+    insertOrIgnoreAnnotations = [] }
 
 let migrationStatements () =
   result {

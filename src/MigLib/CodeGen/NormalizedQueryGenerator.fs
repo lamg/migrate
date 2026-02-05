@@ -1561,11 +1561,13 @@ let generateNormalizedTableCode (useAsync: bool) (normalized: NormalizedTable) :
   | _ ->
     // Generate all method strings
     let insertMethod = generateInsert useAsync normalized
+
     let insertOrIgnoreMethod =
-      if normalized.baseTable.ignoreNonUniqueAnnotations.IsEmpty then
+      if normalized.baseTable.insertOrIgnoreAnnotations.IsEmpty then
         None
       else
         Some(generateInsertOrIgnore useAsync normalized)
+
     let getAllMethod = generateGetAll useAsync normalized
     let getByIdMethod = generateGetById useAsync normalized
     let getOneMethod = generateGetOne useAsync normalized

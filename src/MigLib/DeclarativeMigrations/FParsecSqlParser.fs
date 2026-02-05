@@ -278,43 +278,40 @@ let queryByOrCreateAnnotation: Parser<QueryByOrCreateAnnotation, unit> =
 let queryByOrCreateAnnotations: Parser<QueryByOrCreateAnnotation list, unit> =
   many (attempt (ws >>. queryByOrCreateAnnotation))
 
-// IgnoreNonUnique annotation parsing
-let ignoreNonUniqueAnnotation: Parser<IgnoreNonUniqueAnnotation, unit> =
+// InsertOrIgnore annotation parsing
+let insertOrIgnoreAnnotation: Parser<InsertOrIgnoreAnnotation, unit> =
   pstring "--"
   >>. spaces
-  >>. pstringCI "IgnoreNonUnique"
+  >>. pstringCI "InsertOrIgnore"
   >>. spaces
   >>. opt (pchar '(' >>. spaces >>. pchar ')')
   .>> restOfLine false
-  >>% IgnoreNonUniqueAnnotation
+  >>% InsertOrIgnoreAnnotation
 
-let ignoreNonUniqueAnnotations: Parser<IgnoreNonUniqueAnnotation list, unit> =
-  many (attempt (ws >>. ignoreNonUniqueAnnotation))
+let insertOrIgnoreAnnotations: Parser<InsertOrIgnoreAnnotation list, unit> =
+  many (attempt (ws >>. insertOrIgnoreAnnotation))
 
 type Annotation =
   | QueryByAnno of QueryByAnnotation
   | QueryByOrCreateAnno of QueryByOrCreateAnnotation
-  | IgnoreNonUniqueAnno of IgnoreNonUniqueAnnotation
+  | InsertOrIgnoreAnno of InsertOrIgnoreAnnotation
 
 let annotation: Parser<Annotation, unit> =
   choice
     [ attempt (queryByAnnotation |>> QueryByAnno)
       attempt (queryByOrCreateAnnotation |>> QueryByOrCreateAnno)
-      ignoreNonUniqueAnnotation |>> IgnoreNonUniqueAnno ]
+      insertOrIgnoreAnnotation |>> InsertOrIgnoreAnno ]
 
-let annotations: Parser<Annotation list, unit> =
-  many (attempt (ws >>. annotation))
+let annotations: Parser<Annotation list, unit> = many (attempt (ws >>. annotation))
 
-let commentLine: Parser<string, unit> =
-  pstring "--" >>. restOfLine false
+let commentLine: Parser<string, unit> = pstring "--" >>. restOfLine false
 
-let commentLines: Parser<string list, unit> =
-  many (attempt (ws >>. commentLine))
+let commentLines: Parser<string list, unit> = many (attempt (ws >>. commentLine))
 
 let parseAnnotationsFromComments (comments: string list) =
   let queryBy = ResizeArray<QueryByAnnotation>()
   let queryByOrCreate = ResizeArray<QueryByOrCreateAnnotation>()
-  let ignoreNonUnique = ResizeArray<IgnoreNonUniqueAnnotation>()
+  let insertOrIgnore = ResizeArray<InsertOrIgnoreAnnotation>()
 
   let parseColumns (cols: string) =
     cols.Split(',')
@@ -336,18 +333,22 @@ let parseAnnotationsFromComments (comments: string list) =
     match tryMatch @"^QueryBy\s*\((.*)\)\s*$" line with
     | Some m ->
       let cols = parseColumns m.Groups.[1].Value
-      if cols.Length > 0 then queryBy.Add({ columns = cols })
+
+      if cols.Length > 0 then
+        queryBy.Add({ columns = cols })
     | None ->
       match tryMatch @"^QueryByOrCreate\s*\((.*)\)\s*$" line with
       | Some m ->
         let cols = parseColumns m.Groups.[1].Value
-        if cols.Length > 0 then queryByOrCreate.Add({ columns = cols })
+
+        if cols.Length > 0 then
+          queryByOrCreate.Add({ columns = cols })
       | None ->
-        match tryMatch @"^IgnoreNonUnique(?:\s*\(\s*\))?\s*$" line with
-        | Some _ -> ignoreNonUnique.Add(IgnoreNonUniqueAnnotation)
+        match tryMatch @"^InsertOrIgnore(?:\s*\(\s*\))?\s*$" line with
+        | Some _ -> insertOrIgnore.Add(InsertOrIgnoreAnnotation)
         | None -> ()
 
-  (List.ofSeq queryBy, List.ofSeq queryByOrCreate, List.ofSeq ignoreNonUnique)
+  (List.ofSeq queryBy, List.ofSeq queryByOrCreate, List.ofSeq insertOrIgnore)
 
 // CREATE TABLE parsing
 let createTable: Parser<CreateTable, unit> =
@@ -373,7 +374,7 @@ let createTable: Parser<CreateTable, unit> =
         | Choice2Of2 c -> Some c
         | _ -> None)
 
-    let queryByAnnos, queryByOrCreateAnnos, ignoreNonUniqueAnnos =
+    let queryByAnnos, queryByOrCreateAnnos, insertOrIgnoreAnnos =
       parseAnnotationsFromComments comments
 
     { name = tableName
@@ -381,7 +382,7 @@ let createTable: Parser<CreateTable, unit> =
       constraints = constraints
       queryByAnnotations = queryByAnnos
       queryByOrCreateAnnotations = queryByOrCreateAnnos
-      ignoreNonUniqueAnnotations = ignoreNonUniqueAnnos }
+      insertOrIgnoreAnnotations = insertOrIgnoreAnnos }
 
 // CREATE VIEW parsing
 let createView: Parser<CreateView, unit> =
@@ -411,7 +412,7 @@ let createView: Parser<CreateView, unit> =
           yield m.Groups.[1].Value ]
       |> List.distinct
 
-    let queryByAnnos, queryByOrCreateAnnos, ignoreNonUniqueAnnos =
+    let queryByAnnos, queryByOrCreateAnnos, insertOrIgnoreAnnos =
       parseAnnotationsFromComments comments
 
     { name = viewName
@@ -419,7 +420,7 @@ let createView: Parser<CreateView, unit> =
       dependencies = dependencies
       queryByAnnotations = queryByAnnos
       queryByOrCreateAnnotations = queryByOrCreateAnnos
-      ignoreNonUniqueAnnotations = ignoreNonUniqueAnnos }
+      insertOrIgnoreAnnotations = insertOrIgnoreAnnos }
 
 // CREATE INDEX parsing
 let createIndex: Parser<CreateIndex, unit> =

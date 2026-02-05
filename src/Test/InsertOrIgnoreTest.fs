@@ -1,4 +1,4 @@
-module Test.IgnoreNonUniqueTest
+module Test.InsertOrIgnoreTest
 
 open Xunit
 open FsToolkit.ErrorHandling
@@ -11,50 +11,49 @@ open migrate.CodeGen
 // ============================================================================
 
 [<Fact>]
-let ``IgnoreNonUnique annotation is parsed from CREATE TABLE statement`` () =
+let ``InsertOrIgnore annotation is parsed from CREATE TABLE statement`` () =
   let sql =
     """
     CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL, status text);
-    -- IgnoreNonUnique
+    -- InsertOrIgnore
     """
 
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    return table.ignoreNonUniqueAnnotations
+    return table.insertOrIgnoreAnnotations
   }
   |> function
-    | Ok annotations ->
-      Assert.Equal(1, annotations.Length)
+    | Ok annotations -> Assert.Equal(1, annotations.Length)
     | Error e -> Assert.Fail $"Parsing failed: {e}"
 
 [<Fact>]
-let ``Table without IgnoreNonUnique annotation has empty list`` () =
+let ``Table without InsertOrIgnore annotation has empty list`` () =
   let sql = "CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL);"
 
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    return table.ignoreNonUniqueAnnotations
+    return table.insertOrIgnoreAnnotations
   }
   |> function
     | Ok annotations -> Assert.Empty(annotations)
     | Error e -> Assert.Fail $"Parsing failed: {e}"
 
 [<Fact>]
-let ``IgnoreNonUnique can coexist with QueryBy and QueryByOrCreate annotations`` () =
+let ``InsertOrIgnore can coexist with QueryBy and QueryByOrCreate annotations`` () =
   let sql =
     """
     CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL, status text);
     -- QueryBy(status)
     -- QueryByOrCreate(name)
-    -- IgnoreNonUnique
+    -- InsertOrIgnore
     """
 
   result {
     let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
-    return (table.queryByAnnotations, table.queryByOrCreateAnnotations, table.ignoreNonUniqueAnnotations)
+    return (table.queryByAnnotations, table.queryByOrCreateAnnotations, table.insertOrIgnoreAnnotations)
   }
   |> function
     | Ok(queryByAnnos, queryByOrCreateAnnos, ignoreAnnos) ->
@@ -68,11 +67,11 @@ let ``IgnoreNonUnique can coexist with QueryBy and QueryByOrCreate annotations``
 // ============================================================================
 
 [<Fact>]
-let ``IgnoreNonUnique generates InsertOrIgnore with INSERT OR IGNORE SQL`` () =
+let ``InsertOrIgnore generates InsertOrIgnore with INSERT OR IGNORE SQL`` () =
   let sql =
     """
     CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL, status text);
-    -- IgnoreNonUnique
+    -- InsertOrIgnore
     """
 
   result {
@@ -89,7 +88,7 @@ let ``IgnoreNonUnique generates InsertOrIgnore with INSERT OR IGNORE SQL`` () =
     | Error e -> Assert.Fail $"Code generation failed: {e}"
 
 [<Fact>]
-let ``IgnoreNonUnique is not generated when annotation is absent`` () =
+let ``InsertOrIgnore is not generated when annotation is absent`` () =
   let sql =
     """
     CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL, status text);
@@ -102,8 +101,7 @@ let ``IgnoreNonUnique is not generated when annotation is absent`` () =
     return code
   }
   |> function
-    | Ok code ->
-      Assert.DoesNotContain("InsertOrIgnore", code)
+    | Ok code -> Assert.DoesNotContain("InsertOrIgnore", code)
     | Error e -> Assert.Fail $"Code generation failed: {e}"
 
 // ============================================================================
@@ -111,11 +109,11 @@ let ``IgnoreNonUnique is not generated when annotation is absent`` () =
 // ============================================================================
 
 [<Fact>]
-let ``IgnoreNonUnique works with normalized tables`` () =
+let ``InsertOrIgnore works with normalized tables`` () =
   let sql =
     """
     CREATE TABLE student (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
-    -- IgnoreNonUnique
+    -- InsertOrIgnore
     CREATE TABLE student_address (id INTEGER PRIMARY KEY REFERENCES student(id), address TEXT NOT NULL);
     """
 
@@ -139,12 +137,12 @@ let ``IgnoreNonUnique works with normalized tables`` () =
 // ============================================================================
 
 [<Fact>]
-let ``IgnoreNonUnique on view fails validation`` () =
+let ``InsertOrIgnore on view fails validation`` () =
   let sql =
     """
     CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL);
     CREATE VIEW all_students AS SELECT id, name FROM student;
-    -- IgnoreNonUnique
+    -- InsertOrIgnore
     """
 
   result {
@@ -157,5 +155,5 @@ let ``IgnoreNonUnique on view fails validation`` () =
   |> function
     | Ok _ -> Assert.Fail "Should have failed validation for view"
     | Error msg ->
-      Assert.Contains("IgnoreNonUnique annotation is not supported on views", msg)
+      Assert.Contains("InsertOrIgnore annotation is not supported on views", msg)
       Assert.Contains("read-only", msg)

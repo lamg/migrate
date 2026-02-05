@@ -205,7 +205,8 @@ let generateInsertOrIgnore (useAsync: bool) (table: CreateTable) : string =
   let paramNames =
     insertCols |> List.map (fun c -> $"@{c.name}") |> String.concat ", "
 
-  let insertSql = $"INSERT OR IGNORE INTO {table.name} ({columnNames}) VALUES ({paramNames})"
+  let insertSql =
+    $"INSERT OR IGNORE INTO {table.name} ({columnNames}) VALUES ({paramNames})"
 
   if useAsync then
     // Build the async method body using AST with task CE
@@ -271,7 +272,8 @@ let generateInsertOrIgnore (useAsync: bool) (table: CreateTable) : string =
       :: paramBindingStmts
       @ [ ConstantExpr "let rows = cmd.ExecuteNonQuery()"
           ConstantExpr
-            "if rows = 0 then Ok None else (use lastIdCmd = new SqliteCommand(\"SELECT last_insert_rowid()\", tx.Connection, tx); let lastId = lastIdCmd.ExecuteScalar() |> unbox<int64>; Ok (Some lastId))" ]
+            "let getLastId () = (use lastIdCmd = new SqliteCommand(\"SELECT last_insert_rowid()\", tx.Connection, tx) in lastIdCmd.ExecuteScalar() |> unbox<int64>)"
+          ConstantExpr "if rows = 0 then Ok None else Ok (Some (getLastId ()))" ]
 
     let memberName = $"InsertOrIgnore (item: {typeName}) (tx: SqliteTransaction)"
     let returnType = "Result<int64 option, SqliteException>"
@@ -975,11 +977,13 @@ let generateTableCode (useAsync: bool) (table: CreateTable) : Result<string, str
   | _ ->
     // CRUD methods with curried signatures
     let insertMethod = generateInsert useAsync table
+
     let insertOrIgnoreMethod =
-      if table.ignoreNonUniqueAnnotations.IsEmpty then
+      if table.insertOrIgnoreAnnotations.IsEmpty then
         None
       else
         Some(generateInsertOrIgnore useAsync table)
+
     let getMethod = generateGet useAsync table
     let getAllMethod = generateGetAll useAsync table
     let getOneMethod = generateGetOne useAsync table
@@ -1256,8 +1260,8 @@ let generateViewQueryBy
 let generateViewCode (useAsync: bool) (view: CreateView) (columns: ViewColumn list) : Result<string, string> =
   let typeName = capitalize view.name
 
-  // Reject QueryByOrCreate and IgnoreNonUnique annotations on views (views are read-only)
-  match view.queryByOrCreateAnnotations, view.ignoreNonUniqueAnnotations with
+  // Reject QueryByOrCreate and InsertOrIgnore annotations on views (views are read-only)
+  match view.queryByOrCreateAnnotations, view.insertOrIgnoreAnnotations with
   | [], [] ->
     // Validate all QueryBy annotations
     let validationResults =
@@ -1291,6 +1295,4 @@ let generateViewCode (useAsync: bool) (view: CreateView) (columns: ViewColumn li
   | _ :: _, _ ->
     Error
       $"QueryByOrCreate annotation is not supported on views (view '{view.name}' is read-only). Use QueryBy instead."
-  | [], _ :: _ ->
-    Error
-      $"IgnoreNonUnique annotation is not supported on views (view '{view.name}' is read-only)."
+  | [], _ :: _ -> Error $"InsertOrIgnore annotation is not supported on views (view '{view.name}' is read-only)."
