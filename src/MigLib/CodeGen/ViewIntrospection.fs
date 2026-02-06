@@ -86,7 +86,7 @@ let getViewColumns (tables: CreateTable list) (view: CreateView) : Result<ViewCo
       columns.Add
         { name = colName
           columnType = sqlType
-          isNullable = notNull = 0 }
+          isNullable = false }
 
     return columns |> Seq.toList
   }
