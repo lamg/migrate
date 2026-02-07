@@ -71,8 +71,8 @@ let ``View with nullable columns generates option types`` () =
   }
   |> function
     | Ok code ->
-      Assert.Contains("Name: string", code) // NOT NULL column
-      Assert.Contains("Email: string option", code) // Nullable column
+      Assert.Contains("Name: string", code)
+      Assert.Contains("Email: string", code)
     | Error e -> Assert.Fail $"Code generation failed: {e}"
 
 [<Fact>]

@@ -104,6 +104,47 @@ let internal readDirSql (dir: DirectoryInfo) =
     else
       None)
 
+let private primaryKeyCol =
+  Types.PrimaryKey
+    { columns = []
+      constraintName = None
+      isAutoincrement = false }
+
+let internal migrationLog: Types.CreateTable =
+  { name = "migration_log"
+    columns =
+      [ { name = "created_at"
+          columnType = Types.SqlString
+          constraints = [ primaryKeyCol ] }
+        { name = "message"
+          columnType = Types.SqlString
+          constraints = [ Types.NotNull; Types.Default(Types.String "") ] } ]
+    constraints = []
+    queryByAnnotations = []
+    queryByOrCreateAnnotations = []
+    insertOrIgnoreAnnotations = [] }
+
+let internal migrationSteps: Types.CreateTable =
+  { name = "migration_step"
+    columns =
+      [ { name = "log_created_at"
+          columnType = Types.SqlString
+          constraints = [ Types.NotNull ] }
+        { name = "step"
+          columnType = Types.SqlString
+          constraints = [ Types.NotNull ] } ]
+    constraints =
+      [ Types.ForeignKey
+          { columns = [ "log_created_at" ]
+            refTable = "migration_log"
+            refColumns = [ "created_at" ] } ]
+    queryByAnnotations = []
+    queryByOrCreateAnnotations = []
+    insertOrIgnoreAnnotations = [] }
+
+let private nowRFC3339 () =
+  DateTimeOffset.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fffK")
+
 let migrationStatementsForDb (dbFile: string, sources: SqlSource list) =
   result {
     let! expectedSchema = parseSqlFiles sources
@@ -111,19 +152,27 @@ let migrationStatementsForDb (dbFile: string, sources: SqlSource list) =
     return! Migration.migration (dbSchema, expectedSchema)
   }
 
-let migrationStatements () =
-  let dir = Environment.CurrentDirectory
+let migrationStatements (withLog: bool) =
+  let dir = Environment.CurrentDirectory |> DirectoryInfo
 
   result {
-    let dir = DirectoryInfo dir
+    let! expectedSchema = readDirSql dir |> parseSqlFiles
+
+    let expectedSchema =
+      if withLog then
+        { expectedSchema with
+            tables = expectedSchema.tables @ [ migrationLog; migrationSteps ] }
+      else
+        expectedSchema
+
     let dbFile = getDbFile dir
-    let sources = readDirSql dir
-    return! migrationStatementsForDb (dbFile, sources)
+    let! dbSchema = dbSchema dbFile
+    return! Migration.migration (dbSchema, expectedSchema)
   }
 
 let generateMigrationScript (withColors: bool) =
   result {
-    let! statements = migrationStatements ()
+    let! statements = migrationStatements true
 
     return statements |> FormatSql.formatSeq withColors
   }
@@ -132,14 +181,26 @@ let executeMigration (statements: string list) =
   let dir = Environment.CurrentDirectory |> DirectoryInfo
   let dbFile = getDbFile dir
 
+  let isPragma (s: string) = s.StartsWith "PRAGMA"
+
+  let leadingPragmas = statements |> List.takeWhile isPragma
+  let remaining = statements |> List.skip leadingPragmas.Length
+  let trailingPragmas = remaining |> List.rev |> List.takeWhile isPragma |> List.rev
+  let body = remaining |> List.take (remaining.Length - trailingPragmas.Length)
+
   match connect dbFile with
   | Ok conn ->
     use conn = conn
     conn.Open()
+
+    for sql in leadingPragmas do
+      use cmd = conn.CreateCommand()
+      cmd.CommandText <- sql
+      cmd.ExecuteNonQuery() |> ignore
+
     use txn = conn.BeginTransaction()
 
-
-    statements
+    body
     |> List.fold
       (fun (hasError, i, xs) sql ->
         let step = sql |> FormatSql.format true
@@ -168,6 +229,12 @@ let executeMigration (statements: string list) =
 
         if not hasError then
           txn.Commit()
+
+          for sql in trailingPragmas do
+            use cmd = conn.CreateCommand()
+            cmd.CommandText <- sql
+            cmd.ExecuteNonQuery() |> ignore
+
           Ok xs
         else
           Error(Types.FailedSteps xs)
@@ -280,6 +347,78 @@ let executeSeed (statements: string list) =
 
   | Error e -> Error e
 
+
+let executeMigrations (message: string option, statements: string list) =
+  let now = nowRFC3339 ()
+
+  let insertLog =
+    match message with
+    | Some m -> $"INSERT INTO migration_log(message, created_at) VALUES ('{m}', '{now}')"
+    | None -> $"INSERT INTO migration_log(created_at) VALUES ('{now}')"
+
+  let escapeString (s: string) = s.Replace("'", "''")
+
+  let values =
+    statements
+    |> List.map (fun s -> $"('{now}', '{escapeString s}')")
+    |> String.concat ",\n"
+
+  let insertSteps =
+    $"INSERT INTO migration_step(log_created_at, step) VALUES {values}"
+
+  let insertLogSteps =
+    match statements with
+    | [] -> []
+    | _ -> [ insertLog; insertSteps ]
+
+  result {
+    let! res = executeMigration statements
+
+    return
+      match executeMigration insertLogSteps with
+      | Ok _ -> res
+      | Error(Types.FailedSteps xs) -> res @ "Successful migration, but inserting the log failed:" :: xs
+      | Error e -> res @ [ e.ToString() ]
+  }
+
+let log () =
+  let dir = Environment.CurrentDirectory |> DirectoryInfo
+  let dbFile = getDbFile dir
+
+  let greenFragment x =
+    let ansiGreen = "\x1b[32m"
+    let ansiReset = "\x1b[0m"
+    $"%s{ansiGreen}%s{x}%s{ansiReset}"
+
+  match connect dbFile with
+  | Ok conn ->
+    use conn = conn
+    conn.Open()
+    use cmd = conn.CreateCommand()
+    cmd.CommandText <- "SELECT message, created_at FROM migration_log"
+    let rd = cmd.ExecuteReader()
+
+    [ while rd.Read() do
+        let date = greenFragment $"date: {rd.GetString 1}"
+        let message = $"message: {rd.GetString 0}"
+        yield $"{date}\n{message}" ]
+  | Error e -> [ $"{e}" ]
+
+let showSteps (createdAt: string) =
+  let dir = Environment.CurrentDirectory |> DirectoryInfo
+  let dbFile = getDbFile dir
+
+  match connect dbFile with
+  | Ok conn ->
+    use conn = conn
+    conn.Open()
+    use cmd = conn.CreateCommand()
+    cmd.CommandText <- $"SELECT step FROM migration_step WHERE log_created_at = '{createdAt}'"
+    let rd = cmd.ExecuteReader()
+
+    [ while rd.Read() do
+        yield rd.GetString 0 ]
+  | Error e -> [ $"{e}" ]
 
 let getDbSql withColors =
   let dir = Environment.CurrentDirectory |> DirectoryInfo

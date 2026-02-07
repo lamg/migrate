@@ -6,7 +6,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     
     <PackageId>MigLib</PackageId>
-    <Version>2.9.1</Version>
+    <Version>2.10.0</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <InvariantGlobalization>true</InvariantGlobalization>
     <RootNamespace>migrate</RootNamespace>
@@ -33,7 +33,6 @@
     <Compile Include="DeclarativeMigrations\Migration.fs" />
     <Compile Include="Execution\FormatSql.fs" />
     <Compile Include="Execution\Exec.fs" />
-    <Compile Include="MigrationLog\ExecAndLog.fs" />
     <Compile Include="CodeGen\FabulousAstHelpers.fs" />
     <Compile Include="CodeGen\AstExprBuilders.fs" />
     <Compile Include="CodeGen\ViewIntrospection.fs" />

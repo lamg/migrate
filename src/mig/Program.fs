@@ -1,7 +1,6 @@
 ﻿open System.IO
 open Argu
 open migrate.DeclarativeMigrations
-open migrate.MigrationLog
 open migrate.Execution
 open migrate.CodeGen
 open FsToolkit.ErrorHandling
@@ -82,7 +81,7 @@ and SeedArgs =
 
 let generate withColors =
   withColors
-  |> ExecAndLog.generateMigrationScript
+  |> Exec.generateMigrationScript
   |> function
     | Ok script ->
       printfn $"{script}"
@@ -106,7 +105,7 @@ module Exec =
 
   let exec () =
     result {
-      let! statements = Exec.migrationStatements ()
+      let! statements = Exec.migrationStatements false
       let! results = Exec.executeMigration statements
       return results
     }
@@ -116,8 +115,8 @@ module Exec =
     let message = flags.TryGetResult Message
 
     result {
-      let! statements = ExecAndLog.migrationStatements ()
-      let! results = ExecAndLog.executeMigrations (message, statements)
+      let! statements = Exec.migrationStatements true
+      let! results = Exec.executeMigrations (message, statements)
       return results
     }
     |> printExecResult
@@ -125,14 +124,14 @@ module Exec =
 let log (flags: ParseResults<LogArgs>) =
   match flags.TryGetResult StepsId with
   | Some id ->
-    ExecAndLog.showSteps id
+    Exec.showSteps id
     |> List.map (FormatSql.format true)
     |> String.concat "\n\n"
     |> printfn "%s"
 
     0
   | None ->
-    ExecAndLog.log () |> List.iter (printfn "%s\n")
+    Exec.log () |> List.iter (printfn "%s\n")
     0
 
 let schema withColors =

@@ -10,6 +10,7 @@
     <Compile Include="UseAsLib.fs" />
     <Compile Include="CompareObjects.fs" />
     <Compile Include="TableMigration.fs" />
+    <Compile Include="ColumnMigration.fs" />
     <Compile Include="ViewMigration.fs" />
     <Compile Include="CompositePKTest.fs" />
     <Compile Include="TransactionTest.fs" />

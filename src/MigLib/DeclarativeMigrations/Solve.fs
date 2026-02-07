@@ -281,7 +281,7 @@ let triggerMigrationSql (left: FileSorted) (right: FileSorted) =
 
   let rs =
     { set = triggerToSet right.file.triggers
-      sql = (fun v -> right.file.triggers |> findOne (fun n -> n.name = v) |> Trigger.createSql)
+      sql = fun v -> right.file.triggers |> findOne (fun n -> n.name = v) |> Trigger.createSql
       sorted = right.sortedRelations }
 
   simpleMigrationSql ls rs
@@ -319,16 +319,31 @@ let columnMigrations (left: CreateTable list) (right: CreateTable list) =
       else
         removes |> List.map (Column.dropSql left.name)
     | _ ->
-      let addedColumns =
-        adds
-        |> List.map (fun name -> right.columns |> List.find (fun c -> c.name = name) |> Table.columnDefSql)
+      let tempName = $"{right.name}_temp"
+      let rightColTuple = right.columns |> List.map _.name |> String.concat ", "
 
-      [ $"-- WARNING addition of columns {addedColumns} requires a complimentary script to ensure data integrity"
-        Table.sqlRenameTable (left.name, $"{left.name}_old")
-        Table.createSql right ]
+      let selectExprs =
+        right.columns
+        |> List.map (fun c ->
+          if left.columns |> List.exists (fun lc -> lc.name = c.name) then
+            c.name
+          else
+            Table.defaultValueSql c.columnType)
+        |> String.concat ", "
+
+      [ Table.createSql { right with name = tempName }
+        $"INSERT INTO {tempName}({rightColTuple}) SELECT {selectExprs} FROM {left.name}"
+        Table.dropSql left.name
+        Table.sqlRenameTable (tempName, right.name) ]
 
   let matchTables =
     left
     |> List.choose (fun l -> right |> List.tryFind (fun r -> l.name = r.name) |> Option.map (fun r -> l, r))
 
-  matchTables |> List.map migrateMatching |> List.concat
+  let stmts = matchTables |> List.map migrateMatching |> List.concat
+  let hasDropTable = stmts |> List.exists (fun s -> s.StartsWith "DROP TABLE")
+
+  if hasDropTable then
+    [ "PRAGMA foreign_keys=OFF" ] @ stmts @ [ "PRAGMA foreign_keys=ON" ]
+  else
+    stmts

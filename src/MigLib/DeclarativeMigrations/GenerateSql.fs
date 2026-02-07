@@ -36,6 +36,15 @@ module Table =
       let refCols = f.refColumns |> sepComma id
       $"FOREIGN KEY({cols}) REFERENCES {f.refTable}({refCols})"
 
+  let defaultValueSql =
+    function
+    | SqlInteger -> "0"
+    | SqlText -> "''"
+    | SqlReal -> "0.0"
+    | SqlTimestamp -> "''"
+    | SqlString -> "''"
+    | SqlFlexible -> "''"
+
   let colTypeSql =
     function
     | SqlInteger -> "integer"

@@ -48,19 +48,19 @@ CREATE TABLE student (
 The generated migration would be:
 
 ```sqlite
--- WARNING addition of columns [teacher_id integer NOT NULL] requires a complimentary script to ensure data integrity;
 CREATE TABLE teacher (id integer primary key);
 
-ALTER TABLE student RENAME TO student_old;
-
-CREATE TABLE student (
+CREATE TABLE student_temp (
   id integer PRIMARY KEY,
   teacher_id integer NOT NULL,
   FOREIGN KEY (teacher_id) REFERENCES teacher (id)
 );
+INSERT INTO student_temp(id, teacher_id) SELECT id, 0 FROM student;
+DROP TABLE student;
+ALTER TABLE student_temp RENAME TO student;
 ```
 
-When adding columns to a table, the data they hold requires a more complex migration that currently this program cannot handle, thus the user has to write a complimentary script.
+When adding columns to a table, a temp-table is created with the new schema, existing data is copied over using type-appropriate default values for the new columns (0 for integers, '' for text, 0.0 for reals), the old table is dropped, and the temp-table is renamed.
 
 Now let's analyze how we would go from the above schema with `teacher` and `student` to the original with just `student`:
 
