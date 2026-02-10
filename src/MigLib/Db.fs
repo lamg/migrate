@@ -84,6 +84,44 @@ type TaskTxnBuilder(dbPath: string) =
     : SqliteTransaction -> Task<Result<'T, SqliteException>> =
     m
 
+  member _.Zero() : SqliteTransaction -> Task<Result<unit, SqliteException>> = fun _ -> Task.FromResult(Ok())
+
+  member _.Delay
+    (f: unit -> SqliteTransaction -> Task<Result<'T, SqliteException>>)
+    : SqliteTransaction -> Task<Result<'T, SqliteException>> =
+    fun tx -> f () tx
+
+  member _.Combine
+    (
+      m: SqliteTransaction -> Task<Result<unit, SqliteException>>,
+      f: SqliteTransaction -> Task<Result<'T, SqliteException>>
+    ) : SqliteTransaction -> Task<Result<'T, SqliteException>> =
+    fun (tx: SqliteTransaction) ->
+      task {
+        match! m tx with
+        | Ok() -> return! f tx
+        | Error ex -> return Error ex
+      }
+
+  member _.For
+    (sequence: seq<'T>, body: 'T -> SqliteTransaction -> Task<Result<unit, SqliteException>>)
+    : SqliteTransaction -> Task<Result<unit, SqliteException>> =
+    fun (tx: SqliteTransaction) ->
+      task {
+        use enumerator = sequence.GetEnumerator()
+        let mutable lastError: SqliteException option = None
+        let mutable hasMore = enumerator.MoveNext()
+
+        while hasMore && lastError.IsNone do
+          match! body enumerator.Current tx with
+          | Ok() -> hasMore <- enumerator.MoveNext()
+          | Error err -> lastError <- Some err
+
+        match lastError with
+        | Some err -> return Error err
+        | None -> return Ok()
+      }
+
   /// Execute the transaction with automatic connection opening, transaction management, and cleanup
   member _.Run(action: SqliteTransaction -> Task<Result<'T, SqliteException>>) : Task<Result<'T, SqliteException>> =
     task {

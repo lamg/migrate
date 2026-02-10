@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.0] - 2026-02-10
+
+Added:
+
+- **TaskTxnBuilder loop support**: Added `For`, `Zero`, `Delay`, and `Combine` members to `TaskTxnBuilder`, enabling `for` loops inside `taskTxn` computation expressions
+  - All iterations share a single transaction, improving performance for batch operations
+  - Stops on first error and rolls back the entire transaction
+
 ## [2.9.1] - 2026-02-06
 
 Fixed:
