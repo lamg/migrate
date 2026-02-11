@@ -304,14 +304,16 @@ let seedStatements () =
     return statements
   }
 
-let executeSeed (statements: string list) =
-  let dir = Environment.CurrentDirectory |> DirectoryInfo
-  let dbFile = getDbFile dir
-
+let internal executeSeedForDb (dbFile: string) (statements: string list) =
   match connect dbFile with
   | Ok conn ->
     use conn = conn
     conn.Open()
+
+    use disableFkCmd = conn.CreateCommand()
+    disableFkCmd.CommandText <- "PRAGMA foreign_keys=OFF"
+    disableFkCmd.ExecuteNonQuery() |> ignore
+
     use txn = conn.BeginTransaction()
 
     statements
@@ -343,11 +345,22 @@ let executeSeed (statements: string list) =
 
         if not hasError then
           txn.Commit()
+
+          use enableFkCmd = conn.CreateCommand()
+          enableFkCmd.CommandText <- "PRAGMA foreign_keys=ON"
+          enableFkCmd.ExecuteNonQuery() |> ignore
+
           Ok xs
         else
           Error(Types.FailedSteps xs)
 
   | Error e -> Error e
+
+let executeSeed (statements: string list) =
+  let dir = Environment.CurrentDirectory |> DirectoryInfo
+  let dbFile = getDbFile dir
+
+  executeSeedForDb dbFile statements
 
 
 let executeMigrations (message: string option, statements: string list) =

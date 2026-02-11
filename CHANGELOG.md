@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.12.1] - 2026-02-11
+
+Fixed:
+
+- **Seed Execution FK Handling**: Disable foreign key checks while running `mig seed`, then re-enable them after commit
+  - Prevents failures when seed data for related tables must be inserted in an order that temporarily violates FK constraints
+  - Added regression test coverage for cyclic foreign key seed scenarios
+
 ## [2.12.0] - 2026-02-11
 
 Changed:

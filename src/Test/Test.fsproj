@@ -15,6 +15,7 @@
     <Compile Include="CompositePKTest.fs" />
     <Compile Include="TransactionTest.fs" />
     <Compile Include="TaskTxnTest.fs" />
+    <Compile Include="SeedExecutionTest.fs" />
     <Compile Include="ViewCodeGenTest.fs" />
     <Compile Include="QueryByTest.fs" />
     <Compile Include="QueryByOrCreateTest.fs" />
