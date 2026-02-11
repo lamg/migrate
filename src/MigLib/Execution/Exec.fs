@@ -137,7 +137,9 @@ let internal migrationSteps: Types.CreateTable =
       [ Types.ForeignKey
           { columns = [ "log_created_at" ]
             refTable = "migration_log"
-            refColumns = [ "created_at" ] } ]
+            refColumns = [ "created_at" ]
+            onDelete = None
+            onUpdate = None } ]
     queryByAnnotations = []
     queryByOrCreateAnnotations = []
     insertOrIgnoreAnnotations = [] }

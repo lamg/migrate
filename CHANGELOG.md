@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.12.0] - 2026-02-11
+
+Changed:
+
+- **SQL Parser Migration**: Replaced the FParsec-based SQLite schema parser with FsLexYacc
+  - Added lexer/parser grammar sources (`SqlLexer.fsl`, `SqlParser.fsy`) and generated parser modules
+  - Preserved existing migration/test behavior while removing FParsec dependency
+
+Fixed:
+
+- **Foreign Key Actions**: Properly parse and generate `ON DELETE`/`ON UPDATE` actions, including `ON DELETE CASCADE`
+  - Inline column foreign keys now emit valid `REFERENCES ... ON DELETE ...` SQL during table recreation
+  - Constraint-only FK changes now trigger table recreation migrations
+- **View Dependencies During Table Recreation**: Migration ordering now drops dependent views before recreated tables and recreates them afterward
+  - Avoids SQLite failures when recreating tables referenced by existing views
+  - Keeps `PRAGMA foreign_keys=OFF/ON` in the correct outer envelope during execution
+
 ## [2.11.0] - 2026-02-10
 
 Added:

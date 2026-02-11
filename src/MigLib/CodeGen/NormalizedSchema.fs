@@ -45,7 +45,9 @@ let private getForeignKeyInfo (table: CreateTable) : ForeignKey list =
           Some
             { columns = [ col.name ]
               refTable = fk.refTable
-              refColumns = fk.refColumns }
+              refColumns = fk.refColumns
+              onDelete = fk.onDelete
+              onUpdate = fk.onUpdate }
         | _ -> None))
 
   // Table-level foreign keys

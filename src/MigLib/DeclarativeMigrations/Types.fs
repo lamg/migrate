@@ -21,10 +21,19 @@ type internal InsertInto =
     columns: string list
     values: Expr list list }
 
+type internal FkAction =
+  | Cascade
+  | Restrict
+  | NoAction
+  | SetNull
+  | SetDefault
+
 type internal ForeignKey =
   { columns: string list
     refTable: string
-    refColumns: string list }
+    refColumns: string list
+    onDelete: FkAction option
+    onUpdate: FkAction option }
 
 type internal PrimaryKey =
   { constraintName: string option

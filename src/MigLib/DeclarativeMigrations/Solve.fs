@@ -295,37 +295,32 @@ let columnMigrations (left: CreateTable list) (right: CreateTable list) =
     let removes = leftSet - rightSet |> Set.toList |> List.map fst
     let adds = rightSet - leftSet |> Set.toList |> List.map fst
 
+    let leftColsByName = left.columns |> List.map (fun c -> c.name, c) |> Map.ofList
+    let rightColsByName = right.columns |> List.map (fun c -> c.name, c) |> Map.ofList
+    let leftColNames = left.columns |> List.map _.name |> Set.ofList
+
+    let constraintsChanged =
+      let commonColumnNames =
+        Set.intersect (left.columns |> List.map _.name |> Set.ofList) (right.columns |> List.map _.name |> Set.ofList)
+        |> Set.toList
+
+      let columnConstraintsChanged =
+        commonColumnNames
+        |> List.exists (fun name -> leftColsByName[name].constraints <> rightColsByName[name].constraints)
+
+      left.constraints <> right.constraints || columnConstraintsChanged
+
     let emptyIntersection (xs: 'a list) (ys: 'a list) =
       Set.intersect (Set.ofList xs) (Set.ofList ys) |> Seq.toList |> List.isEmpty
 
-
-    match adds, removes with
-    | [], _ ->
-
-      let recreate =
-        left.constraints
-        |> List.exists (function
-          | ForeignKey fk -> fk.columns |> emptyIntersection removes |> not
-          | _ -> false)
-
-      if recreate then
-        let colTuple = right.columns |> List.map _.name |> String.concat ", "
-        let tempName = $"{right.name}_temp"
-
-        [ Table.createSql { right with name = tempName }
-          $"INSERT INTO {tempName}({colTuple}) SELECT {colTuple} FROM {left.name}"
-          Table.dropSql left.name
-          Table.sqlRenameTable (tempName, right.name) ]
-      else
-        removes |> List.map (Column.dropSql left.name)
-    | _ ->
+    let recreateTable () =
       let tempName = $"{right.name}_temp"
       let rightColTuple = right.columns |> List.map _.name |> String.concat ", "
 
       let selectExprs =
         right.columns
         |> List.map (fun c ->
-          if left.columns |> List.exists (fun lc -> lc.name = c.name) then
+          if leftColNames |> Set.contains c.name then
             c.name
           else
             Table.defaultValueSql c.columnType)
@@ -335,6 +330,22 @@ let columnMigrations (left: CreateTable list) (right: CreateTable list) =
         $"INSERT INTO {tempName}({rightColTuple}) SELECT {selectExprs} FROM {left.name}"
         Table.dropSql left.name
         Table.sqlRenameTable (tempName, right.name) ]
+
+    match adds, removes with
+    | [], [] when constraintsChanged -> recreateTable ()
+    | [], _ ->
+
+      let recreate =
+        left.constraints
+        |> List.exists (function
+          | ForeignKey fk -> fk.columns |> emptyIntersection removes |> not
+          | _ -> false)
+
+      if recreate || constraintsChanged then
+        recreateTable ()
+      else
+        removes |> List.map (Column.dropSql left.name)
+    | _ -> recreateTable ()
 
   let matchTables =
     left

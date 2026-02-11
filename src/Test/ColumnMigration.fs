@@ -70,15 +70,30 @@ let teacherWithAge =
 let enrollment =
   "CREATE TABLE enrollment(id integer PRIMARY KEY, teacher_id integer NOT NULL, FOREIGN KEY(teacher_id) REFERENCES teacher(id))"
 
+let parent = "CREATE TABLE parent(id integer PRIMARY KEY)"
+
+let childWithInlineFkNoCascade =
+  "CREATE TABLE child(id integer PRIMARY KEY, parent_id integer REFERENCES parent(id))"
+
+let childWithInlineFkCascade =
+  "CREATE TABLE child(id integer PRIMARY KEY, parent_id integer REFERENCES parent(id) ON DELETE CASCADE)"
+
+let childView = "CREATE VIEW child_view AS SELECT c.id, c.parent_id FROM child c"
+
 [<Fact>]
 let ``column addition when other tables have FK references`` () =
   let left = $"{teacher};{enrollment}"
   let right = $"{teacherWithAge};{enrollment}"
 
-  let leftFile = FParsecSqlParser.parseSqlFile ("left", left) |> Result.defaultWith failwith
-  let rightFile = FParsecSqlParser.parseSqlFile ("right", right) |> Result.defaultWith failwith
+  let leftFile =
+    FParsecSqlParser.parseSqlFile ("left", left) |> Result.defaultWith failwith
 
-  let actual = Migration.migration (leftFile, rightFile) |> Result.defaultWith (fun e -> failwith $"%A{e}")
+  let rightFile =
+    FParsecSqlParser.parseSqlFile ("right", right) |> Result.defaultWith failwith
+
+  let actual =
+    Migration.migration (leftFile, rightFile)
+    |> Result.defaultWith (fun e -> failwith $"%A{e}")
 
   printfn "Generated SQL:"
   actual |> List.iter (printfn "  %s")
@@ -92,3 +107,77 @@ let ``column addition when other tables have FK references`` () =
       "PRAGMA foreign_keys=ON" ]
 
   Assert.Equal<string list>(expected, actual)
+
+[<Fact>]
+let ``column FK ON DELETE CASCADE is parsed`` () =
+  let sql = $"{parent};{childWithInlineFkCascade}"
+
+  let parsed =
+    FParsecSqlParser.parseSqlFile ("schema", sql) |> Result.defaultWith failwith
+
+  let childTable = parsed.tables |> List.find (fun t -> t.name = "child")
+  let parentId = childTable.columns |> List.find (fun c -> c.name = "parent_id")
+
+  let fk =
+    parentId.constraints
+    |> List.choose (function
+      | Types.ForeignKey foreignKey -> Some foreignKey
+      | _ -> None)
+    |> List.tryHead
+    |> Option.defaultWith (fun () -> failwith "Expected foreign key on child.parent_id")
+
+  Assert.Equal<Types.FkAction option>(Some Types.Cascade, fk.onDelete)
+
+[<Fact>]
+let ``changing column FK to ON DELETE CASCADE triggers migration`` () =
+  let left = $"{parent};{childWithInlineFkNoCascade}"
+  let right = $"{parent};{childWithInlineFkCascade}"
+
+  let leftFile =
+    FParsecSqlParser.parseSqlFile ("left", left) |> Result.defaultWith failwith
+
+  let rightFile =
+    FParsecSqlParser.parseSqlFile ("right", right) |> Result.defaultWith failwith
+
+  let actual =
+    Migration.migration (leftFile, rightFile)
+    |> Result.defaultWith (fun e -> failwith $"%A{e}")
+
+  let expected =
+    [ "PRAGMA foreign_keys=OFF"
+      "CREATE TABLE child_temp(id integer PRIMARY KEY, parent_id integer REFERENCES parent(id) ON DELETE CASCADE)"
+      "INSERT INTO child_temp(id, parent_id) SELECT id, parent_id FROM child"
+      "DROP TABLE child"
+      "ALTER TABLE child_temp RENAME TO child"
+      "PRAGMA foreign_keys=ON" ]
+
+  Assert.Equal<string list>(expected, actual)
+
+[<Fact>]
+let ``recreating table drops and recreates dependent views`` () =
+  let left = $"{parent};{childWithInlineFkNoCascade};{childView}"
+  let right = $"{parent};{childWithInlineFkCascade};{childView}"
+
+  let leftFile =
+    FParsecSqlParser.parseSqlFile ("left", left) |> Result.defaultWith failwith
+
+  let rightFile =
+    FParsecSqlParser.parseSqlFile ("right", right) |> Result.defaultWith failwith
+
+  let actual =
+    Migration.migration (leftFile, rightFile)
+    |> Result.defaultWith (fun e -> failwith $"%A{e}")
+
+  let ixDropView = actual |> List.findIndex ((=) "DROP VIEW child_view")
+
+  let ixCreateTemp =
+    actual |> List.findIndex (fun s -> s.StartsWith "CREATE TABLE child_temp")
+
+  let ixRename =
+    actual |> List.findIndex ((=) "ALTER TABLE child_temp RENAME TO child")
+
+  let ixCreateView =
+    actual |> List.findIndex (fun s -> s.StartsWith "CREATE VIEW child_view AS")
+
+  Assert.True(ixDropView < ixCreateTemp)
+  Assert.True(ixCreateView > ixRename)

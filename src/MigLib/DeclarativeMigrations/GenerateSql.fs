@@ -5,6 +5,14 @@ open Types
 let sepComma f xs = xs |> List.map f |> String.concat ", "
 let sepSemi (xs: string list) = xs |> String.concat ";\n"
 
+let fkActionSql =
+  function
+  | Cascade -> "CASCADE"
+  | Restrict -> "RESTRICT"
+  | NoAction -> "NO ACTION"
+  | SetNull -> "SET NULL"
+  | SetDefault -> "SET DEFAULT"
+
 module Table =
   let constraintSql =
     function
@@ -33,8 +41,27 @@ module Table =
       $"CHECK ({joined})"
     | ForeignKey f ->
       let cols = f.columns |> sepComma id
-      let refCols = f.refColumns |> sepComma id
-      $"FOREIGN KEY({cols}) REFERENCES {f.refTable}({refCols})"
+
+      let refCols =
+        if List.isEmpty f.refColumns then
+          ""
+        else
+          $"({f.refColumns |> sepComma id})"
+
+      let onDelete =
+        f.onDelete
+        |> Option.map (fun a -> $" ON DELETE {fkActionSql a}")
+        |> Option.defaultValue ""
+
+      let onUpdate =
+        f.onUpdate
+        |> Option.map (fun a -> $" ON UPDATE {fkActionSql a}")
+        |> Option.defaultValue ""
+
+      if List.isEmpty f.columns then
+        $"REFERENCES {f.refTable}{refCols}{onDelete}{onUpdate}"
+      else
+        $"FOREIGN KEY({cols}) REFERENCES {f.refTable}{refCols}{onDelete}{onUpdate}"
 
   let defaultValueSql =
     function
