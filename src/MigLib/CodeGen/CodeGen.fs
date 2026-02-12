@@ -21,7 +21,7 @@ let generateCodeForSqlFile (useAsync: bool) (sqlFilePath: string) : Result<strin
       with ex ->
         Error $"Failed to read SQL file {sqlFilePath}: {ex.Message}"
 
-    let! sqlFile = FParsecSqlParser.parseSqlFile (sqlFilePath, sqlContent)
+    let! sqlFile = SqlParserWrapper.parseSqlFile (sqlFilePath, sqlContent)
 
     let moduleName = FileMapper.sqlFileToModuleName sqlFilePath
     let fsharpFilePath = FileMapper.sqlFileToFSharpFile sqlFilePath

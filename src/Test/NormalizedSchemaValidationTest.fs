@@ -21,7 +21,7 @@ let ``Validation fails when extension has nullable columns`` () =
     );
     """
 
-  match FParsecSqlParser.parseSqlFile ("test", sql) with
+  match SqlParserWrapper.parseSqlFile ("test", sql) with
   | Error e -> Assert.Fail $"Parse failed: {e}"
   | Ok parsed ->
     match NormalizedSchema.validateNormalizedTables parsed.tables with
@@ -62,7 +62,7 @@ let ``Validation fails when FK column is not PK`` () =
     );
     """
 
-  match FParsecSqlParser.parseSqlFile ("test", sql) with
+  match SqlParserWrapper.parseSqlFile ("test", sql) with
   | Error e -> Assert.Fail $"Parse failed: {e}"
   | Ok parsed ->
     match NormalizedSchema.validateNormalizedTables parsed.tables with
@@ -107,7 +107,7 @@ let ``Validation fails when FK references wrong table`` () =
     );
     """
 
-  match FParsecSqlParser.parseSqlFile ("test", sql) with
+  match SqlParserWrapper.parseSqlFile ("test", sql) with
   | Error e -> Assert.Fail $"Parse failed: {e}"
   | Ok parsed ->
     match NormalizedSchema.validateNormalizedTables parsed.tables with
@@ -154,7 +154,7 @@ let ``Validation succeeds for valid normalized schema`` () =
     );
     """
 
-  match FParsecSqlParser.parseSqlFile ("test", sql) with
+  match SqlParserWrapper.parseSqlFile ("test", sql) with
   | Error e -> Assert.Fail $"Parse failed: {e}"
   | Ok parsed ->
     match NormalizedSchema.validateNormalizedTables parsed.tables with
@@ -188,7 +188,7 @@ let ``Validation collects multiple errors from different tables`` () =
     );
     """
 
-  match FParsecSqlParser.parseSqlFile ("test", sql) with
+  match SqlParserWrapper.parseSqlFile ("test", sql) with
   | Error e -> Assert.Fail $"Parse failed: {e}"
   | Ok parsed ->
     match NormalizedSchema.validateNormalizedTables parsed.tables with
@@ -226,7 +226,7 @@ let ``Validation allows tables with nullable columns to be skipped`` () =
     );
     """
 
-  match FParsecSqlParser.parseSqlFile ("test", sql) with
+  match SqlParserWrapper.parseSqlFile ("test", sql) with
   | Error e -> Assert.Fail $"Parse failed: {e}"
   | Ok parsed ->
     match NormalizedSchema.validateNormalizedTables parsed.tables with

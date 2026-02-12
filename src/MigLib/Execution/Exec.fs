@@ -61,7 +61,7 @@ let internal dbSchema (dbFile: string) =
     let! schema =
       sql
       |> FormatSql.join
-      |> fun sql -> FParsecSqlParser.parseSqlFile (conn.Database, sql)
+      |> fun sql -> SqlParserWrapper.parseSqlFile (conn.Database, sql)
       |> Result.mapError Types.ParsingFailed
 
     return schema
@@ -77,7 +77,7 @@ type SqlSource = { name: string; content: string }
 
 let internal parseSqlFiles (sources: SqlSource list) =
   sources
-  |> List.map (fun s -> FParsecSqlParser.parseSqlFile (s.name, s.content))
+  |> List.map (fun s -> SqlParserWrapper.parseSqlFile (s.name, s.content))
   |> Solve.splitResult
   |> function
     | xs, [] ->
@@ -121,6 +121,7 @@ let internal migrationLog: Types.CreateTable =
           constraints = [ Types.NotNull; Types.Default(Types.String "") ] } ]
     constraints = []
     queryByAnnotations = []
+    queryLikeAnnotations = []
     queryByOrCreateAnnotations = []
     insertOrIgnoreAnnotations = [] }
 
@@ -141,6 +142,7 @@ let internal migrationSteps: Types.CreateTable =
             onDelete = None
             onUpdate = None } ]
     queryByAnnotations = []
+    queryLikeAnnotations = []
     queryByOrCreateAnnotations = []
     insertOrIgnoreAnnotations = [] }
 

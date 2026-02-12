@@ -22,7 +22,7 @@ let ``Update method is generated with correct signature`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateUpdate false (normalized |> List.head)
   }
@@ -49,7 +49,7 @@ let ``Update method has pattern matching on Student cases`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateUpdate false (normalized |> List.head)
   }
@@ -77,7 +77,7 @@ let ``Update Base case updates base and deletes extensions`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateUpdate false (normalized |> List.head)
   }
@@ -106,7 +106,7 @@ let ``Update extension case uses INSERT OR REPLACE`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateUpdate false (normalized |> List.head)
   }
@@ -142,7 +142,7 @@ let ``Update with multiple extensions deletes other extensions`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateUpdate false (normalized |> List.head)
   }
@@ -171,7 +171,7 @@ let ``Delete method is generated with correct signature`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateDelete false (normalized |> List.head)
   }
@@ -198,7 +198,7 @@ let ``Delete method only deletes from base table`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateDelete false (normalized |> List.head)
   }
@@ -227,7 +227,7 @@ let ``generateNormalizedTableCode includes Update and Delete`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     let! code = NormalizedQueryGenerator.generateNormalizedTableCode false (normalized |> List.head)
     return code

@@ -51,8 +51,8 @@ let cases =
 
 let testColumnMigration (case: int) (left: string, right: string, r: Result<string list, string>) =
   result {
-    let! leftFile = FParsecSqlParser.parseSqlFile ("left", left)
-    let! rightFile = FParsecSqlParser.parseSqlFile ("right", right)
+    let! leftFile = SqlParserWrapper.parseSqlFile ("left", left)
+    let! rightFile = SqlParserWrapper.parseSqlFile ("right", right)
     let statements = Solve.columnMigrations leftFile.tables rightFile.tables
     return statements
   }
@@ -86,10 +86,10 @@ let ``column addition when other tables have FK references`` () =
   let right = $"{teacherWithAge};{enrollment}"
 
   let leftFile =
-    FParsecSqlParser.parseSqlFile ("left", left) |> Result.defaultWith failwith
+    SqlParserWrapper.parseSqlFile ("left", left) |> Result.defaultWith failwith
 
   let rightFile =
-    FParsecSqlParser.parseSqlFile ("right", right) |> Result.defaultWith failwith
+    SqlParserWrapper.parseSqlFile ("right", right) |> Result.defaultWith failwith
 
   let actual =
     Migration.migration (leftFile, rightFile)
@@ -113,7 +113,7 @@ let ``column FK ON DELETE CASCADE is parsed`` () =
   let sql = $"{parent};{childWithInlineFkCascade}"
 
   let parsed =
-    FParsecSqlParser.parseSqlFile ("schema", sql) |> Result.defaultWith failwith
+    SqlParserWrapper.parseSqlFile ("schema", sql) |> Result.defaultWith failwith
 
   let childTable = parsed.tables |> List.find (fun t -> t.name = "child")
   let parentId = childTable.columns |> List.find (fun c -> c.name = "parent_id")
@@ -134,10 +134,10 @@ let ``changing column FK to ON DELETE CASCADE triggers migration`` () =
   let right = $"{parent};{childWithInlineFkCascade}"
 
   let leftFile =
-    FParsecSqlParser.parseSqlFile ("left", left) |> Result.defaultWith failwith
+    SqlParserWrapper.parseSqlFile ("left", left) |> Result.defaultWith failwith
 
   let rightFile =
-    FParsecSqlParser.parseSqlFile ("right", right) |> Result.defaultWith failwith
+    SqlParserWrapper.parseSqlFile ("right", right) |> Result.defaultWith failwith
 
   let actual =
     Migration.migration (leftFile, rightFile)
@@ -159,10 +159,10 @@ let ``recreating table drops and recreates dependent views`` () =
   let right = $"{parent};{childWithInlineFkCascade};{childView}"
 
   let leftFile =
-    FParsecSqlParser.parseSqlFile ("left", left) |> Result.defaultWith failwith
+    SqlParserWrapper.parseSqlFile ("left", left) |> Result.defaultWith failwith
 
   let rightFile =
-    FParsecSqlParser.parseSqlFile ("right", right) |> Result.defaultWith failwith
+    SqlParserWrapper.parseSqlFile ("right", right) |> Result.defaultWith failwith
 
   let actual =
     Migration.migration (leftFile, rightFile)

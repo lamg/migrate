@@ -22,7 +22,7 @@ let ``Insert method is generated with correct signature`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateInsert false (normalized |> List.head)
   }
@@ -48,7 +48,7 @@ let ``Insert method has pattern matching on NewType cases`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateInsert false (normalized |> List.head)
   }
@@ -75,7 +75,7 @@ let ``Base case does single INSERT into base table`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateInsert false (normalized |> List.head)
   }
@@ -106,7 +106,7 @@ let ``Extension case does two INSERTs in transaction`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateInsert false (normalized |> List.head)
   }
@@ -145,7 +145,7 @@ let ``Multiple extension cases are generated`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateInsert false (normalized |> List.head)
   }
@@ -172,7 +172,7 @@ let ``Insert has try-catch with SqliteException`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateInsert false (normalized |> List.head)
   }
@@ -199,7 +199,7 @@ let ``generateNormalizedTableCode produces type extension`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     let! code = NormalizedQueryGenerator.generateNormalizedTableCode false (normalized |> List.head)
     return code
@@ -227,7 +227,7 @@ let ``Extension case excludes FK column from extension INSERT`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateInsert false (normalized |> List.head)
   }

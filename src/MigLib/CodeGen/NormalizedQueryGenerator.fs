@@ -338,8 +338,8 @@ let generateInsert (useAsync: bool) (normalized: NormalizedTable) : string =
       with
       | :? SqliteException as ex -> return Error ex
     }}"""
+  // Simple case - no extensions, use AST with embedded match expression
   else if normalized.extensions.IsEmpty then
-    // Simple case - no extensions, use AST with embedded match expression
     let insertColumns = getInsertColumns normalized.baseTable
     let insertSql = generateInsertSql normalized.baseTable.name insertColumns
     let fieldPattern = generateFieldPattern insertColumns
@@ -614,8 +614,8 @@ let generateGetAll (useAsync: bool) (normalized: NormalizedTable) : string =
       with
       | :? SqliteException as ex -> return Error ex
     }}"""
+  // Simple case - no extensions, use AST
   else if normalized.extensions.IsEmpty then
-    // Simple case - no extensions, use AST
     let baseFields = generateBaseFieldReads normalized.baseTable 0 |> String.concat "; "
 
     let bodyExprs =
@@ -709,8 +709,8 @@ let generateGetById (useAsync: bool) (normalized: NormalizedTable) : string opti
       with
       | :? SqliteException as ex -> return Error ex
     }}"""
+    // Simple case - no extensions, use AST
     else if normalized.extensions.IsEmpty then
-      // Simple case - no extensions, use AST
       let paramBindingStmts =
         pks
         |> List.map (fun pk -> ConstantExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
@@ -780,12 +780,10 @@ let generateGetOne (useAsync: bool) (normalized: NormalizedTable) : string =
       with
       | :? SqliteException as ex -> return Error ex
     }}"""
-  else if
-    // Build the sync method body using AST
-    // For normalized tables with extensions, embed entire if/else logic
-    normalized.extensions.IsEmpty
-  then
-    // Simple case - no extensions, use base record directly
+  // Build the sync method body using AST
+  // For normalized tables with extensions, embed entire if/else logic
+  // Simple case - no extensions, use base record directly
+  else if normalized.extensions.IsEmpty then
     let baseFields = generateBaseFieldReads normalized.baseTable 0 |> String.concat "; "
 
     let bodyExprs =
@@ -1038,8 +1036,8 @@ let generateUpdate (useAsync: bool) (normalized: NormalizedTable) : string optio
       with
       | :? SqliteException as ex -> return Error ex
     }}"""
+    // Simple case - no extensions, use AST
     else if normalized.extensions.IsEmpty then
-      // Simple case - no extensions, use AST
       let updateSql = generateUpdateBaseSql normalized.baseTable
       let fieldPattern = generateFieldPattern normalized.baseTable.columns
 
@@ -1163,6 +1161,33 @@ let private validateNormalizedQueryByAnnotation
         $"QueryBy annotation references non-existent column '{invalidCol}' in normalized table '{normalized.baseTable.name}'. Available columns: {availableCols}"
     | None -> Ok()
 
+/// Validate QueryLike annotation for normalized table references one existing column (case-insensitive)
+let private validateNormalizedQueryLikeAnnotation
+  (normalized: NormalizedTable)
+  (annotation: QueryLikeAnnotation)
+  : Result<unit, string> =
+  match annotation.columns with
+  | [] -> Error $"QueryLike annotation on normalized table '{normalized.baseTable.name}' requires exactly one column."
+  | [ col ] ->
+    let allColumns = getAllNormalizedColumns normalized
+
+    let columnNames =
+      allColumns |> List.map (fun (_, c) -> c.name.ToLowerInvariant()) |> Set.ofList
+
+    if columnNames.Contains(col.ToLowerInvariant()) then
+      Ok()
+    else
+      let availableCols =
+        allColumns |> List.map (fun (_, c) -> c.name) |> String.concat ", "
+
+      Error
+        $"QueryLike annotation references non-existent column '{col}' in normalized table '{normalized.baseTable.name}'. Available columns: {availableCols}"
+  | _ ->
+    let receivedCols = annotation.columns |> String.concat ", "
+
+    Error
+      $"QueryLike annotation on normalized table '{normalized.baseTable.name}' supports exactly one column. Received: {receivedCols}"
+
 /// Find column in normalized table by name (case-insensitive)
 let private findNormalizedColumn (normalized: NormalizedTable) (colName: string) : (string * ColumnDef) option =
   getAllNormalizedColumns normalized
@@ -1276,6 +1301,108 @@ let private generateNormalizedQueryBy
     }}"""
   else
     // 6. Generate case selection logic (sync needs 10-space indent)
+    let caseSelection =
+      generateCaseSelection 10 normalized.baseTable normalized.extensions typeName
+
+    $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Result<{typeName} list, SqliteException> =
+    try
+      use cmd = new SqliteCommand("{sql}", tx.Connection, tx)
+      {paramBindings}
+      use reader = cmd.ExecuteReader()
+      let results = ResizeArray<{typeName}>()
+      while reader.Read() do
+        let record =
+{caseSelection}
+        results.Add(record)
+      Ok(results |> Seq.toList)
+    with
+    | :? SqliteException as ex -> Error ex"""
+
+/// Generate custom QueryLike method for normalized tables with SQL LIKE '%value%' semantics
+let private generateNormalizedQueryLike
+  (useAsync: bool)
+  (normalized: NormalizedTable)
+  (annotation: QueryLikeAnnotation)
+  : string =
+  let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
+  let col = annotation.columns |> List.head
+
+  let methodName = $"GetBy{TypeGenerator.toPascalCase col}Like"
+
+  let parameters =
+    let _, columnDef = findNormalizedColumn normalized col |> Option.get
+    let isNullable = TypeGenerator.isColumnNullable columnDef
+    let fsharpType = TypeGenerator.mapSqlType columnDef.columnType isNullable
+    $"{col}: {fsharpType}"
+
+  let whereClause = $"{col} LIKE '%%' || @{col} || '%%'"
+
+  let baseColumns = normalized.baseTable.columns |> List.map (fun c -> $"b.{c.name}")
+
+  let extensionSelects =
+    normalized.extensions
+    |> List.collect (fun ext -> ext.table.columns |> List.map (fun c -> $"e{ext.aspectName}.{c.name}"))
+
+  let allSelects = (baseColumns @ extensionSelects) |> String.concat ", "
+
+  let joins =
+    normalized.extensions
+    |> List.map (fun ext ->
+      let pk = getPrimaryKeyColumns normalized.baseTable |> List.head
+      $"LEFT JOIN {ext.table.name} AS e{ext.aspectName} ON b.{pk.name} = e{ext.aspectName}.{ext.fkColumn}")
+    |> String.concat "\n        "
+
+  let sql =
+    if normalized.extensions.IsEmpty then
+      $"SELECT {allSelects} FROM {normalized.baseTable.name} AS b WHERE {whereClause}"
+    else
+      $"""SELECT {allSelects}
+        FROM {normalized.baseTable.name} AS b
+        {joins}
+        WHERE {whereClause}"""
+
+  if useAsync then
+    let asyncParamBindings =
+      let _, columnDef = findNormalizedColumn normalized col |> Option.get
+      let isNullable = TypeGenerator.isColumnNullable columnDef
+
+      if isNullable then
+        $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+      else
+        $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore"
+
+    let caseSelection =
+      generateCaseSelection 14 normalized.baseTable normalized.extensions typeName
+
+    $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
+    task {{
+      try
+        use cmd = new SqliteCommand("{sql}", tx.Connection, tx)
+        {asyncParamBindings}
+        use! reader = cmd.ExecuteReaderAsync()
+        let results = ResizeArray<{typeName}>()
+        let mutable hasMore = true
+        while hasMore do
+          let! next = reader.ReadAsync()
+          hasMore <- next
+          if hasMore then
+            let record =
+{caseSelection}
+            results.Add(record)
+        return Ok(results |> Seq.toList)
+      with
+      | :? SqliteException as ex -> return Error ex
+    }}"""
+  else
+    let paramBindings =
+      let _, columnDef = findNormalizedColumn normalized col |> Option.get
+      let isNullable = TypeGenerator.isColumnNullable columnDef
+
+      if isNullable then
+        $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+      else
+        $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore"
+
     let caseSelection =
       generateCaseSelection 10 normalized.baseTable normalized.extensions typeName
 
@@ -1544,13 +1671,20 @@ let generateNormalizedTableCode (useAsync: bool) (normalized: NormalizedTable) :
     normalized.baseTable.queryByAnnotations
     |> List.map (validateNormalizedQueryByAnnotation normalized)
 
+  // Validate all QueryLike annotations
+  let queryLikeValidationResults =
+    normalized.baseTable.queryLikeAnnotations
+    |> List.map (validateNormalizedQueryLikeAnnotation normalized)
+
   // Validate all QueryByOrCreate annotations
   let queryByOrCreateValidationResults =
     normalized.baseTable.queryByOrCreateAnnotations
     |> List.map (validateNormalizedQueryByOrCreateAnnotation normalized)
 
   let firstError =
-    (queryByValidationResults @ queryByOrCreateValidationResults)
+    (queryByValidationResults
+     @ queryLikeValidationResults
+     @ queryByOrCreateValidationResults)
     |> List.tryFind (fun r ->
       match r with
       | Error _ -> true
@@ -1579,6 +1713,11 @@ let generateNormalizedTableCode (useAsync: bool) (normalized: NormalizedTable) :
       normalized.baseTable.queryByAnnotations
       |> List.map (generateNormalizedQueryBy useAsync normalized)
 
+    // Generate QueryLike methods
+    let queryLikeMethods =
+      normalized.baseTable.queryLikeAnnotations
+      |> List.map (generateNormalizedQueryLike useAsync normalized)
+
     // Generate QueryByOrCreate methods
     let queryByOrCreateMethods =
       normalized.baseTable.queryByOrCreateAnnotations
@@ -1594,6 +1733,7 @@ let generateNormalizedTableCode (useAsync: bool) (normalized: NormalizedTable) :
         updateMethod
         deleteMethod ]
       @ (queryByMethods |> List.map Some)
+      @ (queryLikeMethods |> List.map Some)
       @ (queryByOrCreateMethods |> List.map Some)
       |> List.choose id
       |> String.concat "\n\n"

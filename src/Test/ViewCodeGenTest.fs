@@ -15,7 +15,7 @@ let ``View type generation includes columns`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let view = parsed.views |> List.head
     let! columns = ViewIntrospection.getViewColumns parsed.tables view
     let code = TypeGenerator.generateViewRecordType view.name columns
@@ -38,7 +38,7 @@ let ``View query generation includes both GetAll and GetOne methods`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let view = parsed.views |> List.head
     let! columns = ViewIntrospection.getViewColumns parsed.tables view
     let! code = QueryGenerator.generateViewCode false view columns
@@ -63,7 +63,7 @@ let ``View with nullable columns generates option types`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let view = parsed.views |> List.head
     let! columns = ViewIntrospection.getViewColumns parsed.tables view
     let code = TypeGenerator.generateViewRecordType view.name columns
@@ -90,7 +90,7 @@ let ``Complex view with JOIN is supported`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let view = parsed.views |> List.head
     let! columns = ViewIntrospection.getViewColumns parsed.tables view
     return columns.Length
@@ -108,7 +108,7 @@ let ``View GetOne method is generated`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let view = parsed.views |> List.head
     let! columns = ViewIntrospection.getViewColumns parsed.tables view
     let! code = QueryGenerator.generateViewCode false view columns

@@ -11,6 +11,7 @@ open migrate.DeclarativeMigrations.Types
 
 let parseAnnotationsFromComments (comments: string list) =
   let queryBy = ResizeArray<QueryByAnnotation>()
+  let queryLike = ResizeArray<QueryLikeAnnotation>()
   let queryByOrCreate = ResizeArray<QueryByOrCreateAnnotation>()
   let insertOrIgnore = ResizeArray<InsertOrIgnoreAnnotation>()
 
@@ -38,18 +39,25 @@ let parseAnnotationsFromComments (comments: string list) =
       if cols.Length > 0 then
         queryBy.Add({ columns = cols })
     | None ->
-      match tryMatch @"^QueryByOrCreate\s*\((.*)\)\s*$" line with
+      match tryMatch @"^QueryLike\s*\((.*)\)\s*$" line with
       | Some m ->
         let cols = parseColumns m.Groups.[1].Value
 
         if cols.Length > 0 then
-          queryByOrCreate.Add({ columns = cols })
+          queryLike.Add({ columns = cols })
       | None ->
-        match tryMatch @"^InsertOrIgnore(?:\s*\(\s*\))?\s*$" line with
-        | Some _ -> insertOrIgnore.Add(InsertOrIgnoreAnnotation)
-        | None -> ()
+        match tryMatch @"^QueryByOrCreate\s*\((.*)\)\s*$" line with
+        | Some m ->
+          let cols = parseColumns m.Groups.[1].Value
 
-  (List.ofSeq queryBy, List.ofSeq queryByOrCreate, List.ofSeq insertOrIgnore)
+          if cols.Length > 0 then
+            queryByOrCreate.Add({ columns = cols })
+        | None ->
+          match tryMatch @"^InsertOrIgnore(?:\s*\(\s*\))?\s*$" line with
+          | Some _ -> insertOrIgnore.Add(InsertOrIgnoreAnnotation)
+          | None -> ()
+
+  (List.ofSeq queryBy, List.ofSeq queryLike, List.ofSeq queryByOrCreate, List.ofSeq insertOrIgnore)
 
 let tokensToString (xs: string list) =
   match xs with
@@ -4989,12 +4997,13 @@ let _fsyacc_reductions =
          Microsoft.FSharp.Core.Operators.box (
            (let (t: CreateTable) = _1
             let cs = _3
-            let (qb, qboc, ioi) = parseAnnotationsFromComments cs
+            let (qb, ql, qboc, ioi) = parseAnnotationsFromComments cs
 
             Some(
               Choice1Of5
                 { t with
                     queryByAnnotations = qb
+                    queryLikeAnnotations = ql
                     queryByOrCreateAnnotations = qboc
                     insertOrIgnoreAnnotations = ioi }
             ))
@@ -5008,12 +5017,13 @@ let _fsyacc_reductions =
          Microsoft.FSharp.Core.Operators.box (
            (let (v: CreateView) = _1
             let cs = _3
-            let (qb, qboc, ioi) = parseAnnotationsFromComments cs
+            let (qb, ql, qboc, ioi) = parseAnnotationsFromComments cs
 
             Some(
               Choice2Of5
                 { v with
                     queryByAnnotations = qb
+                    queryLikeAnnotations = ql
                     queryByOrCreateAnnotations = qboc
                     insertOrIgnoreAnnotations = ioi }
             ))
@@ -5067,6 +5077,7 @@ let _fsyacc_reductions =
                columns = columns
                constraints = constraints
                queryByAnnotations = []
+               queryLikeAnnotations = []
                queryByOrCreateAnnotations = []
                insertOrIgnoreAnnotations = [] }
             : CreateTable))
@@ -5488,6 +5499,7 @@ let _fsyacc_reductions =
                sqlTokens = [ fullStatement ]
                dependencies = dependencies
                queryByAnnotations = []
+               queryLikeAnnotations = []
                queryByOrCreateAnnotations = []
                insertOrIgnoreAnnotations = [] }
             : CreateView))

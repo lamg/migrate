@@ -22,7 +22,7 @@ let ``Generates NewType DU with Base case`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized |> List.head |> NormalizedTypeGenerator.generateNewType
   }
@@ -51,7 +51,7 @@ let ``Generates NewType DU with extension case`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized |> List.head |> NormalizedTypeGenerator.generateNewType
   }
@@ -75,7 +75,7 @@ let ``Generates QueryType DU with Id in Base case`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized |> List.head |> NormalizedTypeGenerator.generateQueryType
   }
@@ -102,7 +102,7 @@ let ``Generates QueryType DU with Id in extension case`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized |> List.head |> NormalizedTypeGenerator.generateQueryType
   }
@@ -132,7 +132,7 @@ let ``Generates multiple extension cases`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized |> List.head |> NormalizedTypeGenerator.generateQueryType
   }
@@ -161,7 +161,7 @@ let ``generateTypes produces both NewType and QueryType`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized |> List.head |> NormalizedTypeGenerator.generateTypes
   }
@@ -187,7 +187,7 @@ let ``Extension FK column is excluded from extension case fields`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized |> List.head |> NormalizedTypeGenerator.generateQueryType
   }
@@ -218,7 +218,7 @@ let ``Handles table with multiple columns`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized |> List.head |> NormalizedTypeGenerator.generateTypes
   }

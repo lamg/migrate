@@ -4,6 +4,14 @@
 
 Refactoring `QueryGenerator.fs` and `NormalizedQueryGenerator.fs` to use Fabulous.AST v2's DSL instead of string templates for generating F# code. This provides type-safe code generation with automatic Fantomas formatting.
 
+## Recent Update
+
+✅ Added `QueryLike(column)` annotation support to code generation:
+- Parser support in FsLexYacc annotation extraction
+- Table/view/normalized query generation for `LIKE '%' || @column || '%'`
+- Validation that QueryLike uses exactly one existing column
+- New test coverage for parsing, generation, and validation
+
 ## Key Accomplishments
 
 ✅ **29 methods successfully migrated** (9 sync table + 10 async table + 3 sync view + 3 async view + 3 normalized sync + 1 normalized async)
@@ -22,7 +30,7 @@ Refactoring `QueryGenerator.fs` and `NormalizedQueryGenerator.fs` to use Fabulou
 - **New:** Async pattern using `taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]`
 
 ✅ **Test compatibility maintained**
-- All 135 tests passing throughout migration
+- All 159 tests passing throughout migration
 - Updated test expectations for multi-line match expression formatting
 - Preserved functional behavior while improving code structure
 

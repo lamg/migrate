@@ -19,7 +19,7 @@ let ``QueryByOrCreate annotation is parsed from CREATE TABLE statement`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return table.queryByOrCreateAnnotations
   }
@@ -39,7 +39,7 @@ let ``Multiple QueryByOrCreate annotations are parsed`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return table.queryByOrCreateAnnotations
   }
@@ -59,7 +59,7 @@ let ``QueryByOrCreate annotation with single column is parsed`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return table.queryByOrCreateAnnotations
   }
@@ -78,7 +78,7 @@ let ``QueryByOrCreate annotation with multiple columns is parsed`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return table.queryByOrCreateAnnotations
   }
@@ -93,7 +93,7 @@ let ``Table without QueryByOrCreate annotation has empty list`` () =
   let sql = "CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL);"
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return table.queryByOrCreateAnnotations
   }
@@ -111,7 +111,7 @@ let ``QueryBy and QueryByOrCreate annotations can coexist`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return (table.queryByAnnotations, table.queryByOrCreateAnnotations)
   }
@@ -136,7 +136,7 @@ let ``QueryByOrCreate generates method with correct name for single column`` () 
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let! code = QueryGenerator.generateTableCode false table
     return code
@@ -161,7 +161,7 @@ let ``QueryByOrCreate generates method with tupled parameters for multiple colum
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let! code = QueryGenerator.generateTableCode false table
     return code
@@ -187,7 +187,7 @@ let ``QueryByOrCreate generates correct WHERE clause for single column`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let! code = QueryGenerator.generateTableCode false table
     return code
@@ -208,7 +208,7 @@ let ``QueryByOrCreate generates correct WHERE clause for multiple columns`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let! code = QueryGenerator.generateTableCode false table
     return code
@@ -230,7 +230,7 @@ let ``QueryByOrCreate returns Result of single item type`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let! code = QueryGenerator.generateTableCode false table
     return code
@@ -263,7 +263,7 @@ let ``QueryByOrCreate handles nullable columns with option types`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let! code = QueryGenerator.generateTableCode false table
     return code
@@ -290,7 +290,7 @@ let ``QueryByOrCreate includes Insert fallback logic`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let! code = QueryGenerator.generateTableCode false table
     return code
@@ -314,7 +314,7 @@ let ``QueryByOrCreate generates multiple methods when multiple annotations prese
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let! code = QueryGenerator.generateTableCode false table
     return code
@@ -340,7 +340,7 @@ let ``QueryByOrCreate works with normalized tables`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     let! code = NormalizedQueryGenerator.generateNormalizedTableCode false (normalized |> List.head)
     return code
@@ -369,7 +369,7 @@ let ``QueryByOrCreate with normalized table uses NewType for insert`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     let! code = NormalizedQueryGenerator.generateNormalizedTableCode false (normalized |> List.head)
     return code
@@ -391,7 +391,7 @@ let ``QueryByOrCreate with normalized table generates LEFT JOIN query`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     let! code = NormalizedQueryGenerator.generateNormalizedTableCode false (normalized |> List.head)
     return code
@@ -413,7 +413,7 @@ let ``QueryByOrCreate with extension-only fields generates invalidArg for incomp
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     let! code = NormalizedQueryGenerator.generateNormalizedTableCode false (normalized |> List.head)
     return code
@@ -443,7 +443,7 @@ let ``QueryByOrCreate with extension-only fields works with async`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     let! code = NormalizedQueryGenerator.generateNormalizedTableCode true (normalized |> List.head)
     return code
@@ -471,7 +471,7 @@ let ``QueryByOrCreate on view fails validation`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let view = parsed.views |> List.head
     let! columns = ViewIntrospection.getViewColumns parsed.tables view
     let! code = QueryGenerator.generateViewCode false view columns
@@ -496,7 +496,7 @@ let ``QueryByOrCreate with invalid column name fails validation`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let! code = QueryGenerator.generateTableCode false table
     return code
@@ -516,7 +516,7 @@ let ``QueryByOrCreate validation is case-insensitive`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let! code = QueryGenerator.generateTableCode false table
     return code
@@ -536,7 +536,7 @@ let ``QueryByOrCreate with multiple invalid columns shows first error`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let! code = QueryGenerator.generateTableCode false table
     return code
@@ -557,7 +557,7 @@ let ``QueryByOrCreate validation error for normalized tables`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     let! code = NormalizedQueryGenerator.generateNormalizedTableCode false (normalized |> List.head)
     return code

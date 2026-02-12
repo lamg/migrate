@@ -475,12 +475,35 @@ Available columns: id, name
 
 **Implementation Status:**
 ✅ COMPLETE - Fully implemented and integrated (January 2025)
-- SQL comment parsing with FParsec
+- SQL comment parsing with FsLexYacc
 - QueryBy annotation extraction
 - Code generation for all table types (regular, normalized, views)
 - Column validation with error reporting
 - Tupled parameter syntax for query columns
 - Integration with existing CRUD code generation pipeline
+
+### 4.1 LIKE Query Generation with QueryLike Annotations
+
+Migrate also supports `QueryLike` annotations for generating `%value%` pattern-matching queries.
+
+**Syntax:**
+```sql
+CREATE TABLE table_name (...);
+-- QueryLike(column)
+```
+
+**Placement:** QueryLike annotations must appear on the line(s) immediately following a CREATE TABLE or CREATE VIEW statement.
+
+**Features:**
+- Supports regular tables, normalized tables, and views
+- Generates methods named `GetBy{Column}Like`
+- Uses a single parameter with SQL `LIKE '%' || @column || '%'`
+- Validates that exactly one existing column is provided
+
+**Generated SQL pattern:**
+```sql
+WHERE column LIKE '%' || @column || '%'
+```
 
 ### 5. Find-or-Create Query Generation with QueryByOrCreate Annotations
 

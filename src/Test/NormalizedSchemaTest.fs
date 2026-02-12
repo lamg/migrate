@@ -22,7 +22,7 @@ let ``Detects extension table with correct naming and FK pattern`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized
   }
@@ -59,7 +59,7 @@ let ``Detects multiple extension tables for same base table`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized
   }
@@ -92,7 +92,7 @@ let ``Does not detect table with nullable columns as base table`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized
   }
@@ -117,7 +117,7 @@ let ``Does not detect extension table with nullable columns`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized
   }
@@ -142,7 +142,7 @@ let ``Does not detect table without extension naming pattern`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized
   }
@@ -172,7 +172,7 @@ let ``Does not detect table with FK to different table`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized
   }
@@ -198,7 +198,7 @@ let ``Does not detect table without PK being FK`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized
   }
@@ -229,7 +229,7 @@ let ``ClassifyTables separates normalized and regular tables`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let (normalized, regular) = NormalizedSchema.classifyTables parsed.tables
     return (normalized, regular)
   }
@@ -250,7 +250,7 @@ let ``hasNullableColumns returns true for table with nullable column`` () =
     "CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL, age integer)"
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return NormalizedSchema.hasNullableColumns table
   }
@@ -265,7 +265,7 @@ let ``hasNullableColumns returns false for table without nullable columns`` () =
     "CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL, age integer NOT NULL)"
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return NormalizedSchema.hasNullableColumns table
   }
@@ -291,7 +291,7 @@ let ``Table level FK constraint is detected for extension tables`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized
   }

@@ -3,6 +3,7 @@ open migrate.DeclarativeMigrations.Types
 
 let parseAnnotationsFromComments (comments: string list) =
   let queryBy = ResizeArray<QueryByAnnotation>()
+  let queryLike = ResizeArray<QueryLikeAnnotation>()
   let queryByOrCreate = ResizeArray<QueryByOrCreateAnnotation>()
   let insertOrIgnore = ResizeArray<InsertOrIgnoreAnnotation>()
 
@@ -28,17 +29,23 @@ let parseAnnotationsFromComments (comments: string list) =
       if cols.Length > 0 then
         queryBy.Add({ columns = cols })
     | None ->
-      match tryMatch @"^QueryByOrCreate\s*\((.*)\)\s*$" line with
+      match tryMatch @"^QueryLike\s*\((.*)\)\s*$" line with
       | Some m ->
         let cols = parseColumns m.Groups.[1].Value
         if cols.Length > 0 then
-          queryByOrCreate.Add({ columns = cols })
+          queryLike.Add({ columns = cols })
       | None ->
-        match tryMatch @"^InsertOrIgnore(?:\s*\(\s*\))?\s*$" line with
-        | Some _ -> insertOrIgnore.Add(InsertOrIgnoreAnnotation)
-        | None -> ()
+        match tryMatch @"^QueryByOrCreate\s*\((.*)\)\s*$" line with
+        | Some m ->
+          let cols = parseColumns m.Groups.[1].Value
+          if cols.Length > 0 then
+            queryByOrCreate.Add({ columns = cols })
+        | None ->
+          match tryMatch @"^InsertOrIgnore(?:\s*\(\s*\))?\s*$" line with
+          | Some _ -> insertOrIgnore.Add(InsertOrIgnoreAnnotation)
+          | None -> ()
 
-  (List.ofSeq queryBy, List.ofSeq queryByOrCreate, List.ofSeq insertOrIgnore)
+  (List.ofSeq queryBy, List.ofSeq queryLike, List.ofSeq queryByOrCreate, List.ofSeq insertOrIgnore)
 
 let tokensToString (xs: string list) =
   match xs with
@@ -113,17 +120,19 @@ statement:
   | create_table opt_semi comments %prec COMMENT
     { let (t: CreateTable) = $1
       let cs = $3
-      let (qb, qboc, ioi) = parseAnnotationsFromComments cs
+      let (qb, ql, qboc, ioi) = parseAnnotationsFromComments cs
       Some (Choice1Of5 { t with
                           queryByAnnotations = qb
+                          queryLikeAnnotations = ql
                           queryByOrCreateAnnotations = qboc
                           insertOrIgnoreAnnotations = ioi }) }
   | create_view opt_semi comments %prec COMMENT
     { let (v: CreateView) = $1
       let cs = $3
-      let (qb, qboc, ioi) = parseAnnotationsFromComments cs
+      let (qb, ql, qboc, ioi) = parseAnnotationsFromComments cs
       Some (Choice2Of5 { v with
                           queryByAnnotations = qb
+                          queryLikeAnnotations = ql
                           queryByOrCreateAnnotations = qboc
                           insertOrIgnoreAnnotations = ioi }) }
   | create_index opt_semi
@@ -154,6 +163,7 @@ create_table:
          columns = columns
          constraints = constraints
          queryByAnnotations = []
+         queryLikeAnnotations = []
          queryByOrCreateAnnotations = []
          insertOrIgnoreAnnotations = [] }: CreateTable) }
 
@@ -378,6 +388,7 @@ create_view:
          sqlTokens = [ fullStatement ]
          dependencies = dependencies
          queryByAnnotations = []
+         queryLikeAnnotations = []
          queryByOrCreateAnnotations = []
          insertOrIgnoreAnnotations = [] }: CreateView) }
 

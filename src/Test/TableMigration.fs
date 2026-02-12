@@ -45,8 +45,8 @@ let cases =
 
 let testTableMigration (case: int) (left: string, right: string, r: Result<string list, string>) =
   result {
-    let! left = FParsecSqlParser.parseSqlFile ("left", left)
-    let! right = FParsecSqlParser.parseSqlFile ("right", right)
+    let! left = SqlParserWrapper.parseSqlFile ("left", left)
+    let! right = SqlParserWrapper.parseSqlFile ("right", right)
     let sortedLeft, _ = Solve.sortFile left
     let sortedRight, _ = Solve.sortFile right
     let statements = Solve.tableMigrationsSql sortedLeft sortedRight

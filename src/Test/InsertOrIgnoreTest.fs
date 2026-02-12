@@ -19,7 +19,7 @@ let ``InsertOrIgnore annotation is parsed from CREATE TABLE statement`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return table.insertOrIgnoreAnnotations
   }
@@ -32,7 +32,7 @@ let ``Table without InsertOrIgnore annotation has empty list`` () =
   let sql = "CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL);"
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return table.insertOrIgnoreAnnotations
   }
@@ -51,7 +51,7 @@ let ``InsertOrIgnore can coexist with QueryBy and QueryByOrCreate annotations`` 
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return (table.queryByAnnotations, table.queryByOrCreateAnnotations, table.insertOrIgnoreAnnotations)
   }
@@ -75,7 +75,7 @@ let ``InsertOrIgnore generates InsertOrIgnore with INSERT OR IGNORE SQL`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let! code = QueryGenerator.generateTableCode false table
     return code
@@ -95,7 +95,7 @@ let ``InsertOrIgnore is not generated when annotation is absent`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let! code = QueryGenerator.generateTableCode false table
     return code
@@ -118,7 +118,7 @@ let ``InsertOrIgnore works with normalized tables`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     let! code = NormalizedQueryGenerator.generateNormalizedTableCode false (normalized |> List.head)
     return code
@@ -146,7 +146,7 @@ let ``InsertOrIgnore on view fails validation`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let view = parsed.views |> List.head
     let! columns = ViewIntrospection.getViewColumns parsed.tables view
     let! code = QueryGenerator.generateViewCode false view columns

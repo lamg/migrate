@@ -22,7 +22,7 @@ let ``Properties are generated for common fields`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized |> List.head |> NormalizedTypeGenerator.generateTypes
   }
@@ -57,7 +57,7 @@ let ``Properties are generated for partial fields with option type`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized |> List.head |> NormalizedTypeGenerator.generateTypes
   }
@@ -94,7 +94,7 @@ let ``Properties work with multiple extensions`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized |> List.head |> NormalizedTypeGenerator.generateTypes
   }
@@ -139,7 +139,7 @@ let ``Properties handle different types correctly`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized |> List.head |> NormalizedTypeGenerator.generateTypes
   }
@@ -172,7 +172,7 @@ let ``Property generation includes type extension syntax`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized |> List.head |> NormalizedTypeGenerator.generateTypes
   }
@@ -202,7 +202,7 @@ let ``Properties are not generated for NewType (insert type)`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized |> List.head |> NormalizedTypeGenerator.generateTypes
   }
@@ -235,7 +235,7 @@ let ``Properties have correct pattern matching structure`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return normalized |> List.head |> NormalizedTypeGenerator.generateTypes
   }

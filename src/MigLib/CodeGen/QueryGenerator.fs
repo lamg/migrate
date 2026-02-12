@@ -611,6 +611,27 @@ let validateQueryByAnnotation (table: CreateTable) (annotation: QueryByAnnotatio
         $"QueryBy annotation references non-existent column '{invalidCol}' in table '{table.name}'. Available columns: {availableCols}"
     | None -> Ok()
 
+/// Validate QueryLike annotation references one existing column (case-insensitive)
+let validateQueryLikeAnnotation (table: CreateTable) (annotation: QueryLikeAnnotation) : Result<unit, string> =
+  match annotation.columns with
+  | [] -> Error $"QueryLike annotation on table '{table.name}' requires exactly one column."
+  | [ col ] ->
+    let columnNames =
+      table.columns |> List.map (fun c -> c.name.ToLowerInvariant()) |> Set.ofList
+
+    if columnNames.Contains(col.ToLowerInvariant()) then
+      Ok()
+    else
+      let availableCols =
+        table.columns |> List.map (fun c -> c.name) |> String.concat ", "
+
+      Error
+        $"QueryLike annotation references non-existent column '{col}' in table '{table.name}'. Available columns: {availableCols}"
+  | _ ->
+    let receivedCols = annotation.columns |> String.concat ", "
+
+    Error $"QueryLike annotation on table '{table.name}' supports exactly one column. Received: {receivedCols}"
+
 /// Find column by name (case-insensitive)
 let findColumn (table: CreateTable) (colName: string) : ColumnDef option =
   table.columns
@@ -728,6 +749,94 @@ let generateQueryBy (useAsync: bool) (table: CreateTable) (annotation: QueryByAn
           ConstantExpr $"let results = ResizeArray<{typeName}>()"
           ConstantExpr $"while reader.Read() do results.Add({{ {fieldMappings} }})"
           ConstantExpr "Ok(results |> Seq.toList)" ]
+
+    let memberName = $"{methodName} ({parameters}) (tx: SqliteTransaction)"
+    let returnType = $"Result<{typeName} list, SqliteException>"
+    let body = trySqliteException bodyExprs
+
+    generateStaticMemberCode typeName memberName returnType body
+
+/// Generate custom QueryLike method with one parameter and SQL LIKE '%value%' semantics
+let generateQueryLike (useAsync: bool) (table: CreateTable) (annotation: QueryLikeAnnotation) : string =
+  let typeName = capitalize table.name
+  let col = annotation.columns |> List.head
+
+  let methodName = $"GetBy{capitalize col}Like"
+  let columnDef = findColumn table col |> Option.get
+  let isNullable = TypeGenerator.isColumnNullable columnDef
+  let fsharpType = TypeGenerator.mapSqlType columnDef.columnType isNullable
+  let parameters = $"{col}: {fsharpType}"
+  let whereClause = $"{col} LIKE '%%' || @{col} || '%%'"
+  let columnNames = table.columns |> List.map (fun c -> c.name) |> String.concat ", "
+
+  let fieldMappings =
+    table.columns
+    |> List.mapi (fun i c ->
+      let fieldName = capitalize c.name
+      let isNullableField = TypeGenerator.isColumnNullable c
+      let method = TypeGenerator.mapSqlType c.columnType false |> readerMethod
+
+      if isNullableField then
+        $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
+      else
+        $"{fieldName} = reader.Get{method} {i}")
+    |> String.concat "; "
+
+  if useAsync then
+    let asyncParamBindingExpr =
+      if isNullable then
+        OtherExpr
+          $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+      else
+        OtherExpr $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore"
+
+    let whileLoopBody =
+      $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
+
+    let asyncBodyExprs =
+      [ OtherExpr
+          $"use cmd = new SqliteCommand(\"SELECT {columnNames} FROM {table.name} WHERE {whereClause}\", tx.Connection, tx)"
+        asyncParamBindingExpr
+        OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
+        OtherExpr $"let results = ResizeArray<{typeName}>()"
+        OtherExpr whileLoopBody
+        OtherExpr "return Ok(results |> Seq.toList)" ]
+
+    let memberName = $"{methodName} ({parameters}) (tx: SqliteTransaction)"
+    let returnType = $"Task<Result<{typeName} list, SqliteException>>"
+    let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
+
+    generateStaticMemberCode typeName memberName returnType body
+  else
+    let paramBindingStmt =
+      if isNullable then
+        let matchExpr =
+          ParenExpr(
+            MatchExpr(
+              ConstantExpr col,
+              [ MatchClauseExpr("Some v", "box v")
+                MatchClauseExpr("None", "box DBNull.Value") ]
+            )
+          )
+
+        let addWithValue =
+          AppExpr("cmd.Parameters.AddWithValue", [ ConstantExpr $"\"@{col}\""; matchExpr ])
+
+        pipeIgnore addWithValue
+      else
+        let addWithValue =
+          AppExpr("cmd.Parameters.AddWithValue", [ ConstantExpr $"\"@{col}\""; ConstantExpr col ])
+
+        pipeIgnore addWithValue
+
+    let bodyExprs =
+      [ ConstantExpr
+          $"use cmd = new SqliteCommand(\"SELECT {columnNames} FROM {table.name} WHERE {whereClause}\", tx.Connection, tx)"
+        paramBindingStmt
+        ConstantExpr "use reader = cmd.ExecuteReader()"
+        ConstantExpr $"let results = ResizeArray<{typeName}>()"
+        ConstantExpr $"while reader.Read() do results.Add({{ {fieldMappings} }})"
+        ConstantExpr "Ok(results |> Seq.toList)" ]
 
     let memberName = $"{methodName} ({parameters}) (tx: SqliteTransaction)"
     let returnType = $"Result<{typeName} list, SqliteException>"
@@ -960,13 +1069,19 @@ let generateTableCode (useAsync: bool) (table: CreateTable) : Result<string, str
   let queryByValidationResults =
     table.queryByAnnotations |> List.map (validateQueryByAnnotation table)
 
+  // Validate all QueryLike annotations
+  let queryLikeValidationResults =
+    table.queryLikeAnnotations |> List.map (validateQueryLikeAnnotation table)
+
   // Validate all QueryByOrCreate annotations
   let queryByOrCreateValidationResults =
     table.queryByOrCreateAnnotations
     |> List.map (validateQueryByOrCreateAnnotation table)
 
   let firstError =
-    (queryByValidationResults @ queryByOrCreateValidationResults)
+    (queryByValidationResults
+     @ queryLikeValidationResults
+     @ queryByOrCreateValidationResults)
     |> List.tryFind (fun r ->
       match r with
       | Error _ -> true
@@ -994,6 +1109,10 @@ let generateTableCode (useAsync: bool) (table: CreateTable) : Result<string, str
     let queryByMethods =
       table.queryByAnnotations |> List.map (generateQueryBy useAsync table)
 
+    // Generate QueryLike methods
+    let queryLikeMethods =
+      table.queryLikeAnnotations |> List.map (generateQueryLike useAsync table)
+
     // Generate QueryByOrCreate methods
     let queryByOrCreateMethods =
       table.queryByOrCreateAnnotations
@@ -1008,6 +1127,7 @@ let generateTableCode (useAsync: bool) (table: CreateTable) : Result<string, str
         updateMethod
         deleteMethod ]
       @ (queryByMethods |> List.map Some)
+      @ (queryLikeMethods |> List.map Some)
       @ (queryByOrCreateMethods |> List.map Some)
       |> List.choose id
       |> String.concat "\n\n"
@@ -1130,6 +1250,30 @@ let validateViewQueryByAnnotation
       Error
         $"QueryBy annotation references non-existent column '{invalidCol}' in view '{viewName}'. Available columns: {availableCols}"
     | None -> Ok()
+
+/// Validate QueryLike annotation for view references one existing column (case-insensitive)
+let validateViewQueryLikeAnnotation
+  (viewName: string)
+  (columns: ViewColumn list)
+  (annotation: QueryLikeAnnotation)
+  : Result<unit, string> =
+  match annotation.columns with
+  | [] -> Error $"QueryLike annotation on view '{viewName}' requires exactly one column."
+  | [ col ] ->
+    let columnNames =
+      columns |> List.map (fun c -> c.name.ToLowerInvariant()) |> Set.ofList
+
+    if columnNames.Contains(col.ToLowerInvariant()) then
+      Ok()
+    else
+      let availableCols = columns |> List.map (fun c -> c.name) |> String.concat ", "
+
+      Error
+        $"QueryLike annotation references non-existent column '{col}' in view '{viewName}'. Available columns: {availableCols}"
+  | _ ->
+    let receivedCols = annotation.columns |> String.concat ", "
+
+    Error $"QueryLike annotation on view '{viewName}' supports exactly one column. Received: {receivedCols}"
 
 /// Find view column by name (case-insensitive)
 let findViewColumn (columns: ViewColumn list) (colName: string) : ViewColumn option =
@@ -1256,6 +1400,96 @@ let generateViewQueryBy
 
     generateStaticMemberCode typeName memberName returnType body
 
+/// Generate custom QueryLike method for views with SQL LIKE '%value%' semantics
+let generateViewQueryLike
+  (useAsync: bool)
+  (viewName: string)
+  (columns: ViewColumn list)
+  (annotation: QueryLikeAnnotation)
+  : string =
+  let typeName = capitalize viewName
+  let col = annotation.columns |> List.head
+  let methodName = $"GetBy{capitalize col}Like"
+  let columnDef = findViewColumn columns col |> Option.get
+  let fsharpType = TypeGenerator.mapSqlType columnDef.columnType columnDef.isNullable
+  let parameters = $"{col}: {fsharpType}"
+  let whereClause = $"{col} LIKE '%%' || @{col} || '%%'"
+  let columnNames = columns |> List.map (fun c -> c.name) |> String.concat ", "
+
+  let fieldMappings =
+    columns
+    |> List.mapi (fun i c ->
+      let fieldName = capitalize c.name
+      let method = TypeGenerator.mapSqlType c.columnType false |> readerMethod
+
+      if c.isNullable then
+        $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
+      else
+        $"{fieldName} = reader.Get{method} {i}")
+    |> String.concat "; "
+
+  if useAsync then
+    let asyncParamBindingExpr =
+      if columnDef.isNullable then
+        OtherExpr
+          $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+      else
+        OtherExpr $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore"
+
+    let whileLoopBody =
+      $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
+
+    let asyncBodyExprs =
+      [ OtherExpr
+          $"use cmd = new SqliteCommand(\"SELECT {columnNames} FROM {viewName} WHERE {whereClause}\", tx.Connection, tx)"
+        asyncParamBindingExpr
+        OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
+        OtherExpr $"let results = ResizeArray<{typeName}>()"
+        OtherExpr whileLoopBody
+        OtherExpr "return Ok(results |> Seq.toList)" ]
+
+    let memberName = $"{methodName} ({parameters}) (tx: SqliteTransaction)"
+    let returnType = $"Task<Result<{typeName} list, SqliteException>>"
+    let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
+
+    generateStaticMemberCode typeName memberName returnType body
+  else
+    let paramBindingStmt =
+      if columnDef.isNullable then
+        let matchExpr =
+          ParenExpr(
+            MatchExpr(
+              ConstantExpr col,
+              [ MatchClauseExpr("Some v", "box v")
+                MatchClauseExpr("None", "box DBNull.Value") ]
+            )
+          )
+
+        let addWithValue =
+          AppExpr("cmd.Parameters.AddWithValue", [ ConstantExpr $"\"@{col}\""; matchExpr ])
+
+        pipeIgnore addWithValue
+      else
+        let addWithValue =
+          AppExpr("cmd.Parameters.AddWithValue", [ ConstantExpr $"\"@{col}\""; ConstantExpr col ])
+
+        pipeIgnore addWithValue
+
+    let bodyExprs =
+      [ ConstantExpr
+          $"use cmd = new SqliteCommand(\"SELECT {columnNames} FROM {viewName} WHERE {whereClause}\", tx.Connection, tx)"
+        paramBindingStmt
+        ConstantExpr "use reader = cmd.ExecuteReader()"
+        ConstantExpr $"let results = ResizeArray<{typeName}>()"
+        ConstantExpr $"while reader.Read() do results.Add({{ {fieldMappings} }})"
+        ConstantExpr "Ok(results |> Seq.toList)" ]
+
+    let memberName = $"{methodName} ({parameters}) (tx: SqliteTransaction)"
+    let returnType = $"Result<{typeName} list, SqliteException>"
+    let body = trySqliteException bodyExprs
+
+    generateStaticMemberCode typeName memberName returnType body
+
 /// Generate code for a view (read-only queries)
 let generateViewCode (useAsync: bool) (view: CreateView) (columns: ViewColumn list) : Result<string, string> =
   let typeName = capitalize view.name
@@ -1264,9 +1498,16 @@ let generateViewCode (useAsync: bool) (view: CreateView) (columns: ViewColumn li
   match view.queryByOrCreateAnnotations, view.insertOrIgnoreAnnotations with
   | [], [] ->
     // Validate all QueryBy annotations
-    let validationResults =
+    let queryByValidationResults =
       view.queryByAnnotations
       |> List.map (validateViewQueryByAnnotation view.name columns)
+
+    // Validate all QueryLike annotations
+    let queryLikeValidationResults =
+      view.queryLikeAnnotations
+      |> List.map (validateViewQueryLikeAnnotation view.name columns)
+
+    let validationResults = queryByValidationResults @ queryLikeValidationResults
 
     let firstError =
       validationResults
@@ -1286,8 +1527,14 @@ let generateViewCode (useAsync: bool) (view: CreateView) (columns: ViewColumn li
         view.queryByAnnotations
         |> List.map (generateViewQueryBy useAsync view.name columns)
 
+      // Generate QueryLike methods
+      let queryLikeMethods =
+        view.queryLikeAnnotations
+        |> List.map (generateViewQueryLike useAsync view.name columns)
+
       let allMethods =
-        [ getAllMethod; getOneMethod ] @ queryByMethods |> String.concat "\n\n"
+        [ getAllMethod; getOneMethod ] @ queryByMethods @ queryLikeMethods
+        |> String.concat "\n\n"
 
       Ok
         $"""type {typeName} with

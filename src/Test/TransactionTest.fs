@@ -12,7 +12,7 @@ let ``Insert method uses curried signature with tx last`` () =
     "CREATE TABLE student(id integer PRIMARY KEY AUTOINCREMENT, name text NOT NULL)"
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let code = QueryGenerator.generateInsert false table
     return code
@@ -28,7 +28,7 @@ let ``GetById method uses curried signature with tx last`` () =
   let sql = "CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL)"
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return QueryGenerator.generateGet false table
   }
@@ -44,7 +44,7 @@ let ``GetAll method uses curried signature`` () =
   let sql = "CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL)"
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let code = QueryGenerator.generateGetAll false table
     return code
@@ -61,7 +61,7 @@ let ``Update method uses curried signature with tx last`` () =
     "CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL, email text)"
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return QueryGenerator.generateUpdate false table
   }
@@ -77,7 +77,7 @@ let ``Delete method uses curried signature with tx last`` () =
   let sql = "CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL)"
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return QueryGenerator.generateDelete false table
   }
@@ -93,7 +93,7 @@ let ``Generated table code uses curried signatures for all methods`` () =
   let sql = "CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL)"
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let! code = QueryGenerator.generateTableCode false table
     return code

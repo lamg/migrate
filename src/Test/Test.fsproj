@@ -18,6 +18,7 @@
     <Compile Include="SeedExecutionTest.fs" />
     <Compile Include="ViewCodeGenTest.fs" />
     <Compile Include="QueryByTest.fs" />
+    <Compile Include="QueryLikeTest.fs" />
     <Compile Include="QueryByOrCreateTest.fs" />
     <Compile Include="InsertOrIgnoreTest.fs" />
     <Compile Include="NormalizedSchemaTest.fs" />

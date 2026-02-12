@@ -56,6 +56,8 @@ type internal ColumnDef =
 
 type internal QueryByAnnotation = { columns: string list }
 
+type internal QueryLikeAnnotation = { columns: string list }
+
 type internal QueryByOrCreateAnnotation = { columns: string list }
 
 type internal InsertOrIgnoreAnnotation = InsertOrIgnoreAnnotation
@@ -65,6 +67,7 @@ type internal CreateView =
     sqlTokens: string seq
     dependencies: string list
     queryByAnnotations: QueryByAnnotation list
+    queryLikeAnnotations: QueryLikeAnnotation list
     queryByOrCreateAnnotations: QueryByOrCreateAnnotation list
     insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list }
 
@@ -73,6 +76,7 @@ type internal CreateTable =
     columns: ColumnDef list
     constraints: ColumnConstraint list
     queryByAnnotations: QueryByAnnotation list
+    queryLikeAnnotations: QueryLikeAnnotation list
     queryByOrCreateAnnotations: QueryByOrCreateAnnotation list
     insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list }
 

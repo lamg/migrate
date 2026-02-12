@@ -12,7 +12,7 @@ let ``Composite primary key is parsed and recognized`` () =
     "CREATE TABLE enrollment(student_id integer NOT NULL, course_id integer NOT NULL, grade text, PRIMARY KEY(student_id, course_id))"
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let pkCols = QueryGenerator.getPrimaryKey table
     return pkCols |> List.map (fun c -> c.name)
@@ -28,7 +28,7 @@ let ``Generated GetById method handles composite PK with transaction`` () =
     "CREATE TABLE enrollment(student_id integer NOT NULL, course_id integer NOT NULL, grade text, PRIMARY KEY(student_id, course_id))"
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return QueryGenerator.generateGet false table
   }
@@ -48,7 +48,7 @@ let ``Generated Delete method handles composite PK with transaction`` () =
     "CREATE TABLE enrollment(student_id integer NOT NULL, course_id integer NOT NULL, grade text, PRIMARY KEY(student_id, course_id))"
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return QueryGenerator.generateDelete false table
   }
@@ -68,7 +68,7 @@ let ``Generated Update method excludes all PK columns from SET with transaction`
     "CREATE TABLE enrollment(student_id integer NOT NULL, course_id integer NOT NULL, grade text, PRIMARY KEY(student_id, course_id))"
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     return QueryGenerator.generateUpdate false table
   }
@@ -89,7 +89,7 @@ let ``GetOne method is generated for tables`` () =
     "CREATE TABLE student(id integer PRIMARY KEY, name text NOT NULL, age integer)"
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let table = parsed.tables |> List.head
     let code = QueryGenerator.generateGetOne false table
     return code

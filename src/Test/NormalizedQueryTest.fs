@@ -22,7 +22,7 @@ let ``GetAll method is generated with correct signature`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateGetAll false (normalized |> List.head)
   }
@@ -47,7 +47,7 @@ let ``GetAll uses LEFT JOIN for extension tables`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateGetAll false (normalized |> List.head)
   }
@@ -71,7 +71,7 @@ let ``GetAll has case selection logic with NULL checks`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateGetAll false (normalized |> List.head)
   }
@@ -107,7 +107,7 @@ let ``GetAll with multiple extensions generates proper pattern matching`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateGetAll false (normalized |> List.head)
   }
@@ -143,7 +143,7 @@ let ``GetById method is generated with WHERE clause`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateGetById false (normalized |> List.head)
   }
@@ -175,7 +175,7 @@ let ``GetById uses same LEFT JOIN and case selection as GetAll`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateGetById false (normalized |> List.head)
   }
@@ -204,7 +204,7 @@ let ``GetOne method is generated with LIMIT 1`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     return NormalizedQueryGenerator.generateGetOne false (normalized |> List.head)
   }
@@ -230,7 +230,7 @@ let ``generateNormalizedTableCode includes all query methods`` () =
     """
 
   result {
-    let! parsed = FParsecSqlParser.parseSqlFile ("test", sql)
+    let! parsed = SqlParserWrapper.parseSqlFile ("test", sql)
     let normalized = NormalizedSchema.detectNormalizedTables parsed.tables
     let! code = NormalizedQueryGenerator.generateNormalizedTableCode false (normalized |> List.head)
     return code

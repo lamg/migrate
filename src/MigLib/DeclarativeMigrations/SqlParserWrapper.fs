@@ -1,4 +1,4 @@
-module internal migrate.DeclarativeMigrations.FParsecSqlParser
+module internal migrate.DeclarativeMigrations.SqlParserWrapper
 
 open FSharp.Text.Lexing
 open migrate.DeclarativeMigrations.Types
