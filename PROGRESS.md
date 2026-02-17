@@ -90,14 +90,22 @@ src/
 ## Update (2026-02-17, migrate and drain execution flow)
 
 - **Migrate execution implemented**: `MigLib.HotMigration.runMigrate` now evaluates the `.fsx` schema, introspects old DB schema, builds bulk-copy plans, prepares old DB recording markers/log table, initializes the new DB schema/migration tables, and copies data with ID mapping persistence.
-- **Drain execution implemented**: `MigLib.HotMigration.runDrain` now switches old DB marker to `draining`, loads bulk-copy/replay metadata from both databases, replays migration log entries into the new DB, and deletes consumed log entries.
+- **Drain execution implemented**: `MigLib.HotMigration.runDrain` now switches old DB marker to `draining`, loads bulk-copy/replay metadata from both databases, and replays migration log entries into the new DB.
 - **SQLite schema bridge added**: hot migration now includes runtime SQLite schema introspection + SQL DDL rendering so migration planning/copy can operate from live databases and reflected schema models.
 - **CLI wiring completed**: `mig migrate` and `mig drain` now execute real flows and print structured progress summaries with non-zero exit codes on failure.
 - **Coverage added**: end-to-end tests now validate migrate setup/copy behavior and drain replay/consumption behavior against real SQLite files.
 
+## Update (2026-02-17, migration safety hardening)
+
+- **Replay checkpoint table added**: new DB migrations now create `_migration_progress(id=0, last_replayed_log_id, drain_completed)` to persist drain progress.
+- **Exact pending replay accounting added**: `status --new` now reports pending replay as `_migration_log.id > last_replayed_log_id` instead of mirroring total log row count.
+- **Drain progress persistence added**: drain updates `_migration_progress` during replay and marks `drain_completed=1` only when no pending entries remain.
+- **Stricter cutover prechecks added**: cutover now requires `_migration_progress` to exist with `drain_completed=1` before switching `_migration_status` to `ready`.
+- **Coverage added**: tests now validate pending replay checkpoint math, cutover rejection before drain completion, migrate initialization of checkpoint state, and drain checkpoint progression.
+
 ## What's next
 
-1. Migration safety hardening (exact pending replay accounting and stricter cutover prechecks)
+1. Operational cleanup policy (migration table retention/removal and status output after cutover)
 
 ## Completed next-step items
 
@@ -108,3 +116,4 @@ src/
 4. Drain replay logic
 5. Cutover and status commands
 6. Migrate and drain command execution flow
+7. Migration safety hardening

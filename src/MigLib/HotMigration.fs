@@ -48,8 +48,17 @@ type private ForeignKeyRow =
     onUpdate: string
     onDelete: string }
 
+type private MigrationProgressRow =
+  { lastReplayedLogId: int64
+    drainCompleted: bool }
+
 let private migrationTables =
-  set [ "_migration_marker"; "_migration_log"; "_migration_status"; "_id_mapping" ]
+  set
+    [ "_migration_marker"
+      "_migration_log"
+      "_migration_status"
+      "_migration_progress"
+      "_id_mapping" ]
 
 let private toSqliteError (message: string) = SqliteException(message, 0)
 
@@ -267,6 +276,102 @@ let private upsertStatusRow
     return ()
   }
 
+let private upsertMigrationProgress
+  (connection: SqliteConnection)
+  (transaction: SqliteTransaction option)
+  (lastReplayedLogId: int64)
+  (drainCompleted: bool)
+  : Task<unit> =
+  task {
+    use cmd =
+      createCommand
+        connection
+        transaction
+        "INSERT INTO _migration_progress(id, last_replayed_log_id, drain_completed) VALUES (0, @last_replayed, @drain_completed) ON CONFLICT(id) DO UPDATE SET last_replayed_log_id = excluded.last_replayed_log_id, drain_completed = excluded.drain_completed"
+
+    cmd.Parameters.AddWithValue("@last_replayed", lastReplayedLogId) |> ignore
+
+    cmd.Parameters.AddWithValue("@drain_completed", if drainCompleted then 1 else 0)
+    |> ignore
+
+    let! _ = cmd.ExecuteNonQueryAsync()
+    return ()
+  }
+
+let private readMigrationProgress
+  (connection: SqliteConnection)
+  (transaction: SqliteTransaction option)
+  : Task<MigrationProgressRow option> =
+  task {
+    let! hasProgressTable = tableExists connection transaction "_migration_progress"
+
+    if not hasProgressTable then
+      return None
+    else
+      use rowCmd =
+        createCommand
+          connection
+          transaction
+          "SELECT last_replayed_log_id, drain_completed FROM _migration_progress WHERE id = 0 LIMIT 1"
+
+      use! reader = rowCmd.ExecuteReaderAsync()
+      let! hasRow = reader.ReadAsync()
+
+      if not hasRow then
+        return None
+      else
+        return
+          Some
+            { lastReplayedLogId = reader.GetInt64 0
+              drainCompleted = reader.GetInt64(1) = 1L }
+  }
+
+let private ensureMigrationProgressRow
+  (connection: SqliteConnection)
+  (transaction: SqliteTransaction option)
+  : Task<MigrationProgressRow> =
+  task {
+    use createProgressCmd =
+      createCommand
+        connection
+        transaction
+        "CREATE TABLE IF NOT EXISTS _migration_progress(id INTEGER PRIMARY KEY CHECK (id = 0), last_replayed_log_id INTEGER NOT NULL, drain_completed INTEGER NOT NULL);"
+
+    let! _ = createProgressCmd.ExecuteNonQueryAsync()
+
+    let! progress = readMigrationProgress connection transaction
+
+    match progress with
+    | Some row -> return row
+    | None ->
+      do! upsertMigrationProgress connection transaction 0L false
+
+      return
+        { lastReplayedLogId = 0L
+          drainCompleted = false }
+  }
+
+let private countPendingLogEntries
+  (connection: SqliteConnection)
+  (transaction: SqliteTransaction option)
+  (lastReplayedLogId: int64)
+  : Task<int64> =
+  task {
+    let! hasLogTable = tableExists connection transaction "_migration_log"
+
+    if not hasLogTable then
+      return 0L
+    else
+      use cmd =
+        createCommand connection transaction "SELECT COUNT(*) FROM _migration_log WHERE id > @last_replayed_log_id"
+
+      cmd.Parameters.AddWithValue("@last_replayed_log_id", lastReplayedLogId)
+      |> ignore
+
+      let! countObj = cmd.ExecuteScalarAsync()
+      return Convert.ToInt64(countObj, CultureInfo.InvariantCulture)
+  }
+
 let private renderForeignKeyTail (fk: ForeignKey) =
   let refCols =
     if fk.refColumns.IsEmpty then
@@ -419,6 +524,8 @@ let private createNewMigrationTables (newConnection: SqliteConnection) (tx: Sqli
     let! _ = statusCmd.ExecuteNonQueryAsync()
 
     do! upsertStatusRow newConnection (Some tx) "_migration_status" "migrating"
+    let! _ = ensureMigrationProgressRow newConnection (Some tx)
+    do! upsertMigrationProgress newConnection (Some tx) 0L false
   }
 
 let private initializeNewDatabase
@@ -945,22 +1052,6 @@ let private executeBulkCopy
       return Error ex
   }
 
-let private deleteMigrationLogEntriesUpTo
-  (oldConnection: SqliteConnection)
-  (maxLogIdInclusive: int64)
-  : Task<Result<unit, SqliteException>> =
-  task {
-    try
-      use cmd =
-        createCommand oldConnection None "DELETE FROM _migration_log WHERE id <= @max_id"
-
-      cmd.Parameters.AddWithValue("@max_id", maxLogIdInclusive) |> ignore
-      let! _ = cmd.ExecuteNonQueryAsync()
-      return Ok()
-    with :? SqliteException as ex ->
-      return Error ex
-  }
-
 let private parseSchemaFromScript (schemaPath: string) : Result<SqlFile, SqliteException> =
   match buildSchemaFromScript schemaPath with
   | Ok schema -> Ok schema
@@ -995,12 +1086,18 @@ let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<Migra
 
         let! idMappingEntries = countRowsIfTableExists newConnection None "_id_mapping"
         let! newMigrationStatus = readMarkerStatus newConnection None "_migration_status"
+        let! progress = readMigrationProgress newConnection None
+
+        let! pendingReplayEntries =
+          match progress with
+          | Some row -> countPendingLogEntries oldConnection None row.lastReplayedLogId
+          | None -> Task.FromResult migrationLogEntries
 
         return
           Ok
             { oldMarkerStatus = oldMarkerStatus
               migrationLogEntries = migrationLogEntries
-              pendingReplayEntries = Some migrationLogEntries
+              pendingReplayEntries = Some pendingReplayEntries
               idMappingEntries = Some idMappingEntries
               newMigrationStatus = newMigrationStatus }
     with
@@ -1115,9 +1212,10 @@ let runDrain (oldDbPath: string) (newDbPath: string) : Task<Result<DrainResult, 
               match initialMappingsResult with
               | Error ex -> return Error ex
               | Ok initialMappings ->
+                let! progressRow = ensureMigrationProgressRow newConnection None
                 let mutable mappings = initialMappings
                 let mutable replayedEntries = 0
-                let mutable lastConsumedLogId = 0L
+                let mutable lastConsumedLogId = progressRow.lastReplayedLogId
                 let mutable keepDraining = true
 
                 let mutable result: Result<DrainResult, SqliteException> =
@@ -1141,17 +1239,15 @@ let runDrain (oldDbPath: string) (newDbPath: string) : Task<Result<DrainResult, 
                       replayedEntries <- replayedEntries + entries.Length
 
                       let batchMaxLogId = entries |> List.map _.id |> List.max
-
-                      let! deleteResult = deleteMigrationLogEntriesUpTo oldConnection batchMaxLogId
-
-                      match deleteResult with
-                      | Error ex -> result <- Error ex
-                      | Ok() -> lastConsumedLogId <- batchMaxLogId
+                      lastConsumedLogId <- batchMaxLogId
+                      do! upsertMigrationProgress newConnection None lastConsumedLogId false
 
                 match result with
                 | Error ex -> return Error ex
                 | Ok _ ->
-                  let! remainingEntries = countRowsIfTableExists oldConnection None "_migration_log"
+                  let! remainingEntries = countPendingLogEntries oldConnection None lastConsumedLogId
+
+                  do! upsertMigrationProgress newConnection None lastConsumedLogId (remainingEntries = 0L)
 
                   return
                     Ok
@@ -1196,33 +1292,53 @@ let runCutover (newDbPath: string) : Task<Result<CutoverResult, SqliteException>
           transaction.Rollback()
           return Error error
         | Ok status ->
-          let isMigrating = status.Equals("migrating", StringComparison.OrdinalIgnoreCase)
-          let isReady = status.Equals("ready", StringComparison.OrdinalIgnoreCase)
+          let! progress = readMigrationProgress connection (Some transaction)
 
-          if not isMigrating && not isReady then
+          match progress with
+          | None ->
             transaction.Rollback()
 
             return
               Error(
                 toSqliteError
-                  $"Unsupported _migration_status value '{status}'. Expected 'migrating' or 'ready' before cutover."
+                  "_migration_progress is missing in the new database. Run `mig drain` before `mig cutover`."
               )
-          else
-            let! hasIdMapping = tableExists connection (Some transaction) "_id_mapping"
-
-            if hasIdMapping then
-              use dropCmd = createCommand connection (Some transaction) "DROP TABLE _id_mapping"
-
-              let! _ = dropCmd.ExecuteNonQueryAsync()
-              ()
-
-            do! upsertStatusRow connection (Some transaction) "_migration_status" "ready"
-            transaction.Commit()
+          | Some progressRow when not progressRow.drainCompleted ->
+            transaction.Rollback()
 
             return
-              Ok
-                { previousStatus = status
-                  idMappingDropped = hasIdMapping }
+              Error(
+                toSqliteError
+                  "Drain is not complete. Pending replay entries still exist. Run `mig drain` again before `mig cutover`."
+              )
+          | Some _ ->
+            let isMigrating = status.Equals("migrating", StringComparison.OrdinalIgnoreCase)
+            let isReady = status.Equals("ready", StringComparison.OrdinalIgnoreCase)
+
+            if not isMigrating && not isReady then
+              transaction.Rollback()
+
+              return
+                Error(
+                  toSqliteError
+                    $"Unsupported _migration_status value '{status}'. Expected 'migrating' or 'ready' before cutover."
+                )
+            else
+              let! hasIdMapping = tableExists connection (Some transaction) "_id_mapping"
+
+              if hasIdMapping then
+                use dropCmd = createCommand connection (Some transaction) "DROP TABLE _id_mapping"
+
+                let! _ = dropCmd.ExecuteNonQueryAsync()
+                ()
+
+              do! upsertStatusRow connection (Some transaction) "_migration_status" "ready"
+              transaction.Commit()
+
+              return
+                Ok
+                  { previousStatus = status
+                    idMappingDropped = hasIdMapping }
     with
     | :? SqliteException as ex -> return Error ex
     | ex -> return Error(toSqliteError ex.Message)

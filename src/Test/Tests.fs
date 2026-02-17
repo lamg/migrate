@@ -1142,6 +1142,8 @@ let ``migration status reports old and new database markers and counts`` () =
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');"
+    "CREATE TABLE _migration_progress(id INTEGER PRIMARY KEY CHECK (id = 0), last_replayed_log_id INTEGER NOT NULL, drain_completed INTEGER NOT NULL);"
+    "INSERT INTO _migration_progress(id, last_replayed_log_id, drain_completed) VALUES (0, 1, 0);"
     "CREATE TABLE _id_mapping(table_name TEXT NOT NULL, old_id INTEGER NOT NULL, new_id INTEGER NOT NULL, PRIMARY KEY(table_name, old_id));"
     "INSERT INTO _id_mapping(table_name, old_id, new_id) VALUES ('student', 1, 101);"
     "INSERT INTO _id_mapping(table_name, old_id, new_id) VALUES ('student', 2, 102);" ]
@@ -1156,7 +1158,7 @@ let ``migration status reports old and new database markers and counts`` () =
   | Ok report ->
     Assert.Equal(Some "recording", report.oldMarkerStatus)
     Assert.Equal(2L, report.migrationLogEntries)
-    Assert.Equal(Some 2L, report.pendingReplayEntries)
+    Assert.Equal(Some 1L, report.pendingReplayEntries)
     Assert.Equal(Some 2L, report.idMappingEntries)
     Assert.Equal(Some "migrating", report.newMigrationStatus)
 
@@ -1209,6 +1211,8 @@ let ``cutover sets ready status and drops id mapping table`` () =
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');"
+    "CREATE TABLE _migration_progress(id INTEGER PRIMARY KEY CHECK (id = 0), last_replayed_log_id INTEGER NOT NULL, drain_completed INTEGER NOT NULL);"
+    "INSERT INTO _migration_progress(id, last_replayed_log_id, drain_completed) VALUES (0, 10, 1);"
     "CREATE TABLE _id_mapping(table_name TEXT NOT NULL, old_id INTEGER NOT NULL, new_id INTEGER NOT NULL, PRIMARY KEY(table_name, old_id));"
     "INSERT INTO _id_mapping(table_name, old_id, new_id) VALUES ('student', 1, 101);" ]
   |> List.iter (fun sql ->
@@ -1263,6 +1267,35 @@ let ``cutover fails when migration status table is missing`` () =
   match cutoverResult with
   | Ok _ -> failwith "Expected cutover to fail when _migration_status table is missing"
   | Error ex -> Assert.Contains("_migration_status table is missing", ex.Message)
+
+  newConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cutover fails when drain has not completed`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cutover_not_drained_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let newDbPath = Path.Combine(tempDir, "new.db")
+
+  use newConn = new SqliteConnection($"Data Source={newDbPath}")
+  newConn.Open()
+
+  [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');"
+    "CREATE TABLE _migration_progress(id INTEGER PRIMARY KEY CHECK (id = 0), last_replayed_log_id INTEGER NOT NULL, drain_completed INTEGER NOT NULL);"
+    "INSERT INTO _migration_progress(id, last_replayed_log_id, drain_completed) VALUES (0, 100, 0);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, newConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let cutoverResult = runCutover newDbPath |> fun t -> t.Result
+
+  match cutoverResult with
+  | Ok _ -> failwith "Expected cutover to fail when drain is not complete"
+  | Error ex -> Assert.Contains("Drain is not complete", ex.Message)
 
   newConn.Close()
   Directory.Delete(tempDir, true)
@@ -1357,13 +1390,25 @@ type Invoice = {{ id: int64; account: Account; total: float }}
   let mappingCount = mappingCountCmd.ExecuteScalar() |> unbox<int64>
   Assert.Equal(2L, mappingCount)
 
+  use progressCmd =
+    new SqliteCommand(
+      "SELECT last_replayed_log_id, drain_completed FROM _migration_progress WHERE id = 0",
+      verifyNewConn
+    )
+
+  use progressReader = progressCmd.ExecuteReader()
+  Assert.True(progressReader.Read())
+  Assert.Equal(0L, progressReader.GetInt64(0))
+  Assert.Equal(0L, progressReader.GetInt64(1))
+  Assert.False(progressReader.Read())
+
   verifyOldConn.Close()
   verifyNewConn.Close()
   setupOldConn.Close()
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``drain replays accumulated log entries and clears consumed logs`` () =
+let ``drain replays accumulated log entries and records replay checkpoint`` () =
   let tempDir = Path.Combine(Path.GetTempPath(), $"mig_drain_flow_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
@@ -1438,7 +1483,7 @@ type Invoice = {{ id: int64; account: Account; total: float }}
     new SqliteCommand("SELECT COUNT(*) FROM _migration_log", verifyOldConn)
 
   let oldLogCount = oldLogCountCmd.ExecuteScalar() |> unbox<int64>
-  Assert.Equal(0L, oldLogCount)
+  Assert.Equal(3L, oldLogCount)
 
   use verifyNewConn = new SqliteConnection($"Data Source={newDbPath}")
   verifyNewConn.Open()
@@ -1470,6 +1515,18 @@ type Invoice = {{ id: int64; account: Account; total: float }}
   Assert.Equal("Bob", summaryReader.GetString(0))
   Assert.True(Math.Abs(summaryReader.GetDouble(1) - 15.0) < 0.0001)
   Assert.False(summaryReader.Read())
+
+  use progressCmd =
+    new SqliteCommand(
+      "SELECT last_replayed_log_id, drain_completed FROM _migration_progress WHERE id = 0",
+      verifyNewConn
+    )
+
+  use progressReader = progressCmd.ExecuteReader()
+  Assert.True(progressReader.Read())
+  Assert.Equal(3L, progressReader.GetInt64(0))
+  Assert.Equal(1L, progressReader.GetInt64(1))
+  Assert.False(progressReader.Read())
 
   verifyOldConn.Close()
   verifyNewConn.Close()
