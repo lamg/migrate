@@ -79,9 +79,17 @@ src/
 - **Replay transactional behavior added**: each source transaction group is replayed inside its own SQLite transaction, committing as a unit and rolling back on failure.
 - **Coverage added**: tests validate transaction grouping/order, migration log + mapping loading, end-to-end insert/update/delete replay with ID translation, and rollback on replay failure.
 
+## Update (2026-02-17, cutover and status commands)
+
+- **Hot migration command module added**: `MigLib/HotMigration.fs` now implements reusable database operations for migration `status` inspection and `cutover`.
+- **Status reporting implemented**: status now reads old DB marker/log counts and, when a new DB is provided, reads `_migration_status` and `_id_mapping` counts with pending replay count reporting.
+- **Cutover execution implemented**: cutover now validates `_migration_status`, drops `_id_mapping` if present, and sets `_migration_status(id=0)` to `ready` in one transaction.
+- **CLI wiring completed**: `mig status` and `mig cutover` now call MigLib implementations and return non-zero exit codes on failure with clear error output.
+- **Coverage added**: tests validate status snapshots (with/without migration tables), successful cutover state transition and cleanup, and cutover failure when `_migration_status` is missing.
+
 ## What's next
 
-1. Cutover and status commands
+1. Migrate and drain command execution flow
 
 ## Completed next-step items
 
@@ -90,3 +98,4 @@ src/
 2. Bulk data copy with FK dependency ordering and ID mapping
 3. Migration log recording in TaskTxnBuilder
 4. Drain replay logic
+5. Cutover and status commands

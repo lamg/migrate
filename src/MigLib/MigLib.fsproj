@@ -5,6 +5,7 @@
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Db.fs" />
+    <Compile Include="HotMigration.fs" />
     <Compile Include="DeclarativeMigrations/Types.fs" />
     <Compile Include="DeclarativeMigrations/SchemaDiff.fs" />
     <Compile Include="DeclarativeMigrations/DataCopy.fs" />

@@ -1,6 +1,7 @@
 module Mig.Program
 
 open Argu
+open MigLib.HotMigration
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type MigrateArgs =
@@ -75,14 +76,46 @@ let drain (args: ParseResults<DrainArgs>) =
 
 let cutover (args: ParseResults<CutoverArgs>) =
   let newDb = args.GetResult CutoverArgs.New
-  printfn $"cutover: not implemented (new={newDb})"
-  0
+
+  match runCutover newDb |> fun t -> t.Result with
+  | Ok result ->
+    let droppedIdMapping = if result.idMappingDropped then "yes" else "no"
+    printfn "Cutover complete."
+    printfn $"New database: {newDb}"
+    printfn $"Previous migration status: {result.previousStatus}"
+    printfn "Current migration status: ready"
+    printfn $"Dropped _id_mapping: {droppedIdMapping}"
+    0
+  | Error ex ->
+    eprintfn $"cutover failed: {ex.Message}"
+    1
 
 let status (args: ParseResults<StatusArgs>) =
   let old = args.GetResult StatusArgs.Old
   let newDb = args.TryGetResult StatusArgs.New
-  printfn $"status: not implemented (old={old}, new={newDb})"
-  0
+
+  match getStatus old newDb |> fun t -> t.Result with
+  | Error ex ->
+    eprintfn $"status failed: {ex.Message}"
+    1
+  | Ok report ->
+    let markerStatus = report.oldMarkerStatus |> Option.defaultValue "no marker"
+    printfn $"Old database: {old}"
+    printfn $"Marker status: {markerStatus}"
+    printfn $"Migration log entries: {report.migrationLogEntries}"
+
+    match newDb, report.pendingReplayEntries, report.idMappingEntries with
+    | Some newPath, Some pendingReplayEntries, Some idMappingEntries ->
+      let migrationStatus =
+        report.newMigrationStatus |> Option.defaultValue "no status marker"
+
+      printfn $"New database: {newPath}"
+      printfn $"Migration status: {migrationStatus}"
+      printfn $"Pending replay entries: {pendingReplayEntries}"
+      printfn $"_id_mapping entries: {idMappingEntries}"
+    | _ -> ()
+
+    0
 
 [<EntryPoint>]
 let main argv =

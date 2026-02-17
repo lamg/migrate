@@ -9,6 +9,7 @@ open MigLib.DeclarativeMigrations.Types
 open MigLib.DeclarativeMigrations.DataCopy
 open MigLib.DeclarativeMigrations.DrainReplay
 open MigLib.DeclarativeMigrations.SchemaDiff
+open MigLib.HotMigration
 open MigLib.SchemaReflection
 open MigLib.SchemaScript
 open Microsoft.Data.Sqlite
@@ -1113,6 +1114,158 @@ let ``drain replay rolls back a transaction group when one operation fails`` () 
 
     conn.Close()
     Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``migration status reports old and new database markers and counts`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_status_report_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+  let newDbPath = Path.Combine(tempDir, "new.db")
+
+  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  oldConn.Open()
+
+  [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);"
+    "INSERT INTO _migration_log(txn_id, ordering, operation, table_name, row_data) VALUES (1, 1, 'insert', 'student', '{\"id\":1,\"name\":\"A\"}');"
+    "INSERT INTO _migration_log(txn_id, ordering, operation, table_name, row_data) VALUES (1, 2, 'update', 'student', '{\"id\":1,\"name\":\"B\"}');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, oldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  use newConn = new SqliteConnection($"Data Source={newDbPath}")
+  newConn.Open()
+
+  [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');"
+    "CREATE TABLE _id_mapping(table_name TEXT NOT NULL, old_id INTEGER NOT NULL, new_id INTEGER NOT NULL, PRIMARY KEY(table_name, old_id));"
+    "INSERT INTO _id_mapping(table_name, old_id, new_id) VALUES ('student', 1, 101);"
+    "INSERT INTO _id_mapping(table_name, old_id, new_id) VALUES ('student', 2, 102);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, newConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let statusResult = getStatus oldDbPath (Some newDbPath) |> fun t -> t.Result
+
+  match statusResult with
+  | Error ex -> failwith $"Expected status read to succeed, got {ex.Message}"
+  | Ok report ->
+    Assert.Equal(Some "recording", report.oldMarkerStatus)
+    Assert.Equal(2L, report.migrationLogEntries)
+    Assert.Equal(Some 2L, report.pendingReplayEntries)
+    Assert.Equal(Some 2L, report.idMappingEntries)
+    Assert.Equal(Some "migrating", report.newMigrationStatus)
+
+  oldConn.Close()
+  newConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``migration status handles databases without migration tables`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_status_nomarker_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+
+  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  oldConn.Open()
+
+  use initCmd =
+    new SqliteCommand("CREATE TABLE student(id INTEGER PRIMARY KEY, name TEXT NOT NULL);", oldConn)
+
+  initCmd.ExecuteNonQuery() |> ignore
+
+  let statusResult = getStatus oldDbPath None |> fun t -> t.Result
+
+  match statusResult with
+  | Error ex -> failwith $"Expected status read without migration tables to succeed, got {ex.Message}"
+  | Ok report ->
+    Assert.Equal(None, report.oldMarkerStatus)
+    Assert.Equal(0L, report.migrationLogEntries)
+    Assert.Equal(None, report.pendingReplayEntries)
+    Assert.Equal(None, report.idMappingEntries)
+    Assert.Equal(None, report.newMigrationStatus)
+
+  oldConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cutover sets ready status and drops id mapping table`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cutover_success_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let newDbPath = Path.Combine(tempDir, "new.db")
+
+  use newConn = new SqliteConnection($"Data Source={newDbPath}")
+  newConn.Open()
+
+  [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');"
+    "CREATE TABLE _id_mapping(table_name TEXT NOT NULL, old_id INTEGER NOT NULL, new_id INTEGER NOT NULL, PRIMARY KEY(table_name, old_id));"
+    "INSERT INTO _id_mapping(table_name, old_id, new_id) VALUES ('student', 1, 101);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, newConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let cutoverResult = runCutover newDbPath |> fun t -> t.Result
+
+  match cutoverResult with
+  | Error ex -> failwith $"Expected cutover to succeed, got {ex.Message}"
+  | Ok result ->
+    Assert.Equal("migrating", result.previousStatus)
+    Assert.True(result.idMappingDropped)
+
+  use verifyStatusCmd =
+    new SqliteCommand("SELECT status FROM _migration_status WHERE id = 0", newConn)
+
+  let statusValue = verifyStatusCmd.ExecuteScalar() |> string
+  Assert.Equal("ready", statusValue)
+
+  use existsCmd =
+    new SqliteCommand("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_id_mapping' LIMIT 1", newConn)
+
+  let idMappingExists = existsCmd.ExecuteScalar()
+  Assert.True(isNull idMappingExists)
+
+  newConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cutover fails when migration status table is missing`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cutover_missing_status_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let newDbPath = Path.Combine(tempDir, "new.db")
+
+  use newConn = new SqliteConnection($"Data Source={newDbPath}")
+  newConn.Open()
+
+  use initCmd =
+    new SqliteCommand(
+      "CREATE TABLE _id_mapping(table_name TEXT NOT NULL, old_id INTEGER NOT NULL, new_id INTEGER NOT NULL, PRIMARY KEY(table_name, old_id));",
+      newConn
+    )
+
+  initCmd.ExecuteNonQuery() |> ignore
+
+  let cutoverResult = runCutover newDbPath |> fun t -> t.Result
+
+  match cutoverResult with
+  | Ok _ -> failwith "Expected cutover to fail when _migration_status table is missing"
+  | Error ex -> Assert.Contains("_migration_status table is missing", ex.Message)
+
+  newConn.Close()
+  Directory.Delete(tempDir, true)
 
 [<Fact>]
 let ``schema reflection maps DU optional cases into extension tables`` () =
