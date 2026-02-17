@@ -7,6 +7,7 @@ open MigLib.Db
 open MigLib.CodeGen.CodeGen
 open MigLib.DeclarativeMigrations.Types
 open MigLib.DeclarativeMigrations.DataCopy
+open MigLib.DeclarativeMigrations.DrainReplay
 open MigLib.DeclarativeMigrations.SchemaDiff
 open MigLib.SchemaReflection
 open MigLib.SchemaScript
@@ -36,6 +37,14 @@ let private mkForeignKey refTable refColumns =
       onUpdate = None }
 
 let private mkRow pairs = pairs |> Map.ofList
+
+let private mkLogEntry id txnId ordering operation sourceTable rowData =
+  { id = id
+    txnId = txnId
+    ordering = ordering
+    operation = operation
+    sourceTable = sourceTable
+    rowData = rowData }
 
 [<AutoIncPK "id">]
 [<Unique "name">]
@@ -766,6 +775,344 @@ let ``bulk copy row projection fails when FK mapping is missing`` () =
     match projectRowForInsert invoiceStep sourceInvoiceRow emptyIdMappings with
     | Ok _ -> failwith "Expected projection to fail when account ID mapping is missing"
     | Error error -> Assert.Contains("No ID mappings are available yet for referenced table 'account'", error)
+
+[<Fact>]
+let ``drain replay groups entries by transaction and ordering`` () =
+  let entries =
+    [ mkLogEntry
+        4L
+        2L
+        2L
+        Insert
+        "invoice"
+        (mkRow [ "id", Integer 60; "legacy_account_id", Integer 10; "total", Real 42.5 ])
+      mkLogEntry 2L 1L 2L Update "invoice" (mkRow [ "id", Integer 50; "total", Real 99.0 ])
+      mkLogEntry 3L 2L 1L Insert "account" (mkRow [ "id", Integer 10; "name", String "Alice" ])
+      mkLogEntry 1L 1L 1L Insert "account" (mkRow [ "id", Integer 9; "name", String "Bob" ]) ]
+
+  let grouped = groupEntriesByTransaction entries
+
+  Assert.Equal<int64 list>([ 1L; 2L ], grouped |> List.map fst)
+
+  let txn1 =
+    grouped |> List.find (fun (txnId, _) -> txnId = 1L) |> snd |> List.map _.id
+
+  let txn2 =
+    grouped |> List.find (fun (txnId, _) -> txnId = 2L) |> snd |> List.map _.id
+
+  Assert.Equal<int64 list>([ 1L; 2L ], txn1)
+  Assert.Equal<int64 list>([ 3L; 4L ], txn2)
+
+[<Fact>]
+let ``drain replay reads migration log entries and existing id mappings`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_drainreplay_read_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+  let dbPath = Path.Combine(tempDir, "read.db")
+
+  use setupConn = new SqliteConnection($"Data Source={dbPath}")
+  setupConn.Open()
+
+  [ "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);"
+    "CREATE TABLE _id_mapping(table_name TEXT NOT NULL, old_id INTEGER NOT NULL, new_id INTEGER NOT NULL, PRIMARY KEY(table_name, old_id));"
+    "INSERT INTO _migration_log(txn_id, ordering, operation, table_name, row_data) VALUES (7, 1, 'insert', 'legacy_account', '{\"id\":10,\"name\":\"Alice\"}');"
+    "INSERT INTO _migration_log(txn_id, ordering, operation, table_name, row_data) VALUES (7, 2, 'insert', 'invoice', '{\"id\":50,\"legacy_account_id\":10,\"total\":42.5}');"
+    "INSERT INTO _id_mapping(table_name, old_id, new_id) VALUES ('account', 10, 100);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let entriesResult = readMigrationLogEntries setupConn 0L |> fun t -> t.Result
+
+  match entriesResult with
+  | Error ex -> failwith $"Expected migration log read to succeed, got {ex.Message}"
+  | Ok entries ->
+    Assert.Equal(2, entries.Length)
+    Assert.Equal(7L, entries.Head.txnId)
+    Assert.Equal(Insert, entries.Head.operation)
+
+    match entries.Head.rowData.TryFind "name" with
+    | Some(String name) -> Assert.Equal("Alice", name)
+    | other -> failwith $"Expected row_data name='Alice', got {other}"
+
+    match entries.Tail.Head.rowData.TryFind "total" with
+    | Some(Real total) -> Assert.True(Math.Abs(total - 42.5) < 0.0001)
+    | other -> failwith $"Expected row_data total=42.5, got {other}"
+
+  let mappingsResult = loadIdMappings setupConn |> fun t -> t.Result
+
+  match mappingsResult with
+  | Error ex -> failwith $"Expected ID mapping load to succeed, got {ex.Message}"
+  | Ok mappings ->
+    match lookupMappedIdentity "account" [ Integer 10 ] mappings with
+    | Ok [ Integer mapped ] -> Assert.Equal(100, mapped)
+    | Ok other -> failwith $"Expected mapped identity [Integer 100], got {other}"
+    | Error error -> failwith $"Expected account mapping to exist, got error: {error}"
+
+  setupConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``drain replay replays insert update and delete with id translation`` () =
+  let sourceSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "legacy_account"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              []
+            mkTable
+              "invoice"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "legacy_account_id" SqlInteger [ NotNull; mkForeignKey "legacy_account" [ "id" ] ]
+                mkColumn "total" SqlReal [ NotNull ] ]
+              [] ] }
+
+  let targetSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "account"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              []
+            mkTable
+              "invoice"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ]
+                mkColumn "total" SqlReal [ NotNull ] ]
+              [] ] }
+
+  match buildBulkCopyPlan sourceSchema targetSchema with
+  | Error error -> failwith $"bulk copy plan failed: {error}"
+  | Ok plan ->
+    let tempDir =
+      Path.Combine(Path.GetTempPath(), $"mig_drainreplay_apply_{Guid.NewGuid()}")
+
+    Directory.CreateDirectory tempDir |> ignore
+    let dbPath = Path.Combine(tempDir, "apply.db")
+
+    use conn = new SqliteConnection($"Data Source={dbPath}")
+    conn.Open()
+
+    [ "PRAGMA foreign_keys = ON;"
+      "CREATE TABLE account(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+      "CREATE TABLE invoice(id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, total REAL NOT NULL, FOREIGN KEY(account_id) REFERENCES account(id));"
+      "CREATE TABLE _id_mapping(table_name TEXT NOT NULL, old_id INTEGER NOT NULL, new_id INTEGER NOT NULL, PRIMARY KEY(table_name, old_id));" ]
+    |> List.iter (fun sql ->
+      use cmd = new SqliteCommand(sql, conn)
+      cmd.ExecuteNonQuery() |> ignore)
+
+    let insertAndUpdateEntries =
+      [ mkLogEntry 1L 11L 1L Insert "legacy_account" (mkRow [ "id", Integer 10; "name", String "Alice" ])
+        mkLogEntry
+          2L
+          11L
+          2L
+          Insert
+          "invoice"
+          (mkRow [ "id", Integer 50; "legacy_account_id", Integer 10; "total", Real 42.5 ])
+        mkLogEntry
+          3L
+          12L
+          1L
+          Update
+          "invoice"
+          (mkRow [ "id", Integer 50; "legacy_account_id", Integer 10; "total", Real 99.0 ]) ]
+
+    let replayResult =
+      replayDrainEntries conn plan insertAndUpdateEntries emptyIdMappings
+      |> fun t -> t.Result
+
+    let mappings =
+      match replayResult with
+      | Error ex -> failwith $"Expected replay to succeed, got {ex.Message}"
+      | Ok value -> value
+
+    use accountCmd = new SqliteCommand("SELECT id, name FROM account ORDER BY id", conn)
+    use accountReader = accountCmd.ExecuteReader()
+    Assert.True(accountReader.Read())
+    let accountId = accountReader.GetInt64(0)
+    Assert.Equal("Alice", accountReader.GetString(1))
+    Assert.False(accountReader.Read())
+
+    use invoiceCmd =
+      new SqliteCommand("SELECT id, account_id, total FROM invoice ORDER BY id", conn)
+
+    use invoiceReader = invoiceCmd.ExecuteReader()
+    Assert.True(invoiceReader.Read())
+    let invoiceId = invoiceReader.GetInt64(0)
+    Assert.Equal(accountId, invoiceReader.GetInt64(1))
+    Assert.True(Math.Abs(invoiceReader.GetDouble(2) - 99.0) < 0.0001)
+    Assert.False(invoiceReader.Read())
+
+    use accountMapCmd =
+      new SqliteCommand("SELECT new_id FROM _id_mapping WHERE table_name = 'account' AND old_id = 10", conn)
+
+    let mappedAccountId = accountMapCmd.ExecuteScalar() |> unbox<int64>
+    Assert.Equal(accountId, mappedAccountId)
+
+    use invoiceMapCmd =
+      new SqliteCommand("SELECT new_id FROM _id_mapping WHERE table_name = 'invoice' AND old_id = 50", conn)
+
+    let mappedInvoiceId = invoiceMapCmd.ExecuteScalar() |> unbox<int64>
+    Assert.Equal(invoiceId, mappedInvoiceId)
+
+    match lookupMappedIdentity "account" [ Integer 10 ] mappings with
+    | Ok [ Integer mapped ] -> Assert.Equal(accountId, int64 mapped)
+    | Ok other -> failwith $"Expected mapped account identity, got {other}"
+    | Error error -> failwith $"Expected mapped account identity, got error: {error}"
+
+    let deleteResult =
+      replayDrainEntries conn plan [ mkLogEntry 4L 13L 1L Delete "invoice" (mkRow [ "id", Integer 50 ]) ] mappings
+      |> fun t -> t.Result
+
+    match deleteResult with
+    | Error ex -> failwith $"Expected delete replay to succeed, got {ex.Message}"
+    | Ok _ -> ()
+
+    use countInvoiceCmd = new SqliteCommand("SELECT COUNT(*) FROM invoice", conn)
+    let invoiceCount = countInvoiceCmd.ExecuteScalar() |> unbox<int64>
+    Assert.Equal(0L, invoiceCount)
+
+    conn.Close()
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``drain replay rolls back a transaction group when one operation fails`` () =
+  let sourceSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "legacy_account"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              []
+            mkTable
+              "invoice"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "legacy_account_id" SqlInteger [ NotNull; mkForeignKey "legacy_account" [ "id" ] ]
+                mkColumn "total" SqlReal [ NotNull ] ]
+              [] ] }
+
+  let targetSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "account"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              []
+            mkTable
+              "invoice"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ]
+                mkColumn "total" SqlReal [ NotNull ] ]
+              [] ] }
+
+  match buildBulkCopyPlan sourceSchema targetSchema with
+  | Error error -> failwith $"bulk copy plan failed: {error}"
+  | Ok plan ->
+    let tempDir =
+      Path.Combine(Path.GetTempPath(), $"mig_drainreplay_rollback_{Guid.NewGuid()}")
+
+    Directory.CreateDirectory tempDir |> ignore
+    let dbPath = Path.Combine(tempDir, "rollback.db")
+
+    use conn = new SqliteConnection($"Data Source={dbPath}")
+    conn.Open()
+
+    [ "PRAGMA foreign_keys = ON;"
+      "CREATE TABLE account(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+      "CREATE TABLE invoice(id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, total REAL NOT NULL, FOREIGN KEY(account_id) REFERENCES account(id));"
+      "CREATE TABLE _id_mapping(table_name TEXT NOT NULL, old_id INTEGER NOT NULL, new_id INTEGER NOT NULL, PRIMARY KEY(table_name, old_id));" ]
+    |> List.iter (fun sql ->
+      use cmd = new SqliteCommand(sql, conn)
+      cmd.ExecuteNonQuery() |> ignore)
+
+    let entries =
+      [ mkLogEntry 1L 21L 1L Insert "legacy_account" (mkRow [ "id", Integer 30; "name", String "Bob" ])
+        mkLogEntry
+          2L
+          21L
+          2L
+          Insert
+          "invoice"
+          (mkRow [ "id", Integer 70; "legacy_account_id", Integer 999; "total", Real 10.0 ]) ]
+
+    let replayResult =
+      replayDrainEntries conn plan entries emptyIdMappings |> fun t -> t.Result
+
+    match replayResult with
+    | Ok _ -> failwith "Expected replay to fail when FK mapping is missing"
+    | Error ex ->
+      Assert.Contains("Missing ID mapping for FK", ex.Message)
+      Assert.Contains("invoice", ex.Message)
+
+    use countAccountCmd = new SqliteCommand("SELECT COUNT(*) FROM account", conn)
+    let accountCount = countAccountCmd.ExecuteScalar() |> unbox<int64>
+    Assert.Equal(0L, accountCount)
+
+    use countInvoiceCmd = new SqliteCommand("SELECT COUNT(*) FROM invoice", conn)
+    let invoiceCount = countInvoiceCmd.ExecuteScalar() |> unbox<int64>
+    Assert.Equal(0L, invoiceCount)
+
+    use countMappingCmd = new SqliteCommand("SELECT COUNT(*) FROM _id_mapping", conn)
+    let mappingCount = countMappingCmd.ExecuteScalar() |> unbox<int64>
+    Assert.Equal(0L, mappingCount)
+
+    conn.Close()
+    Directory.Delete(tempDir, true)
 
 [<Fact>]
 let ``schema reflection maps DU optional cases into extension tables`` () =

@@ -88,6 +88,35 @@ let private identityPart (value: Expr) =
 let private identityKey (values: Expr list) =
   values |> List.map identityPart |> String.concat "|"
 
+let internal putMappedIdentity
+  (tableName: string)
+  (sourceIdentity: Expr list)
+  (targetIdentity: Expr list)
+  (idMappings: IdMappingStore)
+  : IdMappingStore =
+  let sourceKey = identityKey sourceIdentity
+
+  let tableMappings =
+    idMappings.TryFind tableName
+    |> Option.defaultValue Map.empty
+    |> Map.add sourceKey targetIdentity
+
+  idMappings.Add(tableName, tableMappings)
+
+let internal lookupMappedIdentity
+  (tableName: string)
+  (sourceIdentity: Expr list)
+  (idMappings: IdMappingStore)
+  : Result<Expr list, string> =
+  let sourceKey = identityKey sourceIdentity
+
+  match idMappings.TryFind tableName with
+  | None -> Error $"No ID mappings are available yet for table '{tableName}'."
+  | Some tableMappings ->
+    match tableMappings.TryFind sourceKey with
+    | Some targetIdentity -> Ok targetIdentity
+    | None -> Error $"Missing ID mapping for table '{tableName}' with key '{sourceKey}'."
+
 let private getTableByName (tablesByName: Map<string, CreateTable>) (tableName: string) =
   match tablesByName.TryFind tableName with
   | Some table -> Ok table
@@ -452,12 +481,5 @@ let internal recordIdMapping
         | None, None ->
           getIdentityValues targetRow identity.targetKeyColumns $"target table '{step.mapping.targetTable}'"
 
-      let sourceKey = identityKey sourceIdentity
-
-      let tableMappings =
-        idMappings.TryFind step.mapping.targetTable
-        |> Option.defaultValue Map.empty
-        |> Map.add sourceKey targetIdentity
-
-      return idMappings.Add(step.mapping.targetTable, tableMappings)
+      return putMappedIdentity step.mapping.targetTable sourceIdentity targetIdentity idMappings
     }

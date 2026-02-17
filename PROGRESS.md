@@ -71,10 +71,17 @@ src/
 - **Generated write-method hooks added**: regular query generator methods now emit `MigrationLog.ensureWriteAllowed` and `MigrationLog.recordInsert|Update|Delete` calls; normalized write methods now emit `MigrationLog.ensureWriteAllowed`.
 - **Coverage added**: tests validate recording flush, drain-mode rejection, no-marker no-op behavior, and codegen hook emission.
 
+## Update (2026-02-17, drain replay logic)
+
+- **Drain replay module added**: `MigLib/DeclarativeMigrations/DrainReplay.fs` now reads `_migration_log` entries, groups operations by transaction, and replays insert/update/delete actions using the bulk-copy mapping plan.
+- **Replay identity translation added**: replay paths reuse ID mapping translation from `DataCopy`, including FK remapping and source->target identity lookup for updates/deletes.
+- **Persistent ID mapping updates added**: successful replay inserts now upsert `_id_mapping` entries for single-column identities to support subsequent dependent operations.
+- **Replay transactional behavior added**: each source transaction group is replayed inside its own SQLite transaction, committing as a unit and rolling back on failure.
+- **Coverage added**: tests validate transaction grouping/order, migration log + mapping loading, end-to-end insert/update/delete replay with ID translation, and rollback on replay failure.
+
 ## What's next
 
-1. Drain replay logic
-2. Cutover and status commands
+1. Cutover and status commands
 
 ## Completed next-step items
 
@@ -82,3 +89,4 @@ src/
     - port/reuse declarative migration engine modules to operate on the same `SqlFile` model
 2. Bulk data copy with FK dependency ordering and ID mapping
 3. Migration log recording in TaskTxnBuilder
+4. Drain replay logic
