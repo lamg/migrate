@@ -150,6 +150,7 @@ let private generateBaseCase (baseTable: CreateTable) (typeName: string) : strin
           // Single INSERT into base table
           use cmd = new SqliteCommand("{insertSql}", tx.Connection, tx)
           {asyncParamBindings}
+          MigrationLog.ensureWriteAllowed tx
           let! _ = cmd.ExecuteNonQueryAsync()
           use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
           let! lastId = lastIdCmd.ExecuteScalarAsync()
@@ -169,6 +170,7 @@ let private generateBaseCaseInsertOrIgnore (baseTable: CreateTable) (typeName: s
           // Single INSERT OR IGNORE into base table
           use cmd = new SqliteCommand("{insertSql}", tx.Connection, tx)
           {asyncParamBindings}
+          MigrationLog.ensureWriteAllowed tx
           let! rows = cmd.ExecuteNonQueryAsync()
           if rows = 0 then
             return Ok None
@@ -210,6 +212,7 @@ let private generateExtensionCase (baseTable: CreateTable) (extension: Extension
           // Two inserts in same transaction (atomic)
           use cmd1 = new SqliteCommand("{baseInsertSql}", tx.Connection, tx)
           {asyncBaseParamBindings}
+          MigrationLog.ensureWriteAllowed tx
           let! _ = cmd1.ExecuteNonQueryAsync()
 
           use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
@@ -219,6 +222,7 @@ let private generateExtensionCase (baseTable: CreateTable) (extension: Extension
           use cmd2 = new SqliteCommand("INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "}) VALUES (@{extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "})", tx.Connection, tx)
           cmd2.Parameters.AddWithValue("@{extension.fkColumn}", {extensionFkValueExpr}) |> ignore
           {asyncExtensionParamBindings}
+          MigrationLog.ensureWriteAllowed tx
           let! _ = cmd2.ExecuteNonQueryAsync()
           return Ok {baseTable.name}Id"""
 
@@ -258,6 +262,7 @@ let private generateExtensionCaseInsertOrIgnore
           // Base INSERT OR IGNORE then extension INSERT
           use cmd1 = new SqliteCommand("{baseInsertSql}", tx.Connection, tx)
           {asyncBaseParamBindings}
+          MigrationLog.ensureWriteAllowed tx
           let! rows = cmd1.ExecuteNonQueryAsync()
           if rows = 0 then
             return Ok None
@@ -269,6 +274,7 @@ let private generateExtensionCaseInsertOrIgnore
             use cmd2 = new SqliteCommand("INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "}) VALUES (@{extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "})", tx.Connection, tx)
             cmd2.Parameters.AddWithValue("@{extension.fkColumn}", {extensionFkValueExpr}) |> ignore
             {asyncExtensionParamBindings}
+            MigrationLog.ensureWriteAllowed tx
             let! _ = cmd2.ExecuteNonQueryAsync()
             return Ok (Some {baseTable.name}Id)"""
 
@@ -667,13 +673,14 @@ let private generateUpdateBaseCase
   let deleteStatements =
     extensions
     |> List.map (fun ext ->
-      $"          use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n          delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", {idVarName}) |> ignore\n          let! _ = delCmd{ext.aspectName}.ExecuteNonQueryAsync()")
+      $"          use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n          delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", {idVarName}) |> ignore\n          MigrationLog.ensureWriteAllowed tx\n          let! _ = delCmd{ext.aspectName}.ExecuteNonQueryAsync()")
     |> String.concat "\n"
 
   $"""        | {typeName}.Base({fieldPattern}) ->
           // Update base table, delete all extensions
           use cmd = new SqliteCommand("{updateSql}", tx.Connection, tx)
           {asyncParamBindings}
+          MigrationLog.ensureWriteAllowed tx
           let! _ = cmd.ExecuteNonQueryAsync()
 
 {deleteStatements}
@@ -735,18 +742,20 @@ let private generateUpdateExtensionCase
     allExtensions
     |> List.filter (fun e -> e.table.name <> extension.table.name)
     |> List.map (fun ext ->
-      $"          use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n          delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", {idVarName}) |> ignore\n          let! _ = delCmd{ext.aspectName}.ExecuteNonQueryAsync()")
+      $"          use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n          delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", {idVarName}) |> ignore\n          MigrationLog.ensureWriteAllowed tx\n          let! _ = delCmd{ext.aspectName}.ExecuteNonQueryAsync()")
     |> String.concat "\n"
 
   $"""        | {typeName}.With{caseName}({fieldPattern}) ->
           // Update base, INSERT OR REPLACE extension
           use cmd1 = new SqliteCommand("{updateSql}", tx.Connection, tx)
           {asyncBaseParamBindings}
+          MigrationLog.ensureWriteAllowed tx
           let! _ = cmd1.ExecuteNonQueryAsync()
 
           use cmd2 = new SqliteCommand("{insertOrReplaceSql}", tx.Connection, tx)
           cmd2.Parameters.AddWithValue("@{extension.fkColumn}", {idVarName}) |> ignore
           {asyncExtensionParamBindings}
+          MigrationLog.ensureWriteAllowed tx
           let! _ = cmd2.ExecuteNonQueryAsync()
 
 {deleteOtherExtensions}
@@ -814,7 +823,9 @@ let generateDelete (normalized: NormalizedTable) : string option =
       [ OtherExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)" ]
       @ (pks
          |> List.map (fun pk -> OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore"))
-      @ [ OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"; OtherExpr "return Ok()" ]
+      @ [ OtherExpr "MigrationLog.ensureWriteAllowed tx"
+          OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"
+          OtherExpr "return Ok()" ]
 
     let memberName = $"Delete {paramList} (tx: SqliteTransaction)"
     let returnType = "Task<Result<unit, SqliteException>>"

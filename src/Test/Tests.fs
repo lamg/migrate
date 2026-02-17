@@ -2,6 +2,7 @@ module Tests
 
 open System
 open System.IO
+open System.Text.Json.Nodes
 open MigLib.Db
 open MigLib.CodeGen.CodeGen
 open MigLib.DeclarativeMigrations.Types
@@ -9,6 +10,7 @@ open MigLib.DeclarativeMigrations.DataCopy
 open MigLib.DeclarativeMigrations.SchemaDiff
 open MigLib.SchemaReflection
 open MigLib.SchemaScript
+open Microsoft.Data.Sqlite
 open Xunit
 
 let private mkColumn name columnType constraints =
@@ -349,6 +351,187 @@ let ``schema copy plan keeps renamed table mappings`` () =
 
   Assert.Equal("legacy_user", userTableMapping.sourceTable)
   Assert.Contains(("full_name", "name"), userTableMapping.renamedColumns)
+
+[<Fact>]
+let ``taskTxn records writes into migration log when marker is recording`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_tasktxn_recording_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "recording.db")
+
+  use setupConn = new SqliteConnection($"Data Source={dbPath}")
+  setupConn.Open()
+
+  [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  setupConn.Close()
+
+  let result =
+    taskTxn dbPath {
+      let! newId =
+        fun tx ->
+          task {
+            use cmd =
+              new SqliteCommand("INSERT INTO student(name) VALUES (@name)", tx.Connection, tx)
+
+            cmd.Parameters.AddWithValue("@name", "Alice") |> ignore
+            MigrationLog.ensureWriteAllowed tx
+            let! _ = cmd.ExecuteNonQueryAsync()
+            use idCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+            let! idObj = idCmd.ExecuteScalarAsync()
+            let id = idObj |> unbox<int64>
+            MigrationLog.recordInsert tx "student" [ "id", box id; "name", box "Alice" ]
+            return Ok id
+          }
+
+      return newId
+    }
+    |> fun t -> t.Result
+
+  match result with
+  | Error ex -> failwith $"Expected successful transaction, got error: {ex.Message}"
+  | Ok id -> Assert.Equal(1L, id)
+
+  use verifyConn = new SqliteConnection($"Data Source={dbPath}")
+  verifyConn.Open()
+
+  use logCmd =
+    new SqliteCommand(
+      "SELECT txn_id, ordering, operation, table_name, row_data FROM _migration_log ORDER BY id",
+      verifyConn
+    )
+
+  use reader = logCmd.ExecuteReader()
+  Assert.True(reader.Read())
+  let txnId = reader.GetInt64(0)
+  let ordering = reader.GetInt64(1)
+  let operation = reader.GetString(2)
+  let tableName = reader.GetString(3)
+  let rowData = reader.GetString(4)
+
+  Assert.True(txnId > 0L)
+  Assert.Equal(1L, ordering)
+  Assert.Equal("insert", operation)
+  Assert.Equal("student", tableName)
+
+  let json = JsonNode.Parse(rowData).AsObject()
+  Assert.Equal("Alice", json["name"].GetValue<string>())
+  Assert.Equal(1L, json["id"].GetValue<int64>())
+  Assert.False(reader.Read())
+
+  verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``taskTxn rejects writes when marker is draining`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_tasktxn_draining_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "draining.db")
+
+  use setupConn = new SqliteConnection($"Data Source={dbPath}")
+  setupConn.Open()
+
+  [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'draining');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  setupConn.Close()
+
+  let result =
+    taskTxn dbPath {
+      let! _ =
+        fun tx ->
+          task {
+            MigrationLog.ensureWriteAllowed tx
+
+            use cmd =
+              new SqliteCommand("INSERT INTO student(name) VALUES ('Bob')", tx.Connection, tx)
+
+            let! _ = cmd.ExecuteNonQueryAsync()
+            return Ok()
+          }
+
+      return ()
+    }
+    |> fun t -> t.Result
+
+  match result with
+  | Ok _ -> failwith "Expected draining mode to reject writes"
+  | Error ex -> Assert.Contains("drain", ex.Message.ToLowerInvariant())
+
+  use verifyConn = new SqliteConnection($"Data Source={dbPath}")
+  verifyConn.Open()
+  use countCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
+  let count = countCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(0L, count)
+
+  verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``taskTxn does not record writes when marker is absent`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_tasktxn_nomarker_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "nomarker.db")
+
+  use setupConn = new SqliteConnection($"Data Source={dbPath}")
+  setupConn.Open()
+
+  [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  setupConn.Close()
+
+  let result =
+    taskTxn dbPath {
+      let! _ =
+        fun tx ->
+          task {
+            use cmd =
+              new SqliteCommand("INSERT INTO student(name) VALUES ('Carol')", tx.Connection, tx)
+
+            MigrationLog.ensureWriteAllowed tx
+            let! _ = cmd.ExecuteNonQueryAsync()
+            MigrationLog.recordInsert tx "student" [ "name", box "Carol" ]
+            return Ok()
+          }
+
+      return ()
+    }
+    |> fun t -> t.Result
+
+  match result with
+  | Error ex -> failwith $"Expected success without marker, got {ex.Message}"
+  | Ok() -> ()
+
+  use verifyConn = new SqliteConnection($"Data Source={dbPath}")
+  verifyConn.Open()
+  use countCmd = new SqliteCommand("SELECT COUNT(*) FROM _migration_log", verifyConn)
+  let count = countCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(0L, count)
+
+  verifyConn.Close()
+  Directory.Delete(tempDir, true)
 
 [<Fact>]
 let ``bulk copy plan orders parent tables before FK dependents`` () =
@@ -696,6 +879,10 @@ let ``codegen generates module and query methods from schema model`` () =
     Assert.Contains("static member Insert (item: Student) (tx: SqliteTransaction)", generated)
     Assert.Contains("static member SelectAll (tx: SqliteTransaction)", generated)
     Assert.Contains("static member SelectByNameAge (name: string, age: int64) (tx: SqliteTransaction)", generated)
+    Assert.Contains("MigrationLog.ensureWriteAllowed tx", generated)
+    Assert.Contains("MigrationLog.recordInsert tx \"student\"", generated)
+    Assert.Contains("MigrationLog.recordUpdate tx \"student\"", generated)
+    Assert.Contains("MigrationLog.recordDelete tx \"student\"", generated)
     Assert.DoesNotContain(": Result<", generated)
 
   Directory.Delete(tempDir, true)
@@ -831,7 +1018,6 @@ let ``querybyorinsert works for composite primary keys without SelectById fallba
     )
 
     Assert.DoesNotContain("let! getResult = OrderItem.SelectById", generated)
-    Assert.DoesNotContain("newId", generated)
 
   Directory.Delete(tempDir, true)
 

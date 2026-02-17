@@ -63,14 +63,22 @@ src/
 - **FK translation added**: projected target rows now translate foreign-key values via ID mappings before insert payload generation.
 - **Coverage added**: tests validate parent-before-child copy order, FK remapping through stored ID mappings, and clear error reporting when FK mappings are missing.
 
+## Update (2026-02-17, migration log recording)
+
+- **TaskTxn migration mode support added**: `TaskTxnBuilder` now detects `_migration_marker` status (`recording` / `draining`) per transaction.
+- **Write gating added**: `MigrationLog.ensureWriteAllowed` blocks writes in drain mode with a `SqliteException`.
+- **Buffered log flush added**: write events are buffered in transaction context and flushed to `_migration_log` on successful commit, preserving `ordering` and shared `txn_id`.
+- **Generated write-method hooks added**: regular query generator methods now emit `MigrationLog.ensureWriteAllowed` and `MigrationLog.recordInsert|Update|Delete` calls; normalized write methods now emit `MigrationLog.ensureWriteAllowed`.
+- **Coverage added**: tests validate recording flush, drain-mode rejection, no-marker no-op behavior, and codegen hook emission.
+
 ## What's next
 
-1. Migration log recording in TaskTxnBuilder
-2. Drain replay logic
-3. Cutover and status commands
+1. Drain replay logic
+2. Cutover and status commands
 
 ## Completed next-step items
 
 1. Schema diffing and column mapping
     - port/reuse declarative migration engine modules to operate on the same `SqlFile` model
 2. Bulk data copy with FK dependency ordering and ID mapping
+3. Migration log recording in TaskTxnBuilder

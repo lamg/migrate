@@ -70,10 +70,49 @@ let private capitalize = TypeGenerator.toPascalCase
 let readerMethod (t: string) =
   t.Replace("int64", "Int64").Replace("string", "String").Replace("float", "Double").Replace("DateTime", "DateTime")
 
+let private getAutoIncrementPrimaryKeyColumnName (table: CreateTable) : string option =
+  let tableLevelAutoPk =
+    table.constraints
+    |> List.tryPick (function
+      | PrimaryKey pk when pk.isAutoincrement && pk.columns.Length = 1 -> Some pk.columns.Head
+      | _ -> None)
+
+  match tableLevelAutoPk with
+  | Some name -> Some name
+  | None ->
+    table.columns
+    |> List.tryPick (fun column ->
+      column.constraints
+      |> List.tryPick (function
+        | PrimaryKey pk when pk.isAutoincrement -> Some column.name
+        | _ -> None))
+
+let private rowDataPairExprForItem (itemExpr: string) (column: ColumnDef) : string =
+  let fieldName = capitalize column.name
+  let isNullable = TypeGenerator.isColumnNullable column
+
+  if isNullable then
+    $"(\"{column.name}\", match {itemExpr}.{fieldName} with Some v -> box v | None -> null)"
+  else
+    $"(\"{column.name}\", box {itemExpr}.{fieldName})"
+
+let private rowDataListExprForItem (itemExpr: string) (columns: ColumnDef list) : string =
+  columns
+  |> List.map (rowDataPairExprForItem itemExpr)
+  |> String.concat "; "
+  |> fun pairs -> $"[{pairs}]"
+
+let private rowDataListExprForParams (columns: ColumnDef list) : string =
+  columns
+  |> List.map (fun column -> $"(\"{column.name}\", box {column.name})")
+  |> String.concat "; "
+  |> fun pairs -> $"[{pairs}]"
+
 /// Generate async INSERT method using Fabulous.AST
 let generateInsert (table: CreateTable) : string =
   let typeName = capitalize table.name
   let pkCols = getPrimaryKey table
+  let autoPkColName = getAutoIncrementPrimaryKeyColumnName table
 
   // Exclude auto-increment primary keys from insert
   let insertCols =
@@ -110,13 +149,24 @@ let generateInsert (table: CreateTable) : string =
       else
         OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
 
+  let rowDataPairs =
+    (insertCols |> List.map (rowDataPairExprForItem "item"))
+    @ (match autoPkColName with
+       | Some colName -> [ $"(\"{colName}\", box newId)" ]
+       | None -> [])
+    |> String.concat "; "
+    |> fun pairs -> $"[{pairs}]"
+
   let asyncBodyExprs =
     [ OtherExpr $"use cmd = new SqliteCommand(\"{insertSql}\", tx.Connection, tx)" ]
     @ asyncParamBindingExprs
-    @ [ OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"
+    @ [ OtherExpr "MigrationLog.ensureWriteAllowed tx"
+        OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"
         OtherExpr "use lastIdCmd = new SqliteCommand(\"SELECT last_insert_rowid()\", tx.Connection, tx)"
         OtherExpr "let! lastId = lastIdCmd.ExecuteScalarAsync()"
-        OtherExpr "return Ok(lastId |> unbox<int64>)" ]
+        OtherExpr "let newId = lastId |> unbox<int64>"
+        OtherExpr $"MigrationLog.recordInsert tx \"{table.name}\" {rowDataPairs}"
+        OtherExpr "return Ok newId" ]
 
   let memberName = $"Insert (item: {typeName}) (tx: SqliteTransaction)"
   let returnType = "Task<Result<int64, SqliteException>>"
@@ -128,6 +178,7 @@ let generateInsert (table: CreateTable) : string =
 let generateInsertOrIgnore (table: CreateTable) : string =
   let typeName = capitalize table.name
   let pkCols = getPrimaryKey table
+  let autoPkColName = getAutoIncrementPrimaryKeyColumnName table
 
   // Exclude auto-increment primary keys from insert
   let insertCols =
@@ -165,14 +216,25 @@ let generateInsertOrIgnore (table: CreateTable) : string =
       else
         OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
 
+  let rowDataPairs =
+    (insertCols |> List.map (rowDataPairExprForItem "item"))
+    @ (match autoPkColName with
+       | Some colName -> [ $"(\"{colName}\", box newId)" ]
+       | None -> [])
+    |> String.concat "; "
+    |> fun pairs -> $"[{pairs}]"
+
   let asyncBodyExprs =
     [ OtherExpr $"use cmd = new SqliteCommand(\"{insertSql}\", tx.Connection, tx)" ]
     @ asyncParamBindingExprs
-    @ [ OtherExpr "let! rows = cmd.ExecuteNonQueryAsync()"
+    @ [ OtherExpr "MigrationLog.ensureWriteAllowed tx"
+        OtherExpr "let! rows = cmd.ExecuteNonQueryAsync()"
         OtherExpr "if rows = 0 then return Ok None else"
         OtherExpr "  use lastIdCmd = new SqliteCommand(\"SELECT last_insert_rowid()\", tx.Connection, tx)"
         OtherExpr "  let! lastId = lastIdCmd.ExecuteScalarAsync()"
-        OtherExpr "  return Ok (Some(lastId |> unbox<int64>))" ]
+        OtherExpr "  let newId = lastId |> unbox<int64>"
+        OtherExpr $"  MigrationLog.recordInsert tx \"{table.name}\" {rowDataPairs}"
+        OtherExpr "  return Ok (Some newId)" ]
 
   let memberName = $"InsertOrIgnore (item: {typeName}) (tx: SqliteTransaction)"
   let returnType = "Task<Result<int64 option, SqliteException>>"
@@ -311,6 +373,7 @@ let generateGetOne (table: CreateTable) : string =
 let generateUpdate (table: CreateTable) : string option =
   let typeName = capitalize table.name
   let pkCols = getPrimaryKey table
+  let rowDataExpr = rowDataListExprForItem "item" table.columns
 
   match pkCols with
   | [] -> None
@@ -346,7 +409,10 @@ let generateUpdate (table: CreateTable) : string option =
     let asyncBodyExprs =
       [ OtherExpr $"use cmd = new SqliteCommand(\"{updateSql}\", tx.Connection, tx)" ]
       @ asyncParamBindingExprs
-      @ [ OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"; OtherExpr "return Ok()" ]
+      @ [ OtherExpr "MigrationLog.ensureWriteAllowed tx"
+          OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"
+          OtherExpr $"MigrationLog.recordUpdate tx \"{table.name}\" {rowDataExpr}"
+          OtherExpr "return Ok()" ]
 
     let memberName = $"Update (item: {typeName}) (tx: SqliteTransaction)"
     let returnType = "Task<Result<unit, SqliteException>>"
@@ -358,6 +424,7 @@ let generateUpdate (table: CreateTable) : string option =
 let generateDelete (table: CreateTable) : string option =
   let typeName = capitalize table.name
   let pkCols = getPrimaryKey table
+  let rowDataExpr = rowDataListExprForParams pkCols
 
   match pkCols with
   | [] -> None
@@ -381,7 +448,10 @@ let generateDelete (table: CreateTable) : string option =
       [ OtherExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)" ]
       @ (pks
          |> List.map (fun pk -> OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore"))
-      @ [ OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"; OtherExpr "return Ok()" ]
+      @ [ OtherExpr "MigrationLog.ensureWriteAllowed tx"
+          OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"
+          OtherExpr $"MigrationLog.recordDelete tx \"{table.name}\" {rowDataExpr}"
+          OtherExpr "return Ok()" ]
 
     let memberName = $"Delete {paramList} (tx: SqliteTransaction)"
     let returnType = "Task<Result<unit, SqliteException>>"
