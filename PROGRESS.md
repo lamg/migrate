@@ -49,11 +49,21 @@ src/
 - **Script/codegen bridge completed**: `generateCodeFromScript` now supports full `.fsx` -> schema model -> generated query module flow.
 - **Validation passed**: `fantomas .`, `dotnet test`, and `dotnet build mig/mig.fsproj` all succeed.
 
+## Update (2026-02-17, schema diffing)
+
+- **Schema diff module added**: `MigLib/DeclarativeMigrations/SchemaDiff.fs` now computes table-level schema diffs (`addedTables`, `removedTables`, `renamedTables`, `matchedTables`) on the shared `SqlFile` model.
+- **Column mapping added**: the same module derives per-table copy mappings with source strategies (`SourceColumn`, `DefaultExpr`, `TypeDefault`) to support copy-time projection for evolved schemas.
+- **Schema copy plan added**: `buildSchemaCopyPlan` combines schema diff + table mappings in target-table order.
+- **Coverage added**: tests now validate rename detection and column-mapping behavior, including renamed columns and default/type-default fill for new columns.
+
 ## What's next
+
+1. Bulk data copy with FK dependency ordering and ID mapping
+2. Migration log recording in TaskTxnBuilder
+3. Drain replay logic
+4. Cutover and status commands
+
+## Completed next-step item
 
 1. Schema diffing and column mapping
     - port/reuse declarative migration engine modules to operate on the same `SqlFile` model
-2. Bulk data copy with FK dependency ordering and ID mapping
-3. Migration log recording in TaskTxnBuilder
-4. Drain replay logic
-5. Cutover and status commands

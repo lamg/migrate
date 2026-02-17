@@ -6,6 +6,7 @@
     <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Db.fs" />
     <Compile Include="DeclarativeMigrations/Types.fs" />
+    <Compile Include="DeclarativeMigrations/SchemaDiff.fs" />
     <Compile Include="SchemaReflection.fs" />
     <Compile Include="SchemaScript.fs" />
     <Compile Include="CodeGen/FabulousAstHelpers.fs" />

@@ -5,9 +5,24 @@ open System.IO
 open MigLib.Db
 open MigLib.CodeGen.CodeGen
 open MigLib.DeclarativeMigrations.Types
+open MigLib.DeclarativeMigrations.SchemaDiff
 open MigLib.SchemaReflection
 open MigLib.SchemaScript
 open Xunit
+
+let private mkColumn name columnType constraints =
+  { name = name
+    columnType = columnType
+    constraints = constraints }
+
+let private mkTable name columns constraints =
+  { name = name
+    columns = columns
+    constraints = constraints
+    queryByAnnotations = []
+    queryLikeAnnotations = []
+    queryByOrCreateAnnotations = []
+    insertOrIgnoreAnnotations = [] }
 
 [<AutoIncPK "id">]
 [<Unique "name">]
@@ -158,6 +173,171 @@ let ``schema reflection maps records, foreign keys, and query annotations`` () =
       match fk.onDelete with
       | Some Cascade -> ()
       | _ -> failwith "Expected ON DELETE CASCADE on reflection_user_wallet.user_id"
+
+[<Fact>]
+let ``schema diff detects renamed tables when schema matches`` () =
+  let sourceSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "legacy_student"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              [] ] }
+
+  let targetSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "student"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              [] ] }
+
+  let diff = diffSchemas sourceSchema targetSchema
+
+  Assert.Empty diff.addedTables
+  Assert.Empty diff.removedTables
+  Assert.Equal<(string * string) list>([ "legacy_student", "student" ], diff.renamedTables)
+  Assert.Equal<(string * string) list>([ "legacy_student", "student" ], diff.matchedTables)
+
+[<Fact>]
+let ``table copy mapping infers renamed and added columns`` () =
+  let sourceTable =
+    mkTable
+      "student"
+      [ mkColumn
+          "id"
+          SqlInteger
+          [ PrimaryKey
+              { constraintName = None
+                columns = []
+                isAutoincrement = true } ]
+        mkColumn "full_name" SqlText [ NotNull ]
+        mkColumn "age" SqlInteger [ NotNull ]
+        mkColumn "legacy_note" SqlText [ NotNull ] ]
+      []
+
+  let targetTable =
+    mkTable
+      "student"
+      [ mkColumn
+          "id"
+          SqlInteger
+          [ PrimaryKey
+              { constraintName = None
+                columns = []
+                isAutoincrement = true } ]
+        mkColumn "name" SqlText [ NotNull ]
+        mkColumn "age" SqlInteger [ NotNull ]
+        mkColumn "status" SqlText [ NotNull; Default(String "active") ]
+        mkColumn "score" SqlReal [ NotNull ] ]
+      []
+
+  let mapping = buildTableCopyMapping sourceTable targetTable
+
+  let byTarget =
+    mapping.columnMappings
+    |> List.map (fun entry -> entry.targetColumn, entry.source)
+    |> Map.ofList
+
+  match byTarget["id"] with
+  | SourceColumn "id" -> ()
+  | other -> failwith $"Expected id to map from source id, got {other}"
+
+  match byTarget["name"] with
+  | SourceColumn "full_name" -> ()
+  | other -> failwith $"Expected name to map from full_name, got {other}"
+
+  match byTarget["status"] with
+  | DefaultExpr(String "active") -> ()
+  | other -> failwith $"Expected status default to be 'active', got {other}"
+
+  match byTarget["score"] with
+  | TypeDefault SqlReal -> ()
+  | other -> failwith $"Expected score to use SqlReal type default, got {other}"
+
+  Assert.Contains(("full_name", "name"), mapping.renamedColumns)
+  Assert.Contains("status", mapping.addedTargetColumns)
+  Assert.Contains("score", mapping.addedTargetColumns)
+  Assert.Contains("legacy_note", mapping.droppedSourceColumns)
+
+[<Fact>]
+let ``schema copy plan keeps renamed table mappings`` () =
+  let sourceSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "legacy_user"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "full_name" SqlText [ NotNull ] ]
+              []
+            mkTable
+              "audit_log"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "message" SqlText [ NotNull ] ]
+              [] ] }
+
+  let targetSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "user"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ]
+                mkColumn "status" SqlText [ NotNull; Default(String "active") ] ]
+              []
+            mkTable
+              "audit_log"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "message" SqlText [ NotNull ] ]
+              [] ] }
+
+  let plan = buildSchemaCopyPlan sourceSchema targetSchema
+
+  Assert.Equal<(string * string) list>([ "legacy_user", "user" ], plan.diff.renamedTables)
+
+  let userTableMapping =
+    plan.tableMappings |> List.find (fun mapping -> mapping.targetTable = "user")
+
+  Assert.Equal("legacy_user", userTableMapping.sourceTable)
+  Assert.Contains(("full_name", "name"), userTableMapping.renamedColumns)
 
 [<Fact>]
 let ``schema reflection maps DU optional cases into extension tables`` () =
