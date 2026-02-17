@@ -321,7 +321,7 @@ CREATE TABLE user_wallet(id INTEGER PRIMARY KEY AUTOINCREMENT, address TEXT NOT 
 
 ### Views
 
-Views are declared as record types with `Join` or `LeftJoin` attributes specifying how tables are connected. The join conditions are inferred from foreign key relationships between the referenced types. Selected columns are determined by the fields of the view record.
+Views are declared as record types with `Join` attributes specifying how tables are connected. The join conditions are inferred from foreign key relationships between the referenced types. Selected columns are determined by the fields of the view record.
 
 ```fsharp
 [<AutoIncPK "id">]
@@ -353,8 +353,6 @@ FROM course c
 JOIN student s ON c.student_id = s.id
 JOIN course_grade cg ON cg.course_id = c.id;
 ```
-
-`LeftJoin` generates a `LEFT JOIN`. Column disambiguation (which table each field comes from) is resolved by matching field names against the columns of the joined tables.
 
 For views that require expressions beyond simple joins (aggregations, subqueries, CASE expressions, etc.), use `ViewSql` with the raw SELECT statement:
 

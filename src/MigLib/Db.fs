@@ -102,12 +102,6 @@ type JoinAttribute(left: Type, right: Type) =
   member _.Left = left
   member _.Right = right
 
-[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
-type LeftJoinAttribute(left: Type, right: Type) =
-  inherit Attribute()
-  member _.Left = left
-  member _.Right = right
-
 [<AttributeUsage(AttributeTargets.Class)>]
 type ViewSqlAttribute(sql: string) =
   inherit Attribute()

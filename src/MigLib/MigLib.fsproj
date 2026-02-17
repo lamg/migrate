@@ -3,10 +3,27 @@
     <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Db.fs" />
+    <Compile Include="DeclarativeMigrations/Types.fs" />
+    <Compile Include="SchemaReflection.fs" />
+    <Compile Include="SchemaScript.fs" />
+    <Compile Include="CodeGen/FabulousAstHelpers.fs" />
+    <Compile Include="CodeGen/AstExprBuilders.fs" />
+    <Compile Include="CodeGen/ViewIntrospection.fs" />
+    <Compile Include="CodeGen/TypeGenerator.fs" />
+    <Compile Include="CodeGen/NormalizedSchema.fs" />
+    <Compile Include="CodeGen/NormalizedTypeGenerator.fs" />
+    <Compile Include="CodeGen/NormalizedQueryGenerator.fs" />
+    <Compile Include="CodeGen/QueryGenerator.fs" />
+    <Compile Include="CodeGen/ProjectGenerator.fs" />
+    <Compile Include="CodeGen/CodeGen.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="FsToolkit.ErrorHandling" />
+    <PackageReference Include="FSharp.Compiler.Service" />
+    <PackageReference Include="Fabulous.AST" />
+    <PackageReference Include="Fantomas.Core" />
   </ItemGroup>
 </Project>

@@ -1,6 +1,550 @@
 module Tests
 
+open System
+open System.IO
+open MigLib.Db
+open MigLib.CodeGen.CodeGen
+open MigLib.DeclarativeMigrations.Types
+open MigLib.SchemaReflection
+open MigLib.SchemaScript
 open Xunit
 
+[<AutoIncPK "id">]
+[<Unique "name">]
+[<Index "name">]
+[<SelectBy("name", "age")>]
+[<SelectLike "name">]
+[<SelectByOrInsert("name", "age")>]
+[<InsertOrIgnore>]
+type ReflectionStudent = { id: int64; name: string; age: int64 }
+
+[<AutoIncPK "id">]
+type ReflectionUser = { id: int64; name: string }
+
+[<AutoIncPK "id">]
+[<OnDeleteCascade "user">]
+type ReflectionUserWallet =
+  { id: int64
+    user: ReflectionUser
+    address: string }
+
+type ReflectionStudentOpt = WithEmail of ReflectionStudent * email: string
+
+[<ViewSql "SELECT id, name FROM reflection_student">]
+[<SelectBy "name">]
+type ReflectionStudentView = { id: int64; name: string }
+
+[<AutoIncPK "id">]
+type JoinStudent = { id: int64; name: string; age: int64 }
+
+[<AutoIncPK "id">]
+type JoinCourse =
+  { id: int64
+    title: string
+    student: JoinStudent }
+
+type JoinCourseGrade = { course: JoinCourse; grade: float }
+
+[<PK "slug">]
+[<SelectByOrInsert "slug">]
+type SlugArticle = { slug: string; title: string }
+
+[<PK "code">]
+[<SelectByOrInsert "name">]
+type Product = { code: string; name: string }
+
+type ProductOpt = WithStock of Product * stock: int64
+
+[<AutoIncPK "id">]
+[<PK "id">]
+type ConflictingPkStudent = { id: int64; name: string }
+
+type ExternalAccount = { id: int64; name: string }
+
+[<AutoIncPK "id">]
+type WalletWithOutsideRef = { id: int64; account: ExternalAccount }
+
+type ParentWithoutPk = { name: string }
+
+[<AutoIncPK "id">]
+type ChildWithParentWithoutPk = { id: int64; parent: ParentWithoutPk }
+
+[<AutoIncPK "id">]
+type JoinChainA = { id: int64; name: string }
+
+[<AutoIncPK "id">]
+type JoinChainB = { id: int64; chainA: JoinChainA }
+
+[<AutoIncPK "id">]
+type JoinChainC = { id: int64; label: string }
+
+[<AutoIncPK "id">]
+type JoinChainD = { id: int64; chainC: JoinChainC }
+
+[<View>]
+[<Join(typeof<JoinChainA>, typeof<JoinChainB>)>]
+[<Join(typeof<JoinChainC>, typeof<JoinChainD>)>]
+type DisconnectedJoinView = { id: int64 }
+
+[<View>]
+[<Join(typeof<JoinCourse>, typeof<JoinStudent>)>]
+[<Join(typeof<JoinCourseGrade>, typeof<JoinCourse>)>]
+type JoinStudentCourseGrade =
+  { studentId: int64
+    studentName: string
+    title: string
+    grade: float }
+
 [<Fact>]
-let ``placeholder test`` () = Assert.True(true)
+let ``schema reflection maps records, foreign keys, and query annotations`` () =
+  let types =
+    [ typeof<ReflectionStudent>
+      typeof<ReflectionUser>
+      typeof<ReflectionUserWallet> ]
+
+  match buildSchemaFromTypes types with
+  | Error e -> failwith $"reflection failed: {e}"
+  | Ok schema ->
+    let student =
+      schema.tables |> List.find (fun table -> table.name = "reflection_student")
+
+    let idColumn = student.columns |> List.find (fun column -> column.name = "id")
+
+    let hasAutoPk =
+      idColumn.constraints
+      |> List.exists (function
+        | PrimaryKey pk -> pk.isAutoincrement
+        | _ -> false)
+
+    Assert.True hasAutoPk
+
+    Assert.True(
+      student.queryByAnnotations
+      |> List.exists (fun q -> q.columns = [ "name"; "age" ])
+    )
+
+    Assert.True(student.queryLikeAnnotations |> List.exists (fun q -> q.columns = [ "name" ]))
+
+    Assert.True(
+      student.queryByOrCreateAnnotations
+      |> List.exists (fun q -> q.columns = [ "name"; "age" ])
+    )
+
+    Assert.True(not student.insertOrIgnoreAnnotations.IsEmpty)
+
+    Assert.True(
+      schema.indexes
+      |> List.exists (fun index -> index.name = "ix_reflection_student_name")
+    )
+
+    let wallet =
+      schema.tables |> List.find (fun table -> table.name = "reflection_user_wallet")
+
+    let userFkColumn =
+      wallet.columns |> List.find (fun column -> column.name = "user_id")
+
+    let fkConstraint =
+      userFkColumn.constraints
+      |> List.tryPick (function
+        | ForeignKey fk -> Some fk
+        | _ -> None)
+
+    match fkConstraint with
+    | None -> failwith "Expected foreign key on reflection_user_wallet.user_id"
+    | Some fk ->
+      Assert.Equal("reflection_user", fk.refTable)
+      Assert.Equal<string>("id", fk.refColumns.Head)
+
+      match fk.onDelete with
+      | Some Cascade -> ()
+      | _ -> failwith "Expected ON DELETE CASCADE on reflection_user_wallet.user_id"
+
+[<Fact>]
+let ``schema reflection maps DU optional cases into extension tables`` () =
+  let types = [ typeof<ReflectionStudent>; typeof<ReflectionStudentOpt> ]
+
+  match buildSchemaFromTypes types with
+  | Error e -> failwith $"reflection failed: {e}"
+  | Ok schema ->
+    let extension =
+      schema.tables
+      |> List.find (fun table -> table.name = "reflection_student_email")
+
+    let studentId =
+      extension.columns
+      |> List.find (fun column -> column.name = "reflection_student_id")
+
+    let hasPk =
+      studentId.constraints
+      |> List.exists (function
+        | PrimaryKey _ -> true
+        | _ -> false)
+
+    Assert.True hasPk
+
+    let hasFk =
+      studentId.constraints
+      |> List.exists (function
+        | ForeignKey fk -> fk.refTable = "reflection_student"
+        | _ -> false)
+
+    Assert.True hasFk
+    Assert.True(extension.columns |> List.exists (fun column -> column.name = "email"))
+
+[<Fact>]
+let ``schema reflection maps ViewSql views`` () =
+  let types = [ typeof<ReflectionStudentView> ]
+
+  match buildSchemaFromTypes types with
+  | Error e -> failwith $"reflection failed: {e}"
+  | Ok schema ->
+    let view =
+      schema.views |> List.find (fun item -> item.name = "reflection_student_view")
+
+    Assert.Equal("SELECT id, name FROM reflection_student", view.sqlTokens |> Seq.head)
+    Assert.True(view.queryByAnnotations |> List.exists (fun q -> q.columns = [ "name" ]))
+
+[<Fact>]
+let ``schema reflection synthesizes SQL for View with Join attributes`` () =
+  let types =
+    [ typeof<JoinStudent>
+      typeof<JoinCourse>
+      typeof<JoinCourseGrade>
+      typeof<JoinStudentCourseGrade> ]
+
+  match buildSchemaFromTypes types with
+  | Error e -> failwith $"reflection failed: {e}"
+  | Ok schema ->
+    let view =
+      schema.views |> List.find (fun item -> item.name = "join_student_course_grade")
+
+    let sql = view.sqlTokens |> Seq.head
+
+    Assert.Contains("CREATE VIEW join_student_course_grade AS", sql)
+    Assert.Contains("FROM join_course jc", sql)
+    Assert.Contains("JOIN join_student js ON jc.student_id = js.id", sql)
+    Assert.Contains("JOIN join_course_grade jcg ON jcg.course_id = jc.id", sql)
+    Assert.Contains("js.id AS student_id", sql)
+    Assert.Contains("js.name AS student_name", sql)
+    Assert.Contains("jc.title AS title", sql)
+    Assert.Contains("jcg.grade AS grade", sql)
+
+[<Fact>]
+let ``codegen generates module and query methods from schema model`` () =
+  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_codegen_{Guid.NewGuid()}")
+  Directory.CreateDirectory tempDir |> ignore
+
+  let outputPath = Path.Combine(tempDir, "Students.fs")
+
+  let studentTable =
+    { name = "student"
+      columns =
+        [ { name = "id"
+            columnType = SqlInteger
+            constraints =
+              [ PrimaryKey
+                  { constraintName = None
+                    columns = []
+                    isAutoincrement = true } ] }
+          { name = "name"
+            columnType = SqlText
+            constraints = [ NotNull ] }
+          { name = "age"
+            columnType = SqlInteger
+            constraints = [ NotNull ] } ]
+      constraints = []
+      queryByAnnotations = [ { columns = [ "name"; "age" ] } ]
+      queryLikeAnnotations = [ { columns = [ "name" ] } ]
+      queryByOrCreateAnnotations = [ { columns = [ "name"; "age" ] } ]
+      insertOrIgnoreAnnotations = [ InsertOrIgnoreAnnotation ] }
+
+  let schema =
+    { emptyFile with
+        tables = [ studentTable ] }
+
+  match generateCodeFromModel "Students" schema outputPath with
+  | Error e -> failwith $"codegen failed: {e}"
+  | Ok _ ->
+    let generated = File.ReadAllText outputPath
+    Assert.Contains("module Students", generated)
+    Assert.Contains("open MigLib.Db", generated)
+    Assert.Contains("static member Insert (item: Student) (tx: SqliteTransaction)", generated)
+    Assert.Contains("static member SelectAll (tx: SqliteTransaction)", generated)
+    Assert.Contains("static member SelectByNameAge (name: string, age: int64) (tx: SqliteTransaction)", generated)
+    Assert.DoesNotContain(": Result<", generated)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``querybyorcreate for regular tables re-queries by annotation columns`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_querybyorcreate_regular_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let outputPath = Path.Combine(tempDir, "SlugArticle.fs")
+
+  match generateCodeFromTypes "SlugArticleQueries" [ typeof<SlugArticle> ] outputPath with
+  | Error e -> failwith $"codegen-from-types failed: {e}"
+  | Ok _ ->
+    let generated = File.ReadAllText outputPath
+    Assert.Contains("static member SelectBySlugOrInsert (newItem: SlugArticle) (tx: SqliteTransaction)", generated)
+    Assert.Contains("SELECT slug, title FROM slug_article WHERE slug = @slug LIMIT 1", generated)
+    Assert.DoesNotContain("let! getResult = SlugArticle.SelectById", generated)
+    Assert.Contains("| Ok _ ->", generated)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``querybyorcreate for normalized tables uses base PK column in re-query joins`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_querybyorcreate_normalized_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let outputPath = Path.Combine(tempDir, "Product.fs")
+
+  match generateCodeFromTypes "ProductQueries" [ typeof<Product>; typeof<ProductOpt> ] outputPath with
+  | Error e -> failwith $"codegen-from-types failed: {e}"
+  | Ok _ ->
+    let generated = File.ReadAllText outputPath
+    Assert.Contains("static member SelectByNameOrInsert", generated)
+    Assert.Contains("(newItem: NewProduct)", generated)
+    Assert.Contains("LEFT JOIN product_stock estock ON b.code = estock.product_id", generated)
+    Assert.Contains("LEFT JOIN product_stock ext0 ON product.code = ext0.product_id", generated)
+    Assert.DoesNotContain("LEFT JOIN product_stock ext0 ON product.id = ext0.product_id", generated)
+    Assert.DoesNotContain("cmd2.Parameters.AddWithValue(\"@product_id\", productId)", generated)
+    Assert.DoesNotContain("let! getResult = Product.SelectById newId tx", generated)
+    Assert.Contains("| Ok _ ->", generated)
+    Assert.DoesNotContain(": Result<", generated)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``schema reflection rejects type with both AutoIncPK and PK`` () =
+  match buildSchemaFromTypes [ typeof<ConflictingPkStudent> ] with
+  | Ok _ -> failwith "Expected reflection failure for conflicting PK attributes"
+  | Error error ->
+    Assert.Contains("has both AutoIncPK and PK attributes", error)
+    Assert.Contains("ConflictingPkStudent", error)
+
+[<Fact>]
+let ``schema reflection rejects record fields referencing types outside schema`` () =
+  match buildSchemaFromTypes [ typeof<WalletWithOutsideRef> ] with
+  | Ok _ -> failwith "Expected reflection failure for outside-schema reference"
+  | Error error ->
+    Assert.Contains("WalletWithOutsideRef.account", error)
+    Assert.Contains("outside schema", error)
+
+[<Fact>]
+let ``schema reflection rejects foreign-key references to types without primary keys`` () =
+  match buildSchemaFromTypes [ typeof<ParentWithoutPk>; typeof<ChildWithParentWithoutPk> ] with
+  | Ok _ -> failwith "Expected reflection failure for FK target without PK"
+  | Error error ->
+    Assert.Contains("ChildWithParentWithoutPk.parent", error)
+    Assert.Contains("does not declare PK or AutoIncPK", error)
+
+[<Fact>]
+let ``schema reflection rejects disconnected view join chains`` () =
+  let types =
+    [ typeof<JoinChainA>
+      typeof<JoinChainB>
+      typeof<JoinChainC>
+      typeof<JoinChainD>
+      typeof<DisconnectedJoinView> ]
+
+  match buildSchemaFromTypes types with
+  | Ok _ -> failwith "Expected reflection failure for disconnected Join chain"
+  | Error error ->
+    Assert.Contains("Join chain is disconnected", error)
+    Assert.Contains("join_chain_c", error)
+
+[<Fact>]
+let ``querybyorinsert works for composite primary keys without SelectById fallback`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_querybyorcreate_composite_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let outputPath = Path.Combine(tempDir, "OrderItem.fs")
+
+  let orderItemTable =
+    { name = "order_item"
+      columns =
+        [ { name = "order_id"
+            columnType = SqlInteger
+            constraints = [ NotNull ] }
+          { name = "sku"
+            columnType = SqlText
+            constraints = [ NotNull ] }
+          { name = "description"
+            columnType = SqlText
+            constraints = [ NotNull ] } ]
+      constraints =
+        [ PrimaryKey
+            { constraintName = None
+              columns = [ "order_id"; "sku" ]
+              isAutoincrement = false } ]
+      queryByAnnotations = []
+      queryLikeAnnotations = []
+      queryByOrCreateAnnotations = [ { columns = [ "description" ] } ]
+      insertOrIgnoreAnnotations = [] }
+
+  let schema =
+    { emptyFile with
+        tables = [ orderItemTable ] }
+
+  match generateCodeFromModel "OrderItemQueries" schema outputPath with
+  | Error error -> failwith $"codegen failed: {error}"
+  | Ok _ ->
+    let generated = File.ReadAllText outputPath
+    Assert.Contains("static member SelectByDescriptionOrInsert (newItem: OrderItem) (tx: SqliteTransaction)", generated)
+
+    Assert.Contains(
+      "SELECT order_id, sku, description FROM order_item WHERE description = @description LIMIT 1",
+      generated
+    )
+
+    Assert.DoesNotContain("let! getResult = OrderItem.SelectById", generated)
+    Assert.DoesNotContain("newId", generated)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``codegen writes CPM project references`` () =
+  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_proj_{Guid.NewGuid()}")
+  Directory.CreateDirectory tempDir |> ignore
+
+  let projectPath = writeGeneratedProjectFile tempDir "students" [ "Students.fs" ]
+  let generatedProject = File.ReadAllText projectPath
+
+  Assert.Contains("<PackageReference Include=\"FsToolkit.ErrorHandling\" />", generatedProject)
+  Assert.Contains("<PackageReference Include=\"Microsoft.Data.Sqlite\" />", generatedProject)
+  Assert.Contains("<PackageReference Include=\"MigLib\" />", generatedProject)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``codegen can run directly from reflected types`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_types_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let outputPath = Path.Combine(tempDir, "ReflectionStudent.fs")
+
+  match generateCodeFromTypes "ReflectionStudent" [ typeof<ReflectionStudent> ] outputPath with
+  | Error e -> failwith $"codegen-from-types failed: {e}"
+  | Ok _ ->
+    let generated = File.ReadAllText outputPath
+    Assert.Contains("module ReflectionStudent", generated)
+    Assert.Contains("static member SelectByNameAge (name: string, age: int64) (tx: SqliteTransaction)", generated)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``schema script evaluation loads fsx types and seed inserts`` () =
+  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_script_{Guid.NewGuid()}")
+  Directory.CreateDirectory tempDir |> ignore
+
+  let scriptPath = Path.Combine(tempDir, "schema.fsx")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Role = {{ id: int64; name: string }}
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; role: Role; name: string }}
+
+let roles = [
+  {{ id = 1L; name = "admin" }}
+  {{ id = 2L; name = "student" }}
+]
+
+let defaultStudent = {{ id = 10L; role = {{ id = 1L; name = "admin" }}; name = "System" }}
+"""
+
+  File.WriteAllText(scriptPath, script.Trim())
+
+  match buildSchemaFromScript scriptPath with
+  | Error e -> failwith $"schema script failed: {e}"
+  | Ok schema ->
+    Assert.True(schema.tables |> List.exists (fun table -> table.name = "role"))
+    Assert.True(schema.tables |> List.exists (fun table -> table.name = "student"))
+
+    let inserts = schema.inserts
+    Assert.Equal(2, inserts.Length)
+    Assert.Equal("role", inserts.[0].table)
+    Assert.Equal("student", inserts.[1].table)
+    Assert.Equal(2, inserts.[0].values.Length)
+    Assert.Single inserts.[1].values |> ignore
+
+    let studentInsert = inserts.[1]
+    let row = studentInsert.values.Head
+
+    let roleIdIndex =
+      studentInsert.columns |> List.findIndex (fun name -> name = "role_id")
+
+    match row.[roleIdIndex] with
+    | Integer value -> Assert.Equal(1, value)
+    | Value value -> Assert.Equal("1", value)
+    | other -> failwith $"Unexpected role_id expression: {other}"
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``codegen can run directly from fsx schema script`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_script_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let scriptPath = Path.Combine(tempDir, "schema.fsx")
+  let outputPath = Path.Combine(tempDir, "Generated.fs")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+[<SelectBy "name">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(scriptPath, script.Trim())
+
+  match generateCodeFromScript "Generated" scriptPath outputPath with
+  | Error e -> failwith $"codegen-from-script failed: {e}"
+  | Ok _ ->
+    let generated = File.ReadAllText outputPath
+    Assert.Contains("module Generated", generated)
+    Assert.Contains("static member SelectByName (name: string) (tx: SqliteTransaction)", generated)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``schema script evaluation reports syntax errors`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_script_syntax_error_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let scriptPath = Path.Combine(tempDir, "broken.fsx")
+  File.WriteAllText(scriptPath, "let broken =")
+
+  match buildSchemaFromScript scriptPath with
+  | Ok _ -> failwith "Expected schema script evaluation to fail on syntax error"
+  | Error error ->
+    Assert.Contains("Failed to evaluate script", error)
+    Assert.Contains("error FS", error)
+
+  Directory.Delete(tempDir, true)
