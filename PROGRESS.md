@@ -56,14 +56,21 @@ src/
 - **Schema copy plan added**: `buildSchemaCopyPlan` combines schema diff + table mappings in target-table order.
 - **Coverage added**: tests now validate rename detection and column-mapping behavior, including renamed columns and default/type-default fill for new columns.
 
+## Update (2026-02-17, bulk data copy planning)
+
+- **Bulk copy planner added**: `MigLib/DeclarativeMigrations/DataCopy.fs` introduces `buildBulkCopyPlan`, producing FK-aware copy steps ordered by table dependencies.
+- **ID mapping flow added**: the module adds row projection and mapping helpers (`projectRowForInsert`, `recordIdMapping`) plus an in-memory ID mapping store for old->new key translation.
+- **FK translation added**: projected target rows now translate foreign-key values via ID mappings before insert payload generation.
+- **Coverage added**: tests validate parent-before-child copy order, FK remapping through stored ID mappings, and clear error reporting when FK mappings are missing.
+
 ## What's next
 
-1. Bulk data copy with FK dependency ordering and ID mapping
-2. Migration log recording in TaskTxnBuilder
-3. Drain replay logic
-4. Cutover and status commands
+1. Migration log recording in TaskTxnBuilder
+2. Drain replay logic
+3. Cutover and status commands
 
-## Completed next-step item
+## Completed next-step items
 
 1. Schema diffing and column mapping
     - port/reuse declarative migration engine modules to operate on the same `SqlFile` model
+2. Bulk data copy with FK dependency ordering and ID mapping

@@ -5,6 +5,7 @@ open System.IO
 open MigLib.Db
 open MigLib.CodeGen.CodeGen
 open MigLib.DeclarativeMigrations.Types
+open MigLib.DeclarativeMigrations.DataCopy
 open MigLib.DeclarativeMigrations.SchemaDiff
 open MigLib.SchemaReflection
 open MigLib.SchemaScript
@@ -23,6 +24,16 @@ let private mkTable name columns constraints =
     queryLikeAnnotations = []
     queryByOrCreateAnnotations = []
     insertOrIgnoreAnnotations = [] }
+
+let private mkForeignKey refTable refColumns =
+  ForeignKey
+    { columns = []
+      refTable = refTable
+      refColumns = refColumns
+      onDelete = None
+      onUpdate = None }
+
+let private mkRow pairs = pairs |> Map.ofList
 
 [<AutoIncPK "id">]
 [<Unique "name">]
@@ -338,6 +349,240 @@ let ``schema copy plan keeps renamed table mappings`` () =
 
   Assert.Equal("legacy_user", userTableMapping.sourceTable)
   Assert.Contains(("full_name", "name"), userTableMapping.renamedColumns)
+
+[<Fact>]
+let ``bulk copy plan orders parent tables before FK dependents`` () =
+  let sourceSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "legacy_account"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              []
+            mkTable
+              "invoice"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "legacy_account_id" SqlInteger [ NotNull; mkForeignKey "legacy_account" [ "id" ] ]
+                mkColumn "total" SqlReal [ NotNull ] ]
+              [] ] }
+
+  let targetSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "account"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              []
+            mkTable
+              "invoice"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ]
+                mkColumn "total" SqlReal [ NotNull ] ]
+              [] ] }
+
+  match buildBulkCopyPlan sourceSchema targetSchema with
+  | Error error -> failwith $"bulk copy plan failed: {error}"
+  | Ok plan ->
+    let orderedTargets = plan.steps |> List.map (fun step -> step.mapping.targetTable)
+
+    Assert.Equal<string list>([ "account"; "invoice" ], orderedTargets)
+
+    let accountStep =
+      plan.steps |> List.find (fun step -> step.mapping.targetTable = "account")
+
+    let invoiceStep =
+      plan.steps |> List.find (fun step -> step.mapping.targetTable = "invoice")
+
+    Assert.Equal<string list>([ "name" ], accountStep.insertColumns)
+    Assert.Equal<string list>([ "account_id"; "total" ], invoiceStep.insertColumns)
+
+[<Fact>]
+let ``bulk copy row projection translates FK values via ID mapping`` () =
+  let sourceSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "legacy_account"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              []
+            mkTable
+              "invoice"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "legacy_account_id" SqlInteger [ NotNull; mkForeignKey "legacy_account" [ "id" ] ]
+                mkColumn "total" SqlReal [ NotNull ] ]
+              [] ] }
+
+  let targetSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "account"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              []
+            mkTable
+              "invoice"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ]
+                mkColumn "total" SqlReal [ NotNull ] ]
+              [] ] }
+
+  match buildBulkCopyPlan sourceSchema targetSchema with
+  | Error error -> failwith $"bulk copy plan failed: {error}"
+  | Ok plan ->
+    let accountStep =
+      plan.steps |> List.find (fun step -> step.mapping.targetTable = "account")
+
+    let invoiceStep =
+      plan.steps |> List.find (fun step -> step.mapping.targetTable = "invoice")
+
+    let sourceAccountRow = mkRow [ "id", Integer 10; "name", String "Alice" ]
+
+    let sourceInvoiceRow =
+      mkRow [ "id", Integer 1; "legacy_account_id", Integer 10; "total", Real 42.5 ]
+
+    let accountTargetRow, _, accountInsertValues =
+      match projectRowForInsert accountStep sourceAccountRow emptyIdMappings with
+      | Ok result -> result
+      | Error error -> failwith $"account projection failed: {error}"
+
+    Assert.Equal<Expr list>([ String "Alice" ], accountInsertValues)
+
+    let idMappingsAfterAccount =
+      match recordIdMapping accountStep sourceAccountRow accountTargetRow (Some [ Integer 100 ]) emptyIdMappings with
+      | Ok mappings -> mappings
+      | Error error -> failwith $"record ID mapping failed: {error}"
+
+    let invoiceTargetRow, _, invoiceInsertValues =
+      match projectRowForInsert invoiceStep sourceInvoiceRow idMappingsAfterAccount with
+      | Ok result -> result
+      | Error error -> failwith $"invoice projection failed: {error}"
+
+    Assert.Equal<Expr list>([ Integer 100; Real 42.5 ], invoiceInsertValues)
+
+    match invoiceTargetRow.TryFind "account_id" with
+    | Some(Integer 100) -> ()
+    | other -> failwith $"Expected translated account_id=100, got {other}"
+
+[<Fact>]
+let ``bulk copy row projection fails when FK mapping is missing`` () =
+  let sourceSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "legacy_account"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              []
+            mkTable
+              "invoice"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "legacy_account_id" SqlInteger [ NotNull; mkForeignKey "legacy_account" [ "id" ] ]
+                mkColumn "total" SqlReal [ NotNull ] ]
+              [] ] }
+
+  let targetSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "account"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              []
+            mkTable
+              "invoice"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ]
+                mkColumn "total" SqlReal [ NotNull ] ]
+              [] ] }
+
+  match buildBulkCopyPlan sourceSchema targetSchema with
+  | Error error -> failwith $"bulk copy plan failed: {error}"
+  | Ok plan ->
+    let invoiceStep =
+      plan.steps |> List.find (fun step -> step.mapping.targetTable = "invoice")
+
+    let sourceInvoiceRow =
+      mkRow [ "id", Integer 1; "legacy_account_id", Integer 10; "total", Real 42.5 ]
+
+    match projectRowForInsert invoiceStep sourceInvoiceRow emptyIdMappings with
+    | Ok _ -> failwith "Expected projection to fail when account ID mapping is missing"
+    | Error error -> Assert.Contains("No ID mappings are available yet for referenced table 'account'", error)
 
 [<Fact>]
 let ``schema reflection maps DU optional cases into extension tables`` () =
