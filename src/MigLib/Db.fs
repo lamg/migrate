@@ -1,151 +1,192 @@
-/// Database transaction management utilities for generated code
-module migrate.Db
+module MigLib.Db
 
 open System
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 
-/// Execute an action within a transaction, handling commit/rollback automatically
-let WithTransaction
-  (conn: SqliteConnection)
-  (action: SqliteTransaction -> Result<'T, SqliteException>)
-  : Result<'T, SqliteException> =
-  let tx = conn.BeginTransaction()
+// Primary key attributes
+[<AttributeUsage(AttributeTargets.Class)>]
+type AutoIncPKAttribute(column: string) =
+  inherit Attribute()
+  member _.Column = column
 
-  try
-    match action tx with
-    | Ok result ->
-      tx.Commit()
-      Ok result
-    | Error ex ->
-      tx.Rollback()
-      Error ex
-  with :? SqliteException as ex ->
-    tx.Rollback()
-    Error ex
+[<AttributeUsage(AttributeTargets.Class)>]
+type PKAttribute(column: string) =
+  inherit Attribute()
+  member _.Column = column
 
-/// Computation expression builder for database transactions with Result monad
-type TxnBuilder(dbPath: string) =
+// Constraint attributes
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type UniqueAttribute([<ParamArray>] columns: string array) =
+  inherit Attribute()
+  member _.Columns = columns
 
-  /// Bind a transaction function and continue with another
-  member _.Bind
-    (m: SqliteTransaction -> Result<'T, SqliteException>, f: 'T -> SqliteTransaction -> Result<'U, SqliteException>)
-    : SqliteTransaction -> Result<'U, SqliteException> =
-    fun (tx: SqliteTransaction) ->
-      match m tx with
-      | Ok value -> f value tx
-      | Error ex -> Error ex
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type DefaultAttribute(column: string, value: string) =
+  inherit Attribute()
+  member _.Column = column
+  member _.Value = value
 
-  /// Return a value wrapped in Ok
-  member _.Return(x: 'T) : SqliteTransaction -> Result<'T, SqliteException> = fun _ -> Ok x
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type DefaultExprAttribute(column: string, expr: string) =
+  inherit Attribute()
+  member _.Column = column
+  member _.Expr = expr
 
-  /// Return a transaction function as-is
-  member _.ReturnFrom
-    (m: SqliteTransaction -> Result<'T, SqliteException>)
-    : SqliteTransaction -> Result<'T, SqliteException> =
-    m
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type IndexAttribute([<ParamArray>] columns: string array) =
+  inherit Attribute()
+  member _.Columns = columns
 
-  /// Execute the transaction with automatic connection opening, transaction management, and cleanup
-  member _.Run(action: SqliteTransaction -> Result<'T, SqliteException>) : Result<'T, SqliteException> =
-    try
-      // Convert database path to SQLite connection string
-      let connString = $"Data Source={dbPath}"
-      use conn = new SqliteConnection(connString)
-      conn.Open()
-      WithTransaction conn action
-    with :? SqliteException as ex ->
-      Error ex
+// Query attributes
+[<AttributeUsage(AttributeTargets.Class)>]
+type SelectAllAttribute() =
+  inherit Attribute()
+  member val OrderBy: string = null with get, set
 
-/// Create a transaction computation expression that accepts a database file path
-let txn (dbPath: string) = TxnBuilder dbPath
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type SelectByAttribute([<ParamArray>] columns: string array) =
+  inherit Attribute()
+  member _.Columns = columns
+  member val OrderBy: string = null with get, set
 
-/// Computation expression builder for async database transactions with Task<Result> monad
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type SelectOneByAttribute([<ParamArray>] columns: string array) =
+  inherit Attribute()
+  member _.Columns = columns
+  member val OrderBy: string = null with get, set
+
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type SelectLikeAttribute(column: string) =
+  inherit Attribute()
+  member _.Column = column
+
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type SelectByOrInsertAttribute([<ParamArray>] columns: string array) =
+  inherit Attribute()
+  member _.Columns = columns
+
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type UpdateByAttribute(column: string) =
+  inherit Attribute()
+  member _.Column = column
+
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type DeleteByAttribute(column: string) =
+  inherit Attribute()
+  member _.Column = column
+
+[<AttributeUsage(AttributeTargets.Class)>]
+type InsertOrIgnoreAttribute() =
+  inherit Attribute()
+
+// Foreign key action attributes
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type OnDeleteCascadeAttribute(column: string) =
+  inherit Attribute()
+  member _.Column = column
+
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type OnDeleteSetNullAttribute(column: string) =
+  inherit Attribute()
+  member _.Column = column
+
+// View attributes
+[<AttributeUsage(AttributeTargets.Class)>]
+type ViewAttribute() =
+  inherit Attribute()
+
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type JoinAttribute(left: Type, right: Type) =
+  inherit Attribute()
+  member _.Left = left
+  member _.Right = right
+
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type LeftJoinAttribute(left: Type, right: Type) =
+  inherit Attribute()
+  member _.Left = left
+  member _.Right = right
+
+[<AttributeUsage(AttributeTargets.Class)>]
+type ViewSqlAttribute(sql: string) =
+  inherit Attribute()
+  member _.Sql = sql
+
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type OrderByAttribute(columns: string) =
+  inherit Attribute()
+  member _.Columns = columns
+
+// TaskTxnBuilder computation expression
 type TaskTxnBuilder(dbPath: string) =
+  member _.DbPath = dbPath
 
-  /// Bind a transaction function and continue with another
-  member _.Bind
-    (
-      m: SqliteTransaction -> Task<Result<'T, SqliteException>>,
-      f: 'T -> SqliteTransaction -> Task<Result<'U, SqliteException>>
-    ) : SqliteTransaction -> Task<Result<'U, SqliteException>> =
-    fun (tx: SqliteTransaction) ->
-      task {
-        match! m tx with
-        | Ok value -> return! f value tx
-        | Error ex -> return Error ex
-      }
-
-  /// Return a value wrapped in Ok
-  member _.Return(x: 'T) : SqliteTransaction -> Task<Result<'T, SqliteException>> = fun _ -> Task.FromResult(Ok x)
-
-  /// Return a transaction function as-is
-  member _.ReturnFrom
-    (m: SqliteTransaction -> Task<Result<'T, SqliteException>>)
-    : SqliteTransaction -> Task<Result<'T, SqliteException>> =
-    m
-
-  member _.Zero() : SqliteTransaction -> Task<Result<unit, SqliteException>> = fun _ -> Task.FromResult(Ok())
-
-  member _.Delay
-    (f: unit -> SqliteTransaction -> Task<Result<'T, SqliteException>>)
-    : SqliteTransaction -> Task<Result<'T, SqliteException>> =
-    fun tx -> f () tx
-
-  member _.Combine
-    (
-      m: SqliteTransaction -> Task<Result<unit, SqliteException>>,
-      f: SqliteTransaction -> Task<Result<'T, SqliteException>>
-    ) : SqliteTransaction -> Task<Result<'T, SqliteException>> =
-    fun (tx: SqliteTransaction) ->
-      task {
-        match! m tx with
-        | Ok() -> return! f tx
-        | Error ex -> return Error ex
-      }
-
-  member _.For
-    (sequence: seq<'T>, body: 'T -> SqliteTransaction -> Task<Result<unit, SqliteException>>)
-    : SqliteTransaction -> Task<Result<unit, SqliteException>> =
-    fun (tx: SqliteTransaction) ->
-      task {
-        use enumerator = sequence.GetEnumerator()
-        let mutable lastError: SqliteException option = None
-        let mutable hasMore = enumerator.MoveNext()
-
-        while hasMore && lastError.IsNone do
-          match! body enumerator.Current tx with
-          | Ok() -> hasMore <- enumerator.MoveNext()
-          | Error err -> lastError <- Some err
-
-        match lastError with
-        | Some err -> return Error err
-        | None -> return Ok()
-      }
-
-  /// Execute the transaction with automatic connection opening, transaction management, and cleanup
-  member _.Run(action: SqliteTransaction -> Task<Result<'T, SqliteException>>) : Task<Result<'T, SqliteException>> =
+  member _.Run(f: SqliteTransaction -> Task<Result<'a, SqliteException>>) : Task<Result<'a, SqliteException>> =
     task {
-      try
-        // Convert database path to SQLite connection string
-        let connString = $"Data Source={dbPath}"
-        use conn = new SqliteConnection(connString)
-        conn.Open()
-        let tx = conn.BeginTransaction()
+      use connection = new SqliteConnection $"Data Source={dbPath}"
+      do! connection.OpenAsync()
+      use transaction = connection.BeginTransaction()
 
-        try
-          match! action tx with
-          | Ok result ->
-            tx.Commit()
-            return Ok result
-          | Error ex ->
-            tx.Rollback()
-            return Error ex
-        with :? SqliteException as ex ->
-          tx.Rollback()
-          return Error ex
+      try
+        let! result = f transaction
+
+        match result with
+        | Ok _ -> transaction.Commit()
+        | Error _ -> transaction.Rollback()
+
+        return result
       with :? SqliteException as ex ->
+        transaction.Rollback()
         return Error ex
     }
 
-/// Create an async transaction computation expression that accepts a database file path
-let taskTxn (dbPath: string) = TaskTxnBuilder dbPath
+  member _.Zero() : SqliteTransaction -> Task<Result<unit, SqliteException>> = fun _ -> Task.FromResult(Ok())
+
+  member _.Return(x: 'a) : SqliteTransaction -> Task<Result<'a, SqliteException>> = fun _ -> Task.FromResult(Ok x)
+
+  member _.Bind
+    (
+      m: SqliteTransaction -> Task<Result<'a, SqliteException>>,
+      f: 'a -> SqliteTransaction -> Task<Result<'b, SqliteException>>
+    ) : SqliteTransaction -> Task<Result<'b, SqliteException>> =
+    fun txn ->
+      task {
+        let! result = m txn
+
+        match result with
+        | Ok a -> return! f a txn
+        | Error e -> return Error e
+      }
+
+  member this.Combine
+    (
+      m: SqliteTransaction -> Task<Result<unit, SqliteException>>,
+      f: SqliteTransaction -> Task<Result<'a, SqliteException>>
+    ) : SqliteTransaction -> Task<Result<'a, SqliteException>> =
+    this.Bind(m, fun () -> f)
+
+  member _.Delay(f: unit -> SqliteTransaction -> Task<Result<'a, SqliteException>>) = fun txn -> f () txn
+
+  member _.For
+    (items: 'a seq, body: 'a -> SqliteTransaction -> Task<Result<unit, SqliteException>>)
+    : SqliteTransaction -> Task<Result<unit, SqliteException>> =
+    fun txn ->
+      task {
+        let mutable error = None
+
+        use enumerator = items.GetEnumerator()
+
+        while error.IsNone && enumerator.MoveNext() do
+          let! result = body enumerator.Current txn
+
+          match result with
+          | Ok() -> ()
+          | Error e -> error <- Some e
+
+        match error with
+        | Some e -> return Error e
+        | None -> return Ok()
+      }
+
+let taskTxn dbPath = TaskTxnBuilder dbPath

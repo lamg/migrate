@@ -1,75 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <RollForward>major</RollForward>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
-
-    <PackageId>MigLib</PackageId>
-    <Version>2.13.0</Version>
-    <PackageOutputPath>./nupkg</PackageOutputPath>
-    <InvariantGlobalization>true</InvariantGlobalization>
-    <RootNamespace>migrate</RootNamespace>
-    <AssemblyName>MigLib</AssemblyName>
-
-    <Authors>Luis Ángel Méndez Gort</Authors>
-    <PackageProjectUrl>https://github.com/lamg/migrate</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/lamg/migrate</RepositoryUrl>
-    <PackageProjectUrl>https://github.com/lamg/migrate</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/lamg/migrate</RepositoryUrl>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <PackageIcon>logo.png</PackageIcon>
   </PropertyGroup>
-
   <ItemGroup>
-    <FsYacc Include="DeclarativeMigrations\SqlParser.fsy">
-      <OtherFlags>--module migrate.DeclarativeMigrations.SqlParser --internal --open migrate.DeclarativeMigrations.Types</OtherFlags>
-    </FsYacc>
-    <FsLex Include="DeclarativeMigrations\SqlLexer.fsl">
-      <OtherFlags>--unicode</OtherFlags>
-    </FsLex>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Db.fs" />
-    <Compile Include="DeclarativeMigrations\Types.fs" />
-    <Compile Include="SqlParser.fsi" />
-    <Compile Include="SqlParser.fs" />
-    <Compile Include="SqlLexer.fs" />
-    <Compile Include="DeclarativeMigrations\SqlParserWrapper.fs" />
-    <Compile Include="DeclarativeMigrations\GenerateSql.fs" />
-    <Compile Include="DeclarativeMigrations\Solve.fs" />
-    <Compile Include="DeclarativeMigrations\Migration.fs" />
-    <Compile Include="Execution\FormatSql.fs" />
-    <Compile Include="Execution\Exec.fs" />
-    <Compile Include="CodeGen\FabulousAstHelpers.fs" />
-    <Compile Include="CodeGen\AstExprBuilders.fs" />
-    <Compile Include="CodeGen\ViewIntrospection.fs" />
-    <Compile Include="CodeGen\TypeGenerator.fs" />
-    <Compile Include="CodeGen\NormalizedSchema.fs" />
-    <Compile Include="CodeGen\NormalizedTypeGenerator.fs" />
-    <Compile Include="CodeGen\NormalizedQueryGenerator.fs" />
-    <Compile Include="CodeGen\QueryGenerator.fs" />
-    <Compile Include="CodeGen\FileMapper.fs" />
-    <Compile Include="CodeGen\ProjectGenerator.fs" />
-    <Compile Include="CodeGen\CodeGen.fs" />
-    <Content Include="..\..\README.md" Pack="true" PackagePath="\" />
-    <Content Include="..\..\images\logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>
-
   <ItemGroup>
-    <PackageReference Include="dotenv.net" />
-    <PackageReference Include="Fabulous.AST" />
-    <PackageReference Include="Fantomas.Core" />
-    <PackageReference Include="FSharp.Core" />
-    <PackageReference Include="FsToolkit.ErrorHandling" />
-    <PackageReference Include="FsLexYacc" GeneratePathProperty="true" PrivateAssets="all" />
-    <PackageReference Include="FsLexYacc.Runtime" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
-    <PackageReference Include="SqlPrettify" />
-    <PackageReference Include="FSharpPlus" />
+    <PackageReference Include="FsToolkit.ErrorHandling" />
   </ItemGroup>
-
 </Project>

@@ -1,5 +1,5 @@
 <Solution>
-  <Project Path="mig/mig.fsproj" />
   <Project Path="MigLib/MigLib.fsproj" />
+  <Project Path="mig/mig.fsproj" />
   <Project Path="Test/Test.fsproj" />
 </Solution>

@@ -1,49 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>false</IsPackable>
-    <GenerateProgramFile>false</GenerateProgramFile>
   </PropertyGroup>
-
   <ItemGroup>
-    <Compile Include="UseAsLib.fs" />
-    <Compile Include="CompareObjects.fs" />
-    <Compile Include="TableMigration.fs" />
-    <Compile Include="ColumnMigration.fs" />
-    <Compile Include="ViewMigration.fs" />
-    <Compile Include="CompositePKTest.fs" />
-    <Compile Include="TransactionTest.fs" />
-    <Compile Include="TaskTxnTest.fs" />
-    <Compile Include="SeedExecutionTest.fs" />
-    <Compile Include="ViewCodeGenTest.fs" />
-    <Compile Include="QueryByTest.fs" />
-    <Compile Include="QueryLikeTest.fs" />
-    <Compile Include="QueryByOrCreateTest.fs" />
-    <Compile Include="InsertOrIgnoreTest.fs" />
-    <Compile Include="NormalizedSchemaTest.fs" />
-    <Compile Include="NormalizedTypeGenTest.fs" />
-    <Compile Include="NormalizedPropertyTest.fs" />
-    <Compile Include="DUTypeExtensionTest.fs" />
-    <Compile Include="NormalizedInsertTest.fs" />
-    <Compile Include="NormalizedQueryTest.fs" />
-    <Compile Include="NormalizedUpdateDeleteTest.fs" />
-    <Compile Include="NormalizedSchemaValidationTest.fs" />
-    <Compile Include="NormalizedIntegrationTest.fs" />
-    <Compile Include="Program.fs" />
+    <Compile Include="Tests.fs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="FSharp.Core" />
-    <PackageReference Include="coverlet.collector" />
-    <PackageReference Include="FsToolkit.ErrorHandling" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" />
-    <PackageReference Include="ObjectDumper.NET" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="coverlet.collector" />
   </ItemGroup>
-
   <ItemGroup>
-    <ProjectReference Include="..\MigLib\MigLib.fsproj" />
+    <ProjectReference Include="../MigLib/MigLib.fsproj" />
   </ItemGroup>
-
 </Project>
