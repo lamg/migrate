@@ -87,9 +87,17 @@ src/
 - **CLI wiring completed**: `mig status` and `mig cutover` now call MigLib implementations and return non-zero exit codes on failure with clear error output.
 - **Coverage added**: tests validate status snapshots (with/without migration tables), successful cutover state transition and cleanup, and cutover failure when `_migration_status` is missing.
 
+## Update (2026-02-17, migrate and drain execution flow)
+
+- **Migrate execution implemented**: `MigLib.HotMigration.runMigrate` now evaluates the `.fsx` schema, introspects old DB schema, builds bulk-copy plans, prepares old DB recording markers/log table, initializes the new DB schema/migration tables, and copies data with ID mapping persistence.
+- **Drain execution implemented**: `MigLib.HotMigration.runDrain` now switches old DB marker to `draining`, loads bulk-copy/replay metadata from both databases, replays migration log entries into the new DB, and deletes consumed log entries.
+- **SQLite schema bridge added**: hot migration now includes runtime SQLite schema introspection + SQL DDL rendering so migration planning/copy can operate from live databases and reflected schema models.
+- **CLI wiring completed**: `mig migrate` and `mig drain` now execute real flows and print structured progress summaries with non-zero exit codes on failure.
+- **Coverage added**: end-to-end tests now validate migrate setup/copy behavior and drain replay/consumption behavior against real SQLite files.
+
 ## What's next
 
-1. Migrate and drain command execution flow
+1. Migration safety hardening (exact pending replay accounting and stricter cutover prechecks)
 
 ## Completed next-step items
 
@@ -99,3 +107,4 @@ src/
 3. Migration log recording in TaskTxnBuilder
 4. Drain replay logic
 5. Cutover and status commands
+6. Migrate and drain command execution flow

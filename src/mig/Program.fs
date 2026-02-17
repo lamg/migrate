@@ -65,14 +65,36 @@ let migrate (args: ParseResults<MigrateArgs>) =
   let old = args.GetResult MigrateArgs.Old
   let schema = args.GetResult MigrateArgs.Schema
   let newDb = args.TryGetResult MigrateArgs.New |> Option.defaultValue $"{old}.new"
-  printfn $"migrate: not implemented (old={old}, schema={schema}, new={newDb})"
-  0
+
+  match runMigrate old schema newDb |> fun t -> t.Result with
+  | Ok result ->
+    printfn "Migrate complete."
+    printfn $"Old database: {old}"
+    printfn $"Schema script: {schema}"
+    printfn $"New database: {result.newDbPath}"
+    printfn $"Copied tables: {result.copiedTables}"
+    printfn $"Copied rows: {result.copiedRows}"
+    0
+  | Error ex ->
+    eprintfn $"migrate failed: {ex.Message}"
+    1
 
 let drain (args: ParseResults<DrainArgs>) =
   let old = args.GetResult DrainArgs.Old
   let newDb = args.GetResult DrainArgs.New
-  printfn $"drain: not implemented (old={old}, new={newDb})"
-  0
+
+  match runDrain old newDb |> fun t -> t.Result with
+  | Ok result ->
+    printfn "Drain complete."
+    printfn $"Old database: {old}"
+    printfn $"New database: {newDb}"
+    printfn $"Replayed entries: {result.replayedEntries}"
+    printfn $"Remaining log entries: {result.remainingEntries}"
+    printfn "Run `mig cutover` when ready."
+    0
+  | Error ex ->
+    eprintfn $"drain failed: {ex.Message}"
+    1
 
 let cutover (args: ParseResults<CutoverArgs>) =
   let newDb = args.GetResult CutoverArgs.New

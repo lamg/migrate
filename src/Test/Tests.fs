@@ -1268,6 +1268,215 @@ let ``cutover fails when migration status table is missing`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
+let ``migrate creates new database, copies rows, and sets recording markers`` () =
+  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_migrate_flow_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+  let newDbPath = Path.Combine(tempDir, "new.db")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+
+  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  setupOldConn.Open()
+
+  [ "PRAGMA foreign_keys = ON;"
+    "CREATE TABLE account(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "CREATE TABLE invoice(id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, total REAL NOT NULL, FOREIGN KEY(account_id) REFERENCES account(id));"
+    "INSERT INTO account(id, name) VALUES (10, 'Alice');"
+    "INSERT INTO invoice(id, account_id, total) VALUES (100, 10, 42.5);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Account = {{ id: int64; name: string }}
+
+[<AutoIncPK "id">]
+type Invoice = {{ id: int64; account: Account; total: float }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+
+  let migrateResult = runMigrate oldDbPath schemaPath newDbPath |> fun t -> t.Result
+
+  match migrateResult with
+  | Error ex -> failwith $"Expected migrate to succeed, got {ex.Message}"
+  | Ok result ->
+    Assert.Equal(newDbPath, result.newDbPath)
+    Assert.Equal(2, result.copiedTables)
+    Assert.Equal(2L, result.copiedRows)
+
+  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  verifyOldConn.Open()
+
+  use markerCmd =
+    new SqliteCommand("SELECT status FROM _migration_marker WHERE id = 0", verifyOldConn)
+
+  let markerStatus = markerCmd.ExecuteScalar() |> string
+  Assert.Equal("recording", markerStatus)
+
+  use oldLogCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM _migration_log", verifyOldConn)
+
+  let oldLogCount = oldLogCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(0L, oldLogCount)
+
+  use verifyNewConn = new SqliteConnection($"Data Source={newDbPath}")
+  verifyNewConn.Open()
+
+  use statusCmd =
+    new SqliteCommand("SELECT status FROM _migration_status WHERE id = 0", verifyNewConn)
+
+  let newStatus = statusCmd.ExecuteScalar() |> string
+  Assert.Equal("migrating", newStatus)
+
+  use accountCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM account", verifyNewConn)
+
+  let accountCount = accountCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(1L, accountCount)
+
+  use invoiceCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM invoice", verifyNewConn)
+
+  let invoiceCount = invoiceCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(1L, invoiceCount)
+
+  use mappingCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM _id_mapping", verifyNewConn)
+
+  let mappingCount = mappingCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(2L, mappingCount)
+
+  verifyOldConn.Close()
+  verifyNewConn.Close()
+  setupOldConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``drain replays accumulated log entries and clears consumed logs`` () =
+  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_drain_flow_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+  let newDbPath = Path.Combine(tempDir, "new.db")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+
+  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  setupOldConn.Open()
+
+  [ "PRAGMA foreign_keys = ON;"
+    "CREATE TABLE account(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "CREATE TABLE invoice(id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, total REAL NOT NULL, FOREIGN KEY(account_id) REFERENCES account(id));"
+    "INSERT INTO account(id, name) VALUES (10, 'Alice');"
+    "INSERT INTO invoice(id, account_id, total) VALUES (100, 10, 42.5);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Account = {{ id: int64; name: string }}
+
+[<AutoIncPK "id">]
+type Invoice = {{ id: int64; account: Account; total: float }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+
+  let migrateResult = runMigrate oldDbPath schemaPath newDbPath |> fun t -> t.Result
+
+  match migrateResult with
+  | Error ex -> failwith $"Expected migrate to succeed before drain test, got {ex.Message}"
+  | Ok _ -> ()
+
+  [ "INSERT INTO account(id, name) VALUES (11, 'Bob');"
+    "INSERT INTO invoice(id, account_id, total) VALUES (101, 11, 15.0);"
+    "UPDATE invoice SET total = 99.0 WHERE id = 100;"
+    "INSERT INTO _migration_log(txn_id, ordering, operation, table_name, row_data) VALUES (1, 1, 'insert', 'account', '{\"id\":11,\"name\":\"Bob\"}');"
+    "INSERT INTO _migration_log(txn_id, ordering, operation, table_name, row_data) VALUES (1, 2, 'insert', 'invoice', '{\"id\":101,\"account_id\":11,\"total\":15.0}');"
+    "INSERT INTO _migration_log(txn_id, ordering, operation, table_name, row_data) VALUES (2, 1, 'update', 'invoice', '{\"id\":100,\"account_id\":10,\"total\":99.0}');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let drainResult = runDrain oldDbPath newDbPath |> fun t -> t.Result
+
+  match drainResult with
+  | Error ex -> failwith $"Expected drain to succeed, got {ex.Message}"
+  | Ok result ->
+    Assert.Equal(3, result.replayedEntries)
+    Assert.Equal(0L, result.remainingEntries)
+
+  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  verifyOldConn.Open()
+
+  use markerCmd =
+    new SqliteCommand("SELECT status FROM _migration_marker WHERE id = 0", verifyOldConn)
+
+  let markerStatus = markerCmd.ExecuteScalar() |> string
+  Assert.Equal("draining", markerStatus)
+
+  use oldLogCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM _migration_log", verifyOldConn)
+
+  let oldLogCount = oldLogCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(0L, oldLogCount)
+
+  use verifyNewConn = new SqliteConnection($"Data Source={newDbPath}")
+  verifyNewConn.Open()
+
+  use accountCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM account", verifyNewConn)
+
+  let accountCount = accountCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(2L, accountCount)
+
+  use invoiceCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM invoice", verifyNewConn)
+
+  let invoiceCount = invoiceCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(2L, invoiceCount)
+
+  use summaryCmd =
+    new SqliteCommand(
+      "SELECT a.name, i.total FROM invoice i JOIN account a ON i.account_id = a.id ORDER BY a.name",
+      verifyNewConn
+    )
+
+  use summaryReader = summaryCmd.ExecuteReader()
+  Assert.True(summaryReader.Read())
+  Assert.Equal("Alice", summaryReader.GetString(0))
+  Assert.True(Math.Abs(summaryReader.GetDouble(1) - 99.0) < 0.0001)
+
+  Assert.True(summaryReader.Read())
+  Assert.Equal("Bob", summaryReader.GetString(0))
+  Assert.True(Math.Abs(summaryReader.GetDouble(1) - 15.0) < 0.0001)
+  Assert.False(summaryReader.Read())
+
+  verifyOldConn.Close()
+  verifyNewConn.Close()
+  setupOldConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
 let ``schema reflection maps DU optional cases into extension tables`` () =
   let types = [ typeof<ReflectionStudent>; typeof<ReflectionStudentOpt> ]
 
