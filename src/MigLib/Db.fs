@@ -3,6 +3,7 @@ module MigLib.Db
 open System
 open System.Collections.Generic
 open System.Globalization
+open System.IO
 open System.Text.Json.Nodes
 open System.Threading
 open System.Threading.Tasks
@@ -132,6 +133,95 @@ type private TxnContext =
     writes: ResizeArray<MigrationWrite> }
 
 let private txnContext = AsyncLocal<TxnContext option>()
+let private hashPlaceholder = "<HASH>"
+
+let private isHashSegment (value: string) =
+  value.Length = 16 && value |> Seq.forall Uri.IsHexDigit
+
+let private tryReadMigrationStatus (dbPath: string) : string option =
+  try
+    use connection = new SqliteConnection($"Data Source={dbPath};Mode=ReadOnly")
+    connection.Open()
+
+    use cmd =
+      new SqliteCommand("SELECT status FROM _migration_status WHERE id = 0 LIMIT 1", connection)
+
+    let statusObj = cmd.ExecuteScalar()
+
+    if isNull statusObj then None else Some(string statusObj)
+  with _ ->
+    None
+
+let tryResolveDatabasePath (configuredPath: string) : Result<string, string> =
+  if String.IsNullOrWhiteSpace configuredPath then
+    Error "Configured database path is empty."
+  else
+    let fullPath = Path.GetFullPath configuredPath
+
+    if not (fullPath.Contains hashPlaceholder) then
+      Ok fullPath
+    else
+      let directory = Path.GetDirectoryName fullPath
+      let fileName = Path.GetFileName fullPath
+      let placeholderIndex = fileName.IndexOf(hashPlaceholder, StringComparison.Ordinal)
+
+      if
+        String.IsNullOrWhiteSpace directory
+        || String.IsNullOrWhiteSpace fileName
+        || placeholderIndex < 0
+      then
+        Error $"Invalid hash-template database path: {configuredPath}"
+      elif not (Directory.Exists directory) then
+        Error $"Directory does not exist for database template '{configuredPath}': {directory}"
+      else
+        let prefix = fileName.Substring(0, placeholderIndex)
+        let suffix = fileName.Substring(placeholderIndex + hashPlaceholder.Length)
+
+        let candidates =
+          Directory.GetFiles(directory, $"{prefix}*{suffix}")
+          |> Array.filter (fun path ->
+            let candidateFileName = Path.GetFileName path
+
+            if
+              candidateFileName.StartsWith(prefix, StringComparison.Ordinal)
+              && candidateFileName.EndsWith(suffix, StringComparison.Ordinal)
+            then
+              let hashLength = candidateFileName.Length - prefix.Length - suffix.Length
+
+              if hashLength <= 0 then
+                false
+              else
+                let hashSegment = candidateFileName.Substring(prefix.Length, hashLength)
+                isHashSegment hashSegment
+            else
+              false)
+          |> Array.sort
+
+        if candidates.Length = 0 then
+          Error $"No database file matched template '{configuredPath}'."
+        elif candidates.Length = 1 then
+          Ok candidates[0]
+        else
+          let readyCandidates =
+            candidates
+            |> Array.filter (fun candidate ->
+              match tryReadMigrationStatus candidate with
+              | Some status -> status.Equals("ready", StringComparison.OrdinalIgnoreCase)
+              | None -> false)
+
+          if readyCandidates.Length = 1 then
+            Ok readyCandidates[0]
+          else
+            let discovered = String.concat ", " candidates
+
+            Error(
+              $"Multiple database files matched template '{configuredPath}' and the selection is ambiguous: {discovered}. Set DATABASE_PATH to an explicit file path."
+            )
+
+let resolveDatabasePathOrFail (configuredPath: string) : string =
+  match tryResolveDatabasePath configuredPath with
+  | Ok path -> path
+  | Error message -> invalidOp message
 
 let private toJsonNode (value: obj) : JsonNode =
   if isNull value || Object.ReferenceEquals(value, DBNull.Value) then

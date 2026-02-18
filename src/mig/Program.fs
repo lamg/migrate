@@ -17,6 +17,15 @@ type MigrateArgs =
       | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
+type InitArgs =
+  | [<AltCommandLine("-d")>] Dir of path: string
+
+  interface IArgParserTemplate with
+    member this.Usage =
+      match this with
+      | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
+
+[<CliPrefix(CliPrefix.DoubleDash)>]
 type PlanArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
 
@@ -73,6 +82,7 @@ type StatusArgs =
       | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
 
 type Command =
+  | [<CliPrefix(CliPrefix.None)>] Init of ParseResults<InitArgs>
   | [<CliPrefix(CliPrefix.None)>] Migrate of ParseResults<MigrateArgs>
   | [<CliPrefix(CliPrefix.None)>] Plan of ParseResults<PlanArgs>
   | [<CliPrefix(CliPrefix.None)>] Drain of ParseResults<DrainArgs>
@@ -84,6 +94,7 @@ type Command =
   interface IArgParserTemplate with
     member this.Usage =
       match this with
+      | Init _ -> "initialize a schema-matched database from schema.fsx without requiring a source database"
       | Migrate _ -> "create new database and copy data from old"
       | Plan _ -> "show dry-run migration plan without mutating databases"
       | Drain _ -> "stop writes on old database and replay accumulated changes"
@@ -351,6 +362,42 @@ let migrate (args: ParseResults<MigrateArgs>) =
         | Error ex ->
           eprintfn $"migrate failed: {ex.Message}"
           printMigrateRecoveryGuidance old newDb
+          1
+
+let init (args: ParseResults<InitArgs>) =
+  match resolveCommandDirectory "init" (args.TryGetResult InitArgs.Dir) with
+  | Error message ->
+    eprintfn $"init failed: {message}"
+    1
+  | Ok currentDirectory ->
+    let directoryName = DirectoryInfo(currentDirectory).Name
+    let schemaPath = defaultSchemaPathForCurrentDirectory currentDirectory
+
+    match resolveDeterministicNewDbPath currentDirectory directoryName schemaPath with
+    | Error message ->
+      eprintfn $"init failed: Could not resolve deterministic new database path from schema '{schemaPath}': {message}"
+
+      1
+    | Ok resolvedNew ->
+      let newDb = resolvedNew.path
+
+      if File.Exists newDb then
+        printfn "Init skipped."
+        printfn $"Schema script: {schemaPath}"
+        printfn $"Schema hash: {resolvedNew.schemaHash}"
+        printfn $"Database already present for current schema: {newDb}"
+        0
+      else
+        match runInit schemaPath newDb |> fun t -> t.Result with
+        | Ok result ->
+          printfn "Init complete."
+          printfn $"Schema script: {schemaPath}"
+          printfn $"Schema hash: {resolvedNew.schemaHash}"
+          printfn $"Database: {result.newDbPath}"
+          printfn $"Seeded rows: {result.seededRows}"
+          0
+        | Error ex ->
+          eprintfn $"init failed: {ex.Message}"
           1
 
 let plan (args: ParseResults<PlanArgs>) =
@@ -760,6 +807,7 @@ let main argv =
     let results = parser.ParseCommandLine(inputs = argv, raiseOnUsage = true)
 
     match results.GetSubCommand() with
+    | Init args -> init args
     | Migrate args -> migrate args
     | Plan args -> plan args
     | Drain args -> drain args

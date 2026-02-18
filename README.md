@@ -88,6 +88,17 @@ mig reset --dry-run
 mig reset
 ```
 
+## Quickstart (Schema Initialization)
+
+When you want to bootstrap a database directly from `schema.fsx` (no source DB yet):
+
+```sh
+# from your project directory:
+# - expects ./schema.fsx
+# - derives db path as <dir>-<schema-hash>.sqlite
+mig init
+```
+
 ## Features
 
 - F# schema reflection from `.fsx` scripts
@@ -106,6 +117,7 @@ mig reset
 
 ## Commands
 
+- `mig init [--dir|-d <path>]` - Create a schema-matched database from `schema.fsx` and apply seed inserts (no source DB required).
 - `mig migrate [--dir|-d <path>]` - Create the new DB from schema, copy data, and start recording on old DB.
 - `mig plan [--dir|-d <path>]` - Print dry-run inferred paths, schema diff summary, and replay prerequisites without mutating DBs.
 - `mig drain [--dir|-d <path>]` - Switch old DB to draining mode and replay pending migration log entries.

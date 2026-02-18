@@ -49,6 +49,9 @@ type MigrateResult =
     copiedTables: int
     copiedRows: int64 }
 
+type InitResult =
+  { newDbPath: string; seededRows: int64 }
+
 type MigratePlanReport =
   { schemaHash: string
     schemaCommit: string option
@@ -754,6 +757,87 @@ let private initializeNewDatabase
       let! _ = fkOnCmd.ExecuteNonQueryAsync()
       tx.Commit()
       return Ok()
+    with
+    | :? SqliteException as ex -> return Error ex
+    | ex -> return Error(toSqliteError ex.Message)
+  }
+
+let private initializeDatabaseFromSchemaOnly
+  (newConnection: SqliteConnection)
+  (targetSchema: SqlFile)
+  : Task<Result<int64, SqliteException>> =
+  task {
+    try
+      use tx = newConnection.BeginTransaction()
+      use fkOffCmd = createCommand newConnection (Some tx) "PRAGMA foreign_keys = OFF;"
+      let! _ = fkOffCmd.ExecuteNonQueryAsync()
+
+      for table in targetSchema.tables do
+        use createTableCmd = createCommand newConnection (Some tx) (createTableSql table)
+        let! _ = createTableCmd.ExecuteNonQueryAsync()
+        ()
+
+      for index in targetSchema.indexes do
+        use createIndexCmd = createCommand newConnection (Some tx) (createIndexSql index)
+        let! _ = createIndexCmd.ExecuteNonQueryAsync()
+        ()
+
+      for view in targetSchema.views do
+        for sql in view.sqlTokens do
+          use createViewCmd = createCommand newConnection (Some tx) sql
+          let! _ = createViewCmd.ExecuteNonQueryAsync()
+          ()
+
+      for trigger in targetSchema.triggers do
+        for sql in trigger.sqlTokens do
+          use createTriggerCmd = createCommand newConnection (Some tx) sql
+          let! _ = createTriggerCmd.ExecuteNonQueryAsync()
+          ()
+
+      use fkOnCmd = createCommand newConnection (Some tx) "PRAGMA foreign_keys = ON;"
+      let! _ = fkOnCmd.ExecuteNonQueryAsync()
+
+      let validationError =
+        targetSchema.inserts
+        |> List.tryPick (fun insert ->
+          if insert.columns.IsEmpty then
+            Some $"Seed insert for table '{insert.table}' has no columns. Use explicit fields in seed records."
+          else
+            insert.values
+            |> List.tryPick (fun rowValues ->
+              if rowValues.Length = insert.columns.Length then
+                None
+              else
+                Some
+                  $"Seed insert for table '{insert.table}' has {rowValues.Length} value(s) but {insert.columns.Length} column(s)."))
+
+      match validationError with
+      | Some message -> raise (toSqliteError message)
+      | None -> ()
+
+      let mutable seededRows = 0L
+
+      for insert in targetSchema.inserts do
+        let escapedColumns =
+          insert.columns |> List.map quoteIdentifier |> String.concat ", "
+
+        let parameterNames =
+          insert.columns |> List.mapi (fun i _ -> $"@p{i}") |> String.concat ", "
+
+        let insertSql =
+          $"INSERT INTO {quoteIdentifier insert.table} ({escapedColumns}) VALUES ({parameterNames})"
+
+        for rowValues in insert.values do
+          use insertCmd = createCommand newConnection (Some tx) insertSql
+
+          rowValues
+          |> List.iteri (fun i value -> insertCmd.Parameters.AddWithValue($"@p{i}", exprToDbValue value) |> ignore)
+
+          let! _ = insertCmd.ExecuteNonQueryAsync()
+          seededRows <- seededRows + 1L
+
+      tx.Commit()
+      return Ok seededRows
     with
     | :? SqliteException as ex -> return Error ex
     | ex -> return Error(toSqliteError ex.Message)
@@ -1791,6 +1875,42 @@ let runMigrate
   : Task<Result<MigrateResult, SqliteException>> =
   let schemaCommit = tryResolveSchemaCommitFromGit schemaPath
   runMigrateInternal oldDbPath schemaPath newDbPath schemaCommit
+
+let runInit (schemaPath: string) (newDbPath: string) : Task<Result<InitResult, SqliteException>> =
+  task {
+    try
+      if File.Exists newDbPath then
+        return Error(toSqliteError $"Database already exists: {newDbPath}")
+      else
+        let! targetSchema =
+          match parseSchemaFromScript schemaPath with
+          | Ok schema -> Task.FromResult(Ok schema)
+          | Error ex -> Task.FromResult(Error ex)
+
+        match targetSchema with
+        | Error ex -> return Error ex
+        | Ok schema ->
+          let newDirectory = Path.GetDirectoryName newDbPath
+
+          if not (String.IsNullOrWhiteSpace newDirectory) then
+            Directory.CreateDirectory newDirectory |> ignore
+
+          use newConnection = new SqliteConnection($"Data Source={newDbPath}")
+          do! newConnection.OpenAsync()
+
+          let! initResult = initializeDatabaseFromSchemaOnly newConnection schema
+
+          match initResult with
+          | Error ex -> return Error ex
+          | Ok seededRows ->
+            return
+              Ok
+                { newDbPath = newDbPath
+                  seededRows = seededRows }
+    with
+    | :? SqliteException as ex -> return Error ex
+    | ex -> return Error(toSqliteError ex.Message)
+  }
 
 let runDrain (oldDbPath: string) (newDbPath: string) : Task<Result<DrainResult, SqliteException>> =
   task {

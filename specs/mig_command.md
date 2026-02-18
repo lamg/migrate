@@ -39,6 +39,29 @@ This command:
 
 No recording, replay, or drain phases are needed since no service is writing to the old database. After completion the administrator swaps the database files.
 
+### `mig init`
+
+```sh
+mig init [--dir|-d /path/to/project]
+```
+
+Schema-only bootstrap mode (no source database required):
+
+- Uses the current directory as project root (override with `--dir` / `-d`)
+- Uses `<dir>/schema.fsx` as schema input
+- Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite`
+- If the schema-matched target already exists, reports skip and exits `0`
+
+Behavior:
+
+1. Evaluates `schema.fsx` and derives schema + seed inserts via reflection
+2. Creates a new SQLite file at the deterministic target path
+3. Creates all tables, indexes, views, and triggers
+4. Applies schema seed inserts in dependency order
+5. Reports completion and seeded row count
+
+This command does not create migration coordination tables (`_migration_status`, `_migration_progress`, `_id_mapping`, `_migration_marker`, `_migration_log`) because it is not a hot-migration phase.
+
 ## Online mode
 
 When services are deployed, the administrator can run one optional planning command, then three required phase commands plus optional cleanup/reset commands:
@@ -217,6 +240,7 @@ MigLib in the new service checks the `_migration_status` table on startup and pe
 
 | Command | What it does | Who reacts |
 |---|---|---|
+| `mig init` | Creates a schema-matched database from `schema.fsx` + seed data (no source DB) | — |
 | `mig plan` | Prints dry-run migration plan and prerequisites without mutating DBs | — |
 | `mig migrate` | Creates new DB, copies data, exits | Old service starts recording writes |
 | `mig drain` | Sets drain marker, replays all accumulated writes, exits | Old service stops writes |

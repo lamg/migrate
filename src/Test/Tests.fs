@@ -147,6 +147,99 @@ let private assertCliHelpOutput (args: string list) (expectedUsage: string) (exp
 
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
 
+let private createDatabaseWithMigrationStatus (dbPath: string) (status: string option) =
+  use connection = new SqliteConnection($"Data Source={dbPath}")
+  connection.Open()
+
+  match status with
+  | None -> ()
+  | Some value ->
+    [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+      $"INSERT INTO _migration_status(id, status) VALUES (0, '{value}');" ]
+    |> List.iter (fun sql ->
+      use cmd = new SqliteCommand(sql, connection)
+      cmd.ExecuteNonQuery() |> ignore)
+
+  connection.Close()
+
+[<Fact>]
+let ``tryResolveDatabasePath returns explicit absolute path when no hash template is used`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_resolve_path_explicit_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "database.sqlite")
+  createDatabaseWithMigrationStatus dbPath None
+
+  match tryResolveDatabasePath dbPath with
+  | Error error -> failwith $"Expected explicit path to resolve, got error: {error}"
+  | Ok resolvedPath -> Assert.Equal(Path.GetFullPath dbPath, resolvedPath)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``tryResolveDatabasePath resolves single hash-template match`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_resolve_path_single_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let resolvedDbPath = Path.Combine(tempDir, "marketdesk-1111222233334444.sqlite")
+  createDatabaseWithMigrationStatus resolvedDbPath None
+
+  let templatePath = Path.Combine(tempDir, "marketdesk-<HASH>.sqlite")
+
+  match tryResolveDatabasePath templatePath with
+  | Error error -> failwith $"Expected hash template to resolve, got error: {error}"
+  | Ok resolvedPath -> Assert.Equal(resolvedDbPath, resolvedPath)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``tryResolveDatabasePath prefers unique ready database when multiple hash matches exist`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_resolve_path_ready_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "marketdesk-1111222233334444.sqlite")
+  let newReadyDbPath = Path.Combine(tempDir, "marketdesk-aaaabbbbccccdddd.sqlite")
+
+  createDatabaseWithMigrationStatus oldDbPath None
+  createDatabaseWithMigrationStatus newReadyDbPath (Some "ready")
+
+  let templatePath = Path.Combine(tempDir, "marketdesk-<HASH>.sqlite")
+
+  match tryResolveDatabasePath templatePath with
+  | Error error -> failwith $"Expected unique ready database to resolve, got error: {error}"
+  | Ok resolvedPath -> Assert.Equal(newReadyDbPath, resolvedPath)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``tryResolveDatabasePath fails when multiple hash matches are ambiguous`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_resolve_path_ambiguous_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath1 = Path.Combine(tempDir, "marketdesk-1111222233334444.sqlite")
+  let dbPath2 = Path.Combine(tempDir, "marketdesk-aaaabbbbccccdddd.sqlite")
+
+  createDatabaseWithMigrationStatus dbPath1 None
+  createDatabaseWithMigrationStatus dbPath2 None
+
+  let templatePath = Path.Combine(tempDir, "marketdesk-<HASH>.sqlite")
+
+  match tryResolveDatabasePath templatePath with
+  | Ok resolvedPath -> failwith $"Expected ambiguity error, got resolved path: {resolvedPath}"
+  | Error error ->
+    Assert.Contains("selection is ambiguous", error)
+    Assert.Contains("Set DATABASE_PATH to an explicit file path", error)
+
+  Directory.Delete(tempDir, true)
+
 [<AutoIncPK "id">]
 [<Unique "name">]
 [<Index "name">]
@@ -1806,7 +1899,8 @@ let ``cli root help shows current command surface`` () =
   assertCliHelpOutput
     [ "--help" ]
     "USAGE: mig [--help] [<subcommand> [<options>]]"
-    [ "migrate <options>"
+    [ "init <options>"
+      "migrate <options>"
       "plan <options>"
       "drain <options>"
       "cutover <options>"
@@ -1817,7 +1911,8 @@ let ``cli root help shows current command surface`` () =
 [<Fact>]
 let ``cli subcommand help shows usage and options`` () =
   let cases: (string list * string * string list) list =
-    [ ([ "migrate"; "--help" ], "USAGE: mig migrate [--help] [--dir <path>]", [ "--dir, -d <path>" ])
+    [ ([ "init"; "--help" ], "USAGE: mig init [--help] [--dir <path>]", [ "--dir, -d <path>" ])
+      ([ "migrate"; "--help" ], "USAGE: mig migrate [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "plan"; "--help" ], "USAGE: mig plan [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "drain"; "--help" ], "USAGE: mig drain [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "cutover"; "--help" ], "USAGE: mig cutover [--help] [--dir <path>]", [ "--dir, -d <path>" ])
@@ -2539,6 +2634,124 @@ type Student = {{ id: int64; name: string }}
   use studentCountCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
   let studentCount = studentCountCmd.ExecuteScalar() |> unbox<int64>
   Assert.Equal(1L, studentCount)
+
+  verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli init creates deterministic schema database with seed data`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_init_seeded_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Role = {{ id: int64; name: string }}
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; role: Role; name: string }}
+
+let roles = [
+  {{ id = 1L; name = "admin" }}
+  {{ id = 2L; name = "student" }}
+]
+
+let defaultStudent = {{ id = 10L; role = {{ id = 1L; name = "admin" }}; name = "System" }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let expectedDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+
+  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "init" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains("Init complete.", stdOut)
+  Assert.Contains($"Schema script: {schemaPath}", stdOut)
+  Assert.Contains($"Schema hash: {deriveShortSchemaHashFromScript schemaPath}", stdOut)
+  Assert.Contains($"Database: {expectedDbPath}", stdOut)
+  Assert.Contains("Seeded rows: 3", stdOut)
+  Assert.True(File.Exists expectedDbPath)
+
+  use verifyConn = new SqliteConnection($"Data Source={expectedDbPath}")
+  verifyConn.Open()
+
+  use roleCountCmd = new SqliteCommand("SELECT COUNT(*) FROM role", verifyConn)
+  let roleCount = roleCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(2L, roleCount)
+
+  use studentCountCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
+  let studentCount = studentCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(1L, studentCount)
+
+  use migrationStatusExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_status' LIMIT 1",
+      verifyConn
+    )
+
+  let migrationStatusExists = migrationStatusExistsCmd.ExecuteScalar()
+  Assert.True(isNull migrationStatusExists)
+
+  verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli init skips when current-directory schema-matched database already exists`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_init_skip_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let expectedDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+
+  use existingConn = new SqliteConnection($"Data Source={expectedDbPath}")
+  existingConn.Open()
+
+  use initCmd =
+    new SqliteCommand("CREATE TABLE sentinel(id INTEGER PRIMARY KEY, value TEXT NOT NULL);", existingConn)
+
+  initCmd.ExecuteNonQuery() |> ignore
+  existingConn.Close()
+
+  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "init" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains("Init skipped.", stdOut)
+  Assert.Contains($"Database already present for current schema: {expectedDbPath}", stdOut)
+
+  use verifyConn = new SqliteConnection($"Data Source={expectedDbPath}")
+  verifyConn.Open()
+
+  use sentinelCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM sentinel", verifyConn)
+
+  let sentinelCount = sentinelCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(0L, sentinelCount)
 
   verifyConn.Close()
   Directory.Delete(tempDir, true)
