@@ -85,7 +85,7 @@ Validation:
 mig status [--dir|-d /path/to/project]
 ```
 
-Check that pending replay entries are `0` before cutover.
+Check that pending replay entries are `0` and old marker status remains `draining` before cutover.
 
 If your target schema defines triggers, run a focused replay check:
 
@@ -180,6 +180,8 @@ After `cleanup-old`:
   - run `mig reset` (if needed), then `mig plan` to verify rerun safety
 - `cutover failed: Drain is not complete...`
   - rerun `mig drain`, then recheck `mig status`
+- `cutover failed: Cutover blocked: ... replay divergence risk ...`
+  - old marker/log state changed after drain; verify old marker is `draining`, then rerun `mig drain` and retry cutover
 - `cleanup-old failed: Old database is still in recording mode...`
   - finish `drain` + `cutover` first
 - missing migration tables

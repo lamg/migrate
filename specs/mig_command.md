@@ -127,7 +127,7 @@ Run after `mig drain` has exited:
 - Uses the current directory as project root (override with `--dir` / `-d`)
 - Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite` from `<dir>/schema.fsx`
 
-- Verifies that drain is complete (`_migration_log` fully consumed)
+- Verifies that drain is complete and old-db replay state is safe (`_migration_marker='draining'`, `_migration_log` present, no log entries beyond the replay checkpoint)
 - Drops replay-only tables (`_id_mapping`, `_migration_progress`) from the new database
 - Updates `_migration_status` to 'ready' in the new database
 - MigLib in the new service detects the status change and starts serving

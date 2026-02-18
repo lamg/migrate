@@ -81,7 +81,7 @@ mig reset
 - `mig migrate [--dir|-d <path>]` - Create the new DB from schema, copy data, and start recording on old DB.
 - `mig plan [--dir|-d <path>]` - Print dry-run inferred paths, schema diff summary, and replay prerequisites without mutating DBs.
 - `mig drain [--dir|-d <path>]` - Switch old DB to draining mode and replay pending migration log entries.
-- `mig cutover [--dir|-d <path>]` - Verify drain completion, switch new DB to `ready`, and remove replay-only tables.
+- `mig cutover [--dir|-d <path>]` - Verify drain completion plus old marker/log replay safety, switch new DB to `ready`, and remove replay-only tables.
 - `mig cleanup-old [--dir|-d <path>]` - Optional cleanup of old DB migration tables (`_migration_marker`, `_migration_log`).
 - `mig reset [--dir|-d <path>]` - Reset failed/aborted migration artifacts (old marker/log cleanup + delete non-ready inferred new DB).
 - `mig status [--dir|-d <path>]` - Show marker/status state and migration counters for operational visibility.

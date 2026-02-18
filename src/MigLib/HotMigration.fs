@@ -798,7 +798,7 @@ let private readTableInfoRows
           rows.Add
             { name = reader.GetString 1
               declaredType = if reader.IsDBNull 2 then "" else reader.GetString 2
-              isNotNull = reader.GetInt32(3) = 1
+              isNotNull = reader.GetInt32 3 = 1
               defaultSql = if reader.IsDBNull 4 then None else Some(reader.GetString 4)
               primaryKeyOrder = reader.GetInt32 5 }
         else
@@ -1995,6 +1995,92 @@ let runResetMigration (oldDbPath: string) (newDbPath: string) : Task<Result<Rese
     | ex -> return Error(toSqliteError ex.Message)
   }
 
+let private ensureOldStateSafeForCutover (oldDbPath: string) (newDbPath: string) : Task<Result<unit, SqliteException>> =
+  task {
+    try
+      if not (File.Exists oldDbPath) then
+        return Error(toSqliteError $"Old database was not found: {oldDbPath}")
+      elif not (File.Exists newDbPath) then
+        return Error(toSqliteError $"New database was not found: {newDbPath}")
+      else
+        use newConnection = new SqliteConnection($"Data Source={newDbPath}")
+        do! newConnection.OpenAsync()
+
+        let! newMigrationStatus = readMarkerStatus newConnection None "_migration_status"
+
+        let newIsMigrating =
+          newMigrationStatus
+          |> Option.exists (fun status -> status.Equals("migrating", StringComparison.OrdinalIgnoreCase))
+
+        if not newIsMigrating then
+          return Ok()
+        else
+          let! progress = readMigrationProgress newConnection None
+
+          match progress with
+          | None ->
+            return
+              Error(
+                toSqliteError
+                  "_migration_progress is missing in the new database. Run `mig drain` before `mig cutover`."
+              )
+          | Some progressRow when not progressRow.drainCompleted ->
+            return
+              Error(
+                toSqliteError
+                  "Drain is not complete. Pending replay entries still exist. Run `mig drain` again before `mig cutover`."
+              )
+          | Some progressRow ->
+            use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
+            do! oldConnection.OpenAsync()
+
+            let! oldMarkerStatus = readMarkerStatus oldConnection None "_migration_marker"
+            let! hasMigrationLog = tableExists oldConnection None "_migration_log"
+
+            if not hasMigrationLog then
+              return
+                Error(
+                  toSqliteError
+                    "Cutover blocked: _migration_log is missing in the old database. Replay divergence risk cannot be ruled out."
+                )
+            else
+              match oldMarkerStatus with
+              | None ->
+                return
+                  Error(
+                    toSqliteError
+                      "Cutover blocked: _migration_marker is missing in the old database. Replay divergence risk cannot be ruled out."
+                  )
+              | Some markerStatus when markerStatus.Equals("recording", StringComparison.OrdinalIgnoreCase) ->
+                return
+                  Error(
+                    toSqliteError
+                      "Cutover blocked: old marker status is recording, so new writes may still be accumulating in _migration_log. Run `mig drain` again before `mig cutover`."
+                  )
+              | Some markerStatus when markerStatus.Equals("draining", StringComparison.OrdinalIgnoreCase) ->
+                let! pendingEntries = countPendingLogEntries oldConnection None progressRow.lastReplayedLogId
+
+                if pendingEntries > 0L then
+                  let entryNoun = if pendingEntries = 1L then "entry" else "entries"
+
+                  return
+                    Error(
+                      toSqliteError
+                        $"Cutover blocked: old _migration_log has {pendingEntries} unreplayed {entryNoun} beyond checkpoint {progressRow.lastReplayedLogId}. Run `mig drain` again before `mig cutover`."
+                    )
+                else
+                  return Ok()
+              | Some markerStatus ->
+                return
+                  Error(
+                    toSqliteError
+                      $"Cutover blocked: old marker status is '{markerStatus}'. Expected 'draining' before cutover to avoid replay divergence."
+                  )
+    with
+    | :? SqliteException as ex -> return Error ex
+    | ex -> return Error(toSqliteError ex.Message)
+  }
+
 let runCutover (newDbPath: string) : Task<Result<CutoverResult, SqliteException>> =
   task {
     try
@@ -2098,4 +2184,13 @@ let runCutover (newDbPath: string) : Task<Result<CutoverResult, SqliteException>
     with
     | :? SqliteException as ex -> return Error ex
     | ex -> return Error(toSqliteError ex.Message)
+  }
+
+let runCutoverWithOldSafety (oldDbPath: string) (newDbPath: string) : Task<Result<CutoverResult, SqliteException>> =
+  task {
+    let! safetyCheck = ensureOldStateSafeForCutover oldDbPath newDbPath
+
+    match safetyCheck with
+    | Error ex -> return Error ex
+    | Ok() -> return! runCutover newDbPath
   }

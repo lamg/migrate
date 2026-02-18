@@ -475,7 +475,15 @@ let cutover (args: ParseResults<CutoverArgs>) =
       eprintfn $"cutover failed: {message}"
       1
     | Ok newDb ->
-      match runCutover newDb |> fun t -> t.Result with
+      let oldResult =
+        inferOldDbFromCurrentDirectory currentDirectory directoryName (Some newDb)
+
+      let cutoverResult =
+        match oldResult with
+        | Ok oldDb -> runCutoverWithOldSafety oldDb newDb |> fun t -> t.Result
+        | Error _ -> runCutover newDb |> fun t -> t.Result
+
+      match cutoverResult with
       | Ok result ->
         let droppedIdMapping = if result.idMappingDropped then "yes" else "no"
 

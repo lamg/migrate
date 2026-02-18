@@ -256,10 +256,16 @@ src/
 - **Reset execution implemented**: `MigLib.HotMigration.runResetMigration` now drops old migration tables (`_migration_marker`, `_migration_log`) and deletes non-ready inferred new DB files.
 - **Coverage and docs aligned**: CLI integration tests now cover `reset` help/success/ready-guard flows; README/spec/runbook now document reset usage.
 
+## Update (2026-02-18, pre-cutover old-state safety guard)
+
+- **Guarded cutover API added**: `MigLib.HotMigration.runCutoverWithOldSafety` now validates old/new migration state before delegating to `runCutover`.
+- **Divergence-risk checks added**: cutover now blocks (while new DB is `migrating`) when old marker is missing/non-`draining`/`recording`, when `_migration_log` is missing, or when old log entries exist beyond `_migration_progress.last_replayed_log_id`.
+- **CLI wiring added**: `mig cutover` now uses the guarded path whenever old DB inference succeeds in deterministic directory mode.
+- **Coverage added**: CLI integration tests now validate cutover rejection for both `recording` marker-state risk and unreplayed old-log entries beyond the replay checkpoint.
+
 ## What's next
 
-1. Add a pre-cutover safety check that blocks when old DB marker/log state indicates replay divergence risk.
-2. Add a `mig reset --dry-run` mode to inspect reset impact before mutating old/new artifacts.
+1. Add a `mig reset --dry-run` mode to inspect reset impact before mutating old/new artifacts.
 
 ## Completed next-step items
 
@@ -294,3 +300,4 @@ src/
 28. Migrate failure recovery snapshot and rerun guidance output
 29. Trigger runtime validation coverage for drain replay and post-cutover writes
 30. Migration reset command (`mig reset`) for failed/aborted attempts
+31. Pre-cutover old-state safety guard for replay-divergence risk

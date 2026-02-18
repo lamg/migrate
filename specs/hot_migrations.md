@@ -84,7 +84,7 @@ Only writes are unavailable between drain and cutover. This window depends on ho
 
 ### Phase 3: Cutover (`mig cutover`)
 
-1. `mig` verifies that drain is complete (`_migration_log` fully consumed)
+1. `mig` verifies that drain is complete (new checkpoint reports `drain_completed=1`) and re-checks old-db replay safety (`_migration_marker='draining'`, `_migration_log` present, no entries beyond checkpoint)
 2. `mig` drops replay-only tables (`_id_mapping`, `_migration_progress`) from the new database
 3. `mig` updates `_migration_status` to 'ready' in the new database
 4. MigLib in the new service detects the status change and starts serving

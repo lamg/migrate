@@ -1872,6 +1872,121 @@ type Student = {{ id: int64; name: string }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
+let ``cli cutover blocks when old marker indicates replay divergence risk`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_cutover_divergence_marker_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+
+  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  oldConn.Open()
+
+  [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, oldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  use newConn = new SqliteConnection($"Data Source={newDbPath}")
+  newConn.Open()
+
+  [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');"
+    "CREATE TABLE _migration_progress(id INTEGER PRIMARY KEY CHECK (id = 0), last_replayed_log_id INTEGER NOT NULL, drain_completed INTEGER NOT NULL);"
+    "INSERT INTO _migration_progress(id, last_replayed_log_id, drain_completed) VALUES (0, 0, 1);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, newConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  oldConn.Close()
+  newConn.Close()
+
+  let exitCode, stdOut, stdErr = runMigCli [ "cutover"; "-d"; tempDir ]
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("cutover failed: Cutover blocked: old marker status is recording", stdErr)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli cutover blocks when old migration log has unreplayed entries beyond checkpoint`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_cutover_divergence_pending_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+
+  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  oldConn.Open()
+
+  [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'draining');"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);"
+    "INSERT INTO _migration_log(txn_id, ordering, operation, table_name, row_data) VALUES (1, 1, 'insert', 'student', '{\"id\":1,\"name\":\"Alice\"}');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, oldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  use newConn = new SqliteConnection($"Data Source={newDbPath}")
+  newConn.Open()
+
+  [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');"
+    "CREATE TABLE _migration_progress(id INTEGER PRIMARY KEY CHECK (id = 0), last_replayed_log_id INTEGER NOT NULL, drain_completed INTEGER NOT NULL);"
+    "INSERT INTO _migration_progress(id, last_replayed_log_id, drain_completed) VALUES (0, 0, 1);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, newConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  oldConn.Close()
+  newConn.Close()
+
+  let exitCode, stdOut, stdErr = runMigCli [ "cutover"; "-d"; tempDir ]
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("cutover failed: Cutover blocked: old _migration_log has 1 unreplayed entry", stdErr)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
 let ``cli drain reports missing schema script clearly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_drain_missing_schema_{Guid.NewGuid()}")
