@@ -1807,6 +1807,44 @@ let ``cli drain reports missing schema script clearly`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
+let ``cli drain reports non-deterministic old database names clearly`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_drain_bad_old_name_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let nonDeterministicOldPath = Path.Combine(tempDir, "old.sqlite")
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  use oldConn = new SqliteConnection($"Data Source={nonDeterministicOldPath}")
+  oldConn.Open()
+  oldConn.Close()
+
+  let exitCode, stdOut, stdErr = runMigCli [ "drain"; "-d"; tempDir ]
+  let dirName = DirectoryInfo(tempDir).Name
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+
+  Assert.Contains("drain failed: Could not infer old database automatically.", stdErr)
+  Assert.Contains($"do not match '{dirName}-<old-hash>.sqlite'", stdErr)
+  Assert.Contains(nonDeterministicOldPath, stdErr)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
 let ``cli cleanup-old prints dropped table summary`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_cleanup_old_success_{Guid.NewGuid()}")

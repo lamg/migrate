@@ -148,11 +148,13 @@ let private inferOldDbFromCurrentDirectory
     | Some excludedPath -> path.Equals(excludedPath, StringComparison.OrdinalIgnoreCase)
     | None -> false
 
-  let candidates =
-    Directory.GetFiles(currentDirectory, $"{directoryName}-*.sqlite")
-    |> Array.filter (isDirectoryHashNamedSqlite directoryName)
+  let sqliteFiles =
+    Directory.GetFiles(currentDirectory, "*.sqlite")
     |> Array.filter (fun path -> not (shouldExclude path))
     |> Array.sort
+
+  let candidates =
+    sqliteFiles |> Array.filter (isDirectoryHashNamedSqlite directoryName)
 
   if candidates.Length = 1 then
     Ok candidates[0]
@@ -161,6 +163,12 @@ let private inferOldDbFromCurrentDirectory
 
     Error(
       $"Could not infer old database automatically. Found multiple candidates matching '{directoryName}-<old-hash>.sqlite': {candidateList}."
+    )
+  elif sqliteFiles.Length > 0 then
+    let discoveredList = String.concat ", " sqliteFiles
+
+    Error(
+      $"Could not infer old database automatically. Found sqlite files that do not match '{directoryName}-<old-hash>.sqlite': {discoveredList}."
     )
   else
     Error(

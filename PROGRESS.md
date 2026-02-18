@@ -204,9 +204,15 @@ src/
 - **Error clarity improved**: commands that depend on schema inference now return explicit `Schema script was not found: <path>` messaging.
 - **Coverage added**: CLI integration test validates missing-schema failure path for `mig drain`.
 
+## Update (2026-02-18, old DB candidate naming preflight)
+
+- **Old DB inference diagnostics improved**: when `.sqlite` files exist but do not follow `<dir>-<old-hash>.sqlite`, commands now report the discovered non-conforming files explicitly.
+- **Error clarity improved**: old-source inference failures now distinguish between `no sqlite files found` and `sqlite files found but invalid naming contract`.
+- **Coverage added**: CLI integration test validates `mig drain` failure messaging for non-deterministic old DB filenames.
+
 ## What's next
 
-1. Evaluate whether we should add equivalent preflight checks for missing old DB candidates before attempting command-specific work.
+1. Evaluate whether status output should include the inferred directory root explicitly (`Dir: <path>`) for multi-project shell workflows.
 
 ## Completed next-step items
 
@@ -233,3 +239,4 @@ src/
 20. Old/new CLI flag removal + shared `--dir` override
 21. Schema argument removal (`mig migrate --schema`)
 22. Schema preflight validation for deterministic pathing
+23. Old DB candidate naming preflight diagnostics
