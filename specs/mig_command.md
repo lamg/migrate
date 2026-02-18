@@ -48,6 +48,9 @@ When services are deployed, the administrator uses three required commands plus 
 mig migrate --old old.db --schema schema.fsx [--new new.db]
 ```
 
+If `--new` is omitted, `mig` derives a deterministic target path in the old DB directory:
+`<old-file-name>-<schema-hash><ext>`.
+
 1. Evaluates `schema.fsx` and derives the new schema via reflection
 2. Creates the new SQLite file with the new schema, `_id_mapping`, and `_migration_status(status='migrating')`
 3. Writes `_migration_marker(status='recording')` and `_migration_log` to the old database

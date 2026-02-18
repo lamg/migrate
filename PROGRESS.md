@@ -138,6 +138,13 @@ src/
 - **Rollback notes added**: runbook now captures practical rollback guidance before and after cutover/cleanup to reduce operator ambiguity.
 - **README linked**: root README now includes the runbook in the specs section.
 
+## Update (2026-02-18, deterministic migrate pathing)
+
+- **Deterministic default new DB path added**: when `mig migrate` is called without `--new`, the CLI now derives `<old-file-name>-<schema-hash><ext>` in the old DB directory.
+- **Schema hash output added**: migrate now prints the derived schema hash whenever deterministic pathing is used.
+- **Coverage added**: CLI integration test now validates deterministic path derivation + successful migrate execution without `--new`.
+- **Docs aligned**: README/specs/runbook now describe deterministic default path behavior for `mig migrate`.
+
 ## What's next
 
 1. Add CLI integration coverage for argument-parser help/usage output (root `--help` and subcommand `--help`).
@@ -157,3 +164,4 @@ src/
 10. CLI integration tests for `mig` output/error paths (status, cutover, cleanup-old)
 11. Refresh root README to current command surface
 12. End-to-end operator runbook with preflight/rollback notes
+13. Deterministic default new DB path from schema hash

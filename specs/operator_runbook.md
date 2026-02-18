@@ -22,6 +22,9 @@ This runbook describes how to execute and validate a hot migration using the cur
 mig migrate --old old.db --schema schema.fsx --new new.db
 ```
 
+Note: if `--new` is omitted, `mig` derives a deterministic path:
+`<old-file-name>-<schema-hash><ext>` in the old DB directory.
+
 Expected outcomes:
 
 - `new.db` exists and contains the new schema

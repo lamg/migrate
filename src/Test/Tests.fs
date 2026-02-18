@@ -2,6 +2,8 @@ module Tests
 
 open System
 open System.IO
+open System.Security.Cryptography
+open System.Text
 open System.Text.Json.Nodes
 open MigLib.Db
 open MigLib.CodeGen.CodeGen
@@ -64,6 +66,33 @@ let private runMigCli (args: string list) =
     finally
       Console.SetOut originalOut
       Console.SetError originalErr)
+
+let private deriveDeterministicNewDbPathFromSchema (oldDbPath: string) (schemaPath: string) =
+  let normalizeLineEndings (text: string) =
+    text.Replace("\r\n", "\n").Replace("\r", "\n")
+
+  let normalizedSchema = File.ReadAllText(schemaPath) |> normalizeLineEndings
+  use sha256 = SHA256.Create()
+  let schemaBytes = Encoding.UTF8.GetBytes normalizedSchema
+  let hashBytes = sha256.ComputeHash schemaBytes
+  let schemaHash = Convert.ToHexString(hashBytes).ToLowerInvariant().Substring(0, 16)
+
+  let oldFileName = Path.GetFileNameWithoutExtension oldDbPath
+  let oldExtension = Path.GetExtension oldDbPath
+
+  let extension =
+    if String.IsNullOrWhiteSpace oldExtension then
+      ".sqlite"
+    else
+      oldExtension
+
+  let deterministicFileName = $"{oldFileName}-{schemaHash}{extension}"
+  let oldDirectory = Path.GetDirectoryName oldDbPath
+
+  if String.IsNullOrWhiteSpace oldDirectory then
+    deterministicFileName
+  else
+    Path.Combine(oldDirectory, deterministicFileName)
 
 [<AutoIncPK "id">]
 [<Unique "name">]
@@ -1681,6 +1710,61 @@ let ``cli cleanup-old returns error while recording`` () =
 
   let markerExists = markerExistsCmd.ExecuteScalar()
   Assert.False(isNull markerExists)
+
+  verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli migrate derives deterministic new path from schema hash when --new is omitted`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_deterministic_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.sqlite")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+
+  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  setupOldConn.Open()
+
+  [ "PRAGMA foreign_keys = ON;"
+    "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+
+  let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema oldDbPath schemaPath
+
+  setupOldConn.Close()
+
+  let exitCode, stdOut, stdErr =
+    runMigCli [ "migrate"; "--old"; oldDbPath; "--schema"; schemaPath ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains($"New database: {expectedNewDbPath}", stdOut)
+  Assert.True(File.Exists expectedNewDbPath)
+
+  use verifyConn = new SqliteConnection($"Data Source={expectedNewDbPath}")
+  verifyConn.Open()
+  use studentCountCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
+  let studentCount = studentCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(1L, studentCount)
 
   verifyConn.Close()
   Directory.Delete(tempDir, true)

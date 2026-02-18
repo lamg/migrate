@@ -39,7 +39,8 @@ Assuming:
 - a target schema script at `schema.fsx`
 
 ```sh
-mig migrate --old old.db --schema schema.fsx --new new.db
+mig migrate --old old.db --schema schema.fsx
+# if --new is omitted, mig derives: <old-name>-<schema-hash><ext>
 mig status --old old.db --new new.db
 mig drain --old old.db --new new.db
 mig cutover --new new.db
@@ -64,7 +65,7 @@ mig cleanup-old --old old.db
 
 ## Commands
 
-- `mig migrate --old <path> --schema <path> [--new <path>]` - Create the new DB from schema, copy data, and start recording on old DB.
+- `mig migrate --old <path> --schema <path> [--new <path>]` - Create the new DB from schema, copy data, and start recording on old DB (`--new` defaults to deterministic `<old-name>-<schema-hash><ext>`).
 - `mig drain --old <path> --new <path>` - Switch old DB to draining mode and replay pending migration log entries.
 - `mig cutover --new <path>` - Verify drain completion, switch new DB to `ready`, and remove replay-only tables.
 - `mig cleanup-old --old <path>` - Optional cleanup of old DB migration tables (`_migration_marker`, `_migration_log`).
