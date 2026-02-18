@@ -324,6 +324,11 @@ type TaskTxnBuilder(dbPath: string) =
 
   member _.Return(x: 'a) : SqliteTransaction -> Task<Result<'a, SqliteException>> = fun _ -> Task.FromResult(Ok x)
 
+  member _.ReturnFrom
+    (m: SqliteTransaction -> Task<Result<'a, SqliteException>>)
+    : SqliteTransaction -> Task<Result<'a, SqliteException>> =
+    m
+
   member _.Bind
     (
       m: SqliteTransaction -> Task<Result<'a, SqliteException>>,

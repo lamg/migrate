@@ -272,7 +272,53 @@ src/
 
 ## What's next
 
-1. No pending plan items.
+1. Start the professionalization roadmap (v1.0 baseline first).
+
+## Future development opportunities (professionalization)
+
+| Future development | Essentiality for professional tool | Why it matters |
+|---|---|---|
+| `mig verify` command (row counts, FK integrity, optional checksums) | Essential | Confirms old/new data equivalence before cutover. |
+| Global migration lock (prevent concurrent `migrate`/`drain`/`cutover`/`reset`) | Essential | Prevents race conditions and inconsistent state transitions. |
+| Crash-safe resume for interrupted operations | Essential | Makes long-running operations robust under failures/restarts. |
+| Structured output mode (`--json`) for all commands | Essential | Enables CI/CD and automation integrations. |
+| Stable and documented exit code contract | Essential | Makes scripting and alerting reliable. |
+| Operation audit artifact (inputs, plan, result, timestamps) | Essential | Supports traceability, compliance, and incident analysis. |
+| Backup/snapshot preflight enforcement hook | Essential | Improves operational safety before destructive transitions. |
+| Performance tuning knobs (batch sizes, chunking, PRAGMAs) | Important | Needed for large datasets and predictable migration runtimes. |
+| Post-cutover rollback assistant/checklist command | Important | Reduces operator error during recovery scenarios. |
+| Service/schema compatibility gate via `_schema_identity` | Important | Prevents service rollout against incompatible database state. |
+| Metrics export (throughput, lag, durations, failures) | Important | Improves observability and capacity planning. |
+| Dry-run modes for `drain` and `cutover` | Important | Extends no-side-effect safety checks beyond plan/reset. |
+| Optional interactive confirmations for risky actions | Nice-to-have | Better UX for manual operators. |
+| Live progress/TUI view for long operations | Nice-to-have | Better operator ergonomics, not core correctness. |
+| Multi-database orchestration support | Nice-to-have | Useful for fleet-scale operations, not baseline reliability. |
+
+## Proposed roadmap
+
+### v1.0 Professional baseline
+
+1. `mig verify`
+2. Global migration lock
+3. Crash-safe resume/restart behavior
+4. `--json` output across commands
+5. Stable exit code contract
+6. Audit artifact per run
+7. Backup/snapshot preflight enforcement hook
+
+### v1.1 Production scale hardening
+
+1. Performance tuning knobs
+2. Service/schema compatibility gate (`_schema_identity`)
+3. Metrics export
+4. Dry-run support for `drain` and `cutover`
+
+### v1.2 Operator experience
+
+1. Rollback assistant command/checklist
+2. Optional interactive confirmations
+3. Live progress/TUI view
+4. Multi-database orchestration
 
 ## Completed next-step items
 
