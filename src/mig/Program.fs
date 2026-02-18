@@ -11,7 +11,6 @@ open MigLib.HotMigration
 type MigrateArgs =
   | Old of path: string
   | Schema of path: string
-  | Schema_Commit of value: string
   | New of path: string
 
   interface IArgParserTemplate with
@@ -19,7 +18,6 @@ type MigrateArgs =
       match this with
       | Old _ -> "path to the old database (default: auto-detect <dir>-<old-hash>.sqlite in current directory)"
       | Schema _ -> "path to the .fsx schema file (default: ./schema.fsx)"
-      | Schema_Commit _ -> "optional schema commit metadata (default: MIG_SCHEMA_COMMIT env var when set)"
       | New _ -> "path for the new database (default: ./<dir>-<schema-hash>.sqlite)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
@@ -105,19 +103,6 @@ let migrate (args: ParseResults<MigrateArgs>) =
     args.TryGetResult MigrateArgs.Schema
     |> Option.defaultValue (Path.Combine(currentDirectory, "schema.fsx"))
 
-  let schemaCommit =
-    let fromArg = args.TryGetResult MigrateArgs.Schema_Commit
-
-    match fromArg with
-    | Some commitValue when not (String.IsNullOrWhiteSpace commitValue) -> Some commitValue
-    | _ ->
-      let fromEnvironment = Environment.GetEnvironmentVariable "MIG_SCHEMA_COMMIT"
-
-      if isNull fromEnvironment || String.IsNullOrWhiteSpace fromEnvironment then
-        None
-      else
-        Some fromEnvironment
-
   let schemaHashResult =
     try
       let normalizedSchema = File.ReadAllText schemaPath |> normalizeLineEndings
@@ -175,10 +160,7 @@ let migrate (args: ParseResults<MigrateArgs>) =
       printfn $"Database already present for current schema: {newDb}"
       0
     | Ok(Some old) ->
-      match
-        runMigrateWithSchemaCommit old schemaPath newDb schemaCommit
-        |> fun t -> t.Result
-      with
+      match runMigrate old schemaPath newDb |> fun t -> t.Result with
       | Ok result ->
         printfn "Migrate complete."
         printfn $"Old database: {old}"

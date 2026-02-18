@@ -19,7 +19,7 @@ This runbook describes how to execute and validate a hot migration using the cur
 ## Phase 1: Migrate
 
 ```sh
-mig migrate [--old old.db] [--schema schema.fsx] [--schema-commit <value>] [--new new.db]
+mig migrate [--old old.db] [--schema schema.fsx] [--new new.db]
 ```
 
 Default no-flag mode (`mig migrate` from project directory):
@@ -30,8 +30,7 @@ Default no-flag mode (`mig migrate` from project directory):
 
 Optional metadata:
 
-- `--schema-commit` stores deployment/source commit metadata in `_schema_identity.schema_commit`
-- if omitted, `MIG_SCHEMA_COMMIT` is used when present
+- `mig migrate` stores git `HEAD` commit metadata automatically in `_schema_identity.schema_commit` when the schema path is inside a git repository
 
 Expected outcomes:
 

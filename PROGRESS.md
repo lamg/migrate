@@ -156,17 +156,16 @@ src/
 
 - **Schema identity table added**: new DB initialization now creates `_schema_identity(id=0, schema_hash, schema_commit, created_utc)` during `runMigrate`.
 - **Schema hash persistence added**: migrate computes a normalized-content schema hash and writes it to `_schema_identity`.
-- **Optional commit metadata added**: migrate records `schema_commit` when `MIG_SCHEMA_COMMIT` is set in the environment.
+- **Optional commit metadata added**: migrate records `schema_commit` when the schema path resolves inside a git repository.
 - **Status exposure added**: `getStatus` now reads schema identity metadata and `mig status --new` prints schema hash/commit when available.
 - **Coverage added**: tests now validate schema identity in status reporting, CLI status output, and migrate initialization of `_schema_identity`.
 - **Docs aligned**: specs/runbook now include `_schema_identity` in new DB migration metadata.
 
-## Update (2026-02-18, schema commit source contract)
+## Update (2026-02-18, schema commit auto-detection)
 
-- **Explicit CLI metadata input added**: `mig migrate` now accepts `--schema-commit <value>` for deterministic schema commit recording.
-- **Fallback contract retained**: when `--schema-commit` is omitted, migrate reads `MIG_SCHEMA_COMMIT` if present.
-- **API split added**: MigLib now exposes `runMigrateWithSchemaCommit` while preserving `runMigrate` for existing callers.
-- **Coverage added**: CLI integration test now validates commit metadata persistence into `_schema_identity.schema_commit`.
+- **Automatic git commit detection added**: `runMigrate` now resolves commit metadata from `git rev-parse HEAD` at the schema path directory.
+- **Manual metadata input removed**: migrate no longer accepts a manual schema-commit argument/configuration.
+- **Coverage added**: CLI integration test validates automatic commit metadata persistence into `_schema_identity.schema_commit`.
 
 ## What's next
 
@@ -190,4 +189,4 @@ src/
 13. Deterministic default new DB path from schema hash
 14. CLI integration coverage for argument-parser help/usage output
 15. Schema identity metadata table + status exposure
-16. Schema commit source contract (`--schema-commit` + env fallback)
+16. Schema commit auto-detection (git `HEAD` from schema path)

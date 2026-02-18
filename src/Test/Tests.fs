@@ -1,6 +1,7 @@
 module Tests
 
 open System
+open System.Diagnostics
 open System.IO
 open System.Security.Cryptography
 open System.Text
@@ -89,6 +90,52 @@ let private deriveDeterministicNewDbPathFromSchema (directoryPath: string) (sche
   let schemaHash = deriveShortSchemaHashFromScript schemaPath
   let directoryName = DirectoryInfo(directoryPath).Name
   Path.Combine(directoryPath, $"{directoryName}-{schemaHash}.sqlite")
+
+let private findGitRootOrFail (startDirectory: string) =
+  let rec loop (currentDirectory: string) =
+    if Directory.Exists(Path.Combine(currentDirectory, ".git")) then
+      Some currentDirectory
+    else
+      let parent = Directory.GetParent currentDirectory
+
+      if isNull parent then None else loop parent.FullName
+
+  match loop startDirectory with
+  | Some gitRoot -> gitRoot
+  | None -> failwith $"Could not locate git repository root from: {startDirectory}"
+
+let private gitHeadCommitOrFail (repositoryDirectory: string) =
+  let startInfo = ProcessStartInfo()
+  startInfo.FileName <- "git"
+  startInfo.UseShellExecute <- false
+  startInfo.RedirectStandardOutput <- true
+  startInfo.RedirectStandardError <- true
+  startInfo.CreateNoWindow <- true
+  startInfo.ArgumentList.Add "-C"
+  startInfo.ArgumentList.Add repositoryDirectory
+  startInfo.ArgumentList.Add "rev-parse"
+  startInfo.ArgumentList.Add "HEAD"
+
+  use proc = Process.Start startInfo
+
+  if isNull proc then
+    failwith "Could not start git process to resolve HEAD commit."
+  else
+    let output = proc.StandardOutput.ReadToEnd()
+    let errorOutput = proc.StandardError.ReadToEnd()
+    let exited = proc.WaitForExit 2000
+
+    if not exited then
+      failwith "git rev-parse HEAD timed out."
+    elif proc.ExitCode <> 0 then
+      failwith $"git rev-parse HEAD failed: {errorOutput}"
+    else
+      let commit = output.Trim()
+
+      if String.IsNullOrWhiteSpace commit then
+        failwith "git rev-parse HEAD returned an empty commit hash."
+      else
+        commit
 
 let private assertCliHelpOutput (args: string list) (expectedUsage: string) (expectedFragments: string list) =
   let exitCode, stdOut, stdErr = runMigCli args
@@ -1626,7 +1673,7 @@ let ``cli subcommand help shows usage and options`` () =
   let cases: (string list * string * string list) list =
     [ ([ "migrate"; "--help" ],
        "USAGE: mig migrate [--help] [--old <path>] [--schema <path>]",
-       [ "--old <path>"; "--schema <path>"; "--schema-commit <value>"; "--new <path>" ])
+       [ "--old <path>"; "--schema <path>"; "--new <path>" ])
       ([ "drain"; "--help" ], "USAGE: mig drain [--help] --old <path> --new <path>", [ "--old <path>"; "--new <path>" ])
       ([ "cutover"; "--help" ], "USAGE: mig cutover [--help] --new <path>", [ "--new <path>" ])
       ([ "cleanup-old"; "--help" ], "USAGE: mig cleanup-old [--help] --old <path>", [ "--old <path>" ])
@@ -1820,16 +1867,21 @@ type Student = {{ id: int64; name: string }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli migrate stores schema commit metadata when provided`` () =
+let ``cli migrate stores schema commit metadata automatically`` () =
+  let gitRoot = findGitRootOrFail (Directory.GetCurrentDirectory())
+  let repoHeadCommit = gitHeadCommitOrFail gitRoot
+
+  let tempRoot = Path.Combine(gitRoot, ".tmp_mig_tests")
+  Directory.CreateDirectory tempRoot |> ignore
+
   let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_schema_commit_{Guid.NewGuid()}")
+    Path.Combine(tempRoot, $"mig_cli_migrate_schema_commit_auto_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-1111222233334444.sqlite")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
-  let schemaCommit = "deadbeefcafebabe"
 
   use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
   setupOldConn.Open()
@@ -1858,15 +1910,7 @@ type Student = {{ id: int64; name: string }}
   setupOldConn.Close()
 
   let exitCode, stdOut, stdErr =
-    runMigCliInDirectory
-      (Some tempDir)
-      [ "migrate"
-        "--old"
-        oldDbPath
-        "--schema"
-        schemaPath
-        "--schema-commit"
-        schemaCommit ]
+    runMigCliInDirectory (Some tempDir) [ "migrate"; "--old"; oldDbPath; "--schema"; schemaPath ]
 
   Assert.Equal(0, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
@@ -1879,7 +1923,7 @@ type Student = {{ id: int64; name: string }}
     new SqliteCommand("SELECT schema_commit FROM _schema_identity WHERE id = 0", verifyConn)
 
   let storedSchemaCommit = schemaIdentityCmd.ExecuteScalar() |> string
-  Assert.Equal(schemaCommit, storedSchemaCommit)
+  Assert.Equal(repoHeadCommit, storedSchemaCommit)
 
   verifyConn.Close()
   Directory.Delete(tempDir, true)

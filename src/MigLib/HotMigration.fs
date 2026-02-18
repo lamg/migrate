@@ -2,6 +2,7 @@ module MigLib.HotMigration
 
 open System
 open System.Collections.Generic
+open System.Diagnostics
 open System.Globalization
 open System.IO
 open System.Security.Cryptography
@@ -104,6 +105,46 @@ let private computeSchemaHashFromScriptPath (schemaPath: string) : Result<string
     Ok(Convert.ToHexString(hashBytes).ToLowerInvariant().Substring(0, 16))
   with ex ->
     Error(toSqliteError $"Could not compute schema hash from script '{schemaPath}': {ex.Message}")
+
+let private tryResolveSchemaCommitFromGit (schemaPath: string) : string option =
+  try
+    let fullSchemaPath = Path.GetFullPath schemaPath
+    let schemaDirectory = Path.GetDirectoryName fullSchemaPath
+
+    if String.IsNullOrWhiteSpace schemaDirectory then
+      None
+    else
+      let startInfo = ProcessStartInfo()
+      startInfo.FileName <- "git"
+      startInfo.UseShellExecute <- false
+      startInfo.RedirectStandardOutput <- true
+      startInfo.RedirectStandardError <- true
+      startInfo.CreateNoWindow <- true
+      startInfo.ArgumentList.Add "-C"
+      startInfo.ArgumentList.Add schemaDirectory
+      startInfo.ArgumentList.Add "rev-parse"
+      startInfo.ArgumentList.Add "HEAD"
+
+      use proc = Process.Start startInfo
+
+      if isNull proc then
+        None
+      else
+        let output = proc.StandardOutput.ReadToEnd()
+        let _ = proc.StandardError.ReadToEnd()
+        let exited = proc.WaitForExit 2000
+
+        if exited && proc.ExitCode = 0 then
+          let commit = output.Trim()
+
+          if String.IsNullOrWhiteSpace commit then
+            None
+          else
+            Some commit
+        else
+          None
+  with _ ->
+    None
 
 let private exprToInt64 (expr: Expr) : int64 option =
   match expr with
@@ -1231,7 +1272,7 @@ let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<Migra
     | ex -> return Error(toSqliteError ex.Message)
   }
 
-let runMigrateWithSchemaCommit
+let private runMigrateInternal
   (oldDbPath: string)
   (schemaPath: string)
   (newDbPath: string)
@@ -1311,7 +1352,8 @@ let runMigrate
   (schemaPath: string)
   (newDbPath: string)
   : Task<Result<MigrateResult, SqliteException>> =
-  runMigrateWithSchemaCommit oldDbPath schemaPath newDbPath None
+  let schemaCommit = tryResolveSchemaCommitFromGit schemaPath
+  runMigrateInternal oldDbPath schemaPath newDbPath schemaCommit
 
 let runDrain (oldDbPath: string) (newDbPath: string) : Task<Result<DrainResult, SqliteException>> =
   task {

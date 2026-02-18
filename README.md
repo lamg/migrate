@@ -71,7 +71,7 @@ mig cleanup-old --old old.sqlite
 
 ## Commands
 
-- `mig migrate [--old <path>] [--schema <path>] [--schema-commit <value>] [--new <path>]` - Create the new DB from schema, copy data, and start recording on old DB (`mig migrate` defaults to current-directory auto-discovery and `./<dir>-<schema-hash>.sqlite` target naming; commit metadata defaults to `MIG_SCHEMA_COMMIT` when set).
+- `mig migrate [--old <path>] [--schema <path>] [--new <path>]` - Create the new DB from schema, copy data, and start recording on old DB (`mig migrate` defaults to current-directory auto-discovery and `./<dir>-<schema-hash>.sqlite` target naming; commit metadata is detected automatically from git).
 - `mig drain --old <path> --new <path>` - Switch old DB to draining mode and replay pending migration log entries.
 - `mig cutover --new <path>` - Verify drain completion, switch new DB to `ready`, and remove replay-only tables.
 - `mig cleanup-old --old <path>` - Optional cleanup of old DB migration tables (`_migration_marker`, `_migration_log`).
