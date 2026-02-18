@@ -105,7 +105,7 @@ let migrate (args: ParseResults<MigrateArgs>) =
 
   let schemaHashResult =
     try
-      let normalizedSchema = File.ReadAllText(schemaPath) |> normalizeLineEndings
+      let normalizedSchema = File.ReadAllText schemaPath |> normalizeLineEndings
       use sha256 = SHA256.Create()
       let schemaBytes = Encoding.UTF8.GetBytes normalizedSchema
       let hashBytes = sha256.ComputeHash schemaBytes
@@ -267,6 +267,15 @@ let status (args: ParseResults<StatusArgs>) =
 
       printfn $"New database: {newPath}"
       printfn $"Migration status: {migrationStatus}"
+
+      match report.schemaIdentityHash with
+      | Some schemaHash -> printfn $"Schema hash: {schemaHash}"
+      | None -> ()
+
+      match report.schemaIdentityCommit with
+      | Some schemaCommit -> printfn $"Schema commit: {schemaCommit}"
+      | None -> ()
+
       printfn $"Pending replay entries: {pendingReplayText}"
 
       match report.idMappingTablePresent, report.idMappingEntries with

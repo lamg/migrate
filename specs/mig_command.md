@@ -18,6 +18,7 @@ They communicate through marker tables in the databases:
   - `status = 'migrating'` → MigLib rejects all requests
   - `status = 'ready'` → MigLib starts serving
 - `_migration_progress` in the **new database**: replay checkpoint state for drain safety and status reporting
+- `_schema_identity` in the **new database**: persisted schema metadata (`schema_hash`, optional `schema_commit`, creation timestamp)
 
 ## Offline mode
 
@@ -57,7 +58,7 @@ Default behavior when run as `mig migrate` from a project directory:
 If the schema-matched target database already exists and no source candidate is found, migrate is skipped as a no-op.
 
 1. Evaluates `schema.fsx` and derives the new schema via reflection
-2. Creates the new SQLite file with the new schema, `_id_mapping`, and `_migration_status(status='migrating')`
+2. Creates the new SQLite file with the new schema, `_id_mapping`, `_migration_status(status='migrating')`, and `_schema_identity`
 3. Writes `_migration_marker(status='recording')` and `_migration_log` to the old database
 4. MigLib in the old service detects the marker and begins recording all writes to `_migration_log` at the `taskTxn` CE level
 5. Bulk-copies data from old to new in FK dependency order, building `_id_mapping`
@@ -124,6 +125,7 @@ Shows the current migration state:
 - `_id_mapping` state (entry count or removed)
 - `_migration_progress` state (present or removed)
 - Migration status in new database (migrating, ready)
+- Schema identity in new database (schema hash and optional schema commit)
 
 ## MigLib behavior
 

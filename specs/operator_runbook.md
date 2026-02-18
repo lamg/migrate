@@ -46,6 +46,7 @@ Check that:
 - marker status is `recording`
 - migration log entries are reported
 - migration status is `migrating`
+- schema hash is reported for the new database
 
 ## Deploy New Service (Still Blocked)
 

@@ -4,6 +4,8 @@ open System
 open System.Collections.Generic
 open System.Globalization
 open System.IO
+open System.Security.Cryptography
+open System.Text
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 open MigLib.DeclarativeMigrations.DataCopy
@@ -19,7 +21,9 @@ type MigrationStatusReport =
     idMappingEntries: int64 option
     newMigrationStatus: string option
     idMappingTablePresent: bool option
-    migrationProgressTablePresent: bool option }
+    migrationProgressTablePresent: bool option
+    schemaIdentityHash: string option
+    schemaIdentityCommit: string option }
 
 type CutoverResult =
   { previousStatus: string
@@ -60,13 +64,18 @@ type private MigrationProgressRow =
   { lastReplayedLogId: int64
     drainCompleted: bool }
 
+type private SchemaIdentityRow =
+  { schemaHash: string
+    schemaCommit: string option }
+
 let private migrationTables =
   set
     [ "_migration_marker"
       "_migration_log"
       "_migration_status"
       "_migration_progress"
-      "_id_mapping" ]
+      "_id_mapping"
+      "_schema_identity" ]
 
 let private toSqliteError (message: string) = SqliteException(message, 0)
 
@@ -82,6 +91,27 @@ let private createCommand
 let private quoteIdentifier (name: string) =
   let escaped = name.Replace("\"", "\"\"")
   $"\"{escaped}\""
+
+let private normalizeLineEndings (text: string) =
+  text.Replace("\r\n", "\n").Replace("\r", "\n")
+
+let private readOptionalEnvironmentVariable (name: string) : string option =
+  let rawValue = Environment.GetEnvironmentVariable name
+
+  if isNull rawValue || String.IsNullOrWhiteSpace rawValue then
+    None
+  else
+    Some rawValue
+
+let private computeSchemaHashFromScriptPath (schemaPath: string) : Result<string, SqliteException> =
+  try
+    let normalizedSchema = File.ReadAllText schemaPath |> normalizeLineEndings
+    use sha256 = SHA256.Create()
+    let schemaBytes = Encoding.UTF8.GetBytes normalizedSchema
+    let hashBytes = sha256.ComputeHash schemaBytes
+    Ok(Convert.ToHexString(hashBytes).ToLowerInvariant().Substring(0, 16))
+  with ex ->
+    Error(toSqliteError $"Could not compute schema hash from script '{schemaPath}': {ex.Message}")
 
 let private exprToInt64 (expr: Expr) : int64 option =
   match expr with
@@ -284,6 +314,34 @@ let private upsertStatusRow
     return ()
   }
 
+let private upsertSchemaIdentity
+  (connection: SqliteConnection)
+  (transaction: SqliteTransaction option)
+  (schemaHash: string)
+  (schemaCommit: string option)
+  : Task<unit> =
+  task {
+    use cmd =
+      createCommand
+        connection
+        transaction
+        "INSERT INTO _schema_identity(id, schema_hash, schema_commit, created_utc) VALUES (0, @schema_hash, @schema_commit, @created_utc) ON CONFLICT(id) DO UPDATE SET schema_hash = excluded.schema_hash, schema_commit = excluded.schema_commit, created_utc = excluded.created_utc"
+
+    cmd.Parameters.AddWithValue("@schema_hash", schemaHash) |> ignore
+
+    let schemaCommitValue =
+      match schemaCommit with
+      | Some value -> box value
+      | None -> box DBNull.Value
+
+    cmd.Parameters.AddWithValue("@schema_commit", schemaCommitValue) |> ignore
+
+    let createdUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture)
+    cmd.Parameters.AddWithValue("@created_utc", createdUtc) |> ignore
+    let! _ = cmd.ExecuteNonQueryAsync()
+    return ()
+  }
+
 let private upsertMigrationProgress
   (connection: SqliteConnection)
   (transaction: SqliteTransaction option)
@@ -332,6 +390,34 @@ let private readMigrationProgress
           Some
             { lastReplayedLogId = reader.GetInt64 0
               drainCompleted = reader.GetInt64(1) = 1L }
+  }
+
+let private readSchemaIdentity
+  (connection: SqliteConnection)
+  (transaction: SqliteTransaction option)
+  : Task<SchemaIdentityRow option> =
+  task {
+    let! hasSchemaIdentityTable = tableExists connection transaction "_schema_identity"
+
+    if not hasSchemaIdentityTable then
+      return None
+    else
+      use rowCmd =
+        createCommand
+          connection
+          transaction
+          "SELECT schema_hash, schema_commit FROM _schema_identity WHERE id = 0 LIMIT 1"
+
+      use! reader = rowCmd.ExecuteReaderAsync()
+      let! hasRow = reader.ReadAsync()
+
+      if not hasRow then
+        return None
+      else
+        return
+          Some
+            { schemaHash = reader.GetString 0
+              schemaCommit = if reader.IsDBNull 1 then None else Some(reader.GetString 1) }
   }
 
 let private ensureMigrationProgressRow
@@ -513,7 +599,12 @@ let private setOldMarkerToDraining (oldConnection: SqliteConnection) : Task<Resu
     | ex -> return Error(toSqliteError ex.Message)
   }
 
-let private createNewMigrationTables (newConnection: SqliteConnection) (tx: SqliteTransaction) : Task<unit> =
+let private createNewMigrationTables
+  (newConnection: SqliteConnection)
+  (tx: SqliteTransaction)
+  (schemaHash: string)
+  (schemaCommit: string option)
+  : Task<unit> =
   task {
     use idMapCmd =
       createCommand
@@ -531,7 +622,16 @@ let private createNewMigrationTables (newConnection: SqliteConnection) (tx: Sqli
 
     let! _ = statusCmd.ExecuteNonQueryAsync()
 
+    use schemaIdentityCmd =
+      createCommand
+        newConnection
+        (Some tx)
+        "CREATE TABLE IF NOT EXISTS _schema_identity(id INTEGER PRIMARY KEY CHECK (id = 0), schema_hash TEXT NOT NULL, schema_commit TEXT, created_utc TEXT NOT NULL);"
+
+    let! _ = schemaIdentityCmd.ExecuteNonQueryAsync()
+
     do! upsertStatusRow newConnection (Some tx) "_migration_status" "migrating"
+    do! upsertSchemaIdentity newConnection (Some tx) schemaHash schemaCommit
     let! _ = ensureMigrationProgressRow newConnection (Some tx)
     do! upsertMigrationProgress newConnection (Some tx) 0L false
   }
@@ -539,6 +639,8 @@ let private createNewMigrationTables (newConnection: SqliteConnection) (tx: Sqli
 let private initializeNewDatabase
   (newConnection: SqliteConnection)
   (targetSchema: SqlFile)
+  (schemaHash: string)
+  (schemaCommit: string option)
   : Task<Result<unit, SqliteException>> =
   task {
     try
@@ -568,7 +670,7 @@ let private initializeNewDatabase
           let! _ = createTriggerCmd.ExecuteNonQueryAsync()
           ()
 
-      do! createNewMigrationTables newConnection tx
+      do! createNewMigrationTables newConnection tx schemaHash schemaCommit
 
       use fkOnCmd = createCommand newConnection (Some tx) "PRAGMA foreign_keys = ON;"
       let! _ = fkOnCmd.ExecuteNonQueryAsync()
@@ -1089,7 +1191,9 @@ let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<Migra
               idMappingEntries = None
               newMigrationStatus = None
               idMappingTablePresent = None
-              migrationProgressTablePresent = None }
+              migrationProgressTablePresent = None
+              schemaIdentityHash = None
+              schemaIdentityCommit = None }
       | Some newPath ->
         use newConnection = new SqliteConnection($"Data Source={newPath}")
         do! newConnection.OpenAsync()
@@ -1105,6 +1209,7 @@ let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<Migra
         let! newMigrationStatus = readMarkerStatus newConnection None "_migration_status"
         let! migrationProgressTablePresent = tableExists newConnection None "_migration_progress"
         let! progress = readMigrationProgress newConnection None
+        let! schemaIdentity = readSchemaIdentity newConnection None
 
         let isReady =
           newMigrationStatus
@@ -1126,7 +1231,9 @@ let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<Migra
               idMappingEntries = Some idMappingEntries
               newMigrationStatus = newMigrationStatus
               idMappingTablePresent = Some idMappingTablePresent
-              migrationProgressTablePresent = Some migrationProgressTablePresent }
+              migrationProgressTablePresent = Some migrationProgressTablePresent
+              schemaIdentityHash = schemaIdentity |> Option.map _.schemaHash
+              schemaIdentityCommit = schemaIdentity |> Option.bind _.schemaCommit }
     with
     | :? SqliteException as ex -> return Error ex
     | ex -> return Error(toSqliteError ex.Message)
@@ -1144,57 +1251,65 @@ let runMigrate
       elif File.Exists newDbPath then
         return Error(toSqliteError $"New database already exists: {newDbPath}")
       else
-        let! targetSchema =
-          match parseSchemaFromScript schemaPath with
-          | Ok schema -> Task.FromResult(Ok schema)
-          | Error ex -> Task.FromResult(Error ex)
+        let schemaHashResult = computeSchemaHashFromScriptPath schemaPath
 
-        match targetSchema with
+        match schemaHashResult with
         | Error ex -> return Error ex
-        | Ok expectedSchema ->
-          use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
-          do! oldConnection.OpenAsync()
+        | Ok schemaHash ->
+          let schemaCommit = readOptionalEnvironmentVariable "MIG_SCHEMA_COMMIT"
 
-          let! sourceSchemaResult = loadSchemaFromDatabase oldConnection migrationTables
+          let! targetSchema =
+            match parseSchemaFromScript schemaPath with
+            | Ok schema -> Task.FromResult(Ok schema)
+            | Error ex -> Task.FromResult(Error ex)
 
-          match sourceSchemaResult with
+          match targetSchema with
           | Error ex -> return Error ex
-          | Ok sourceSchema ->
-            let! copyPlan =
-              match buildCopyPlan sourceSchema expectedSchema with
-              | Ok plan -> Task.FromResult(Ok plan)
-              | Error ex -> Task.FromResult(Error ex)
+          | Ok expectedSchema ->
+            use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
+            do! oldConnection.OpenAsync()
 
-            match copyPlan with
+            let! sourceSchemaResult = loadSchemaFromDatabase oldConnection migrationTables
+
+            match sourceSchemaResult with
             | Error ex -> return Error ex
-            | Ok plan ->
-              let! oldSetupResult = ensureOldRecordingTables oldConnection
+            | Ok sourceSchema ->
+              let! copyPlan =
+                match buildCopyPlan sourceSchema expectedSchema with
+                | Ok plan -> Task.FromResult(Ok plan)
+                | Error ex -> Task.FromResult(Error ex)
 
-              match oldSetupResult with
+              match copyPlan with
               | Error ex -> return Error ex
-              | Ok() ->
-                let newDirectory = Path.GetDirectoryName newDbPath
+              | Ok plan ->
+                let! oldSetupResult = ensureOldRecordingTables oldConnection
 
-                if not (String.IsNullOrWhiteSpace newDirectory) then
-                  Directory.CreateDirectory newDirectory |> ignore
-
-                use newConnection = new SqliteConnection($"Data Source={newDbPath}")
-                do! newConnection.OpenAsync()
-                let! initResult = initializeNewDatabase newConnection expectedSchema
-
-                match initResult with
+                match oldSetupResult with
                 | Error ex -> return Error ex
                 | Ok() ->
-                  let! copyResult = executeBulkCopy oldConnection newConnection plan
+                  let newDirectory = Path.GetDirectoryName newDbPath
 
-                  match copyResult with
+                  if not (String.IsNullOrWhiteSpace newDirectory) then
+                    Directory.CreateDirectory newDirectory |> ignore
+
+                  use newConnection = new SqliteConnection($"Data Source={newDbPath}")
+                  do! newConnection.OpenAsync()
+
+                  let! initResult = initializeNewDatabase newConnection expectedSchema schemaHash schemaCommit
+
+                  match initResult with
                   | Error ex -> return Error ex
-                  | Ok(_, copiedRows) ->
-                    return
-                      Ok
-                        { newDbPath = newDbPath
-                          copiedTables = plan.steps.Length
-                          copiedRows = copiedRows }
+                  | Ok() ->
+                    let! copyResult = executeBulkCopy oldConnection newConnection plan
+
+                    match copyResult with
+                    | Error ex -> return Error ex
+                    | Ok(_, copiedRows) ->
+                      return
+                        Ok
+                          { newDbPath = newDbPath
+                            copiedTables = plan.steps.Length
+                            copiedRows = copiedRows }
     with
     | :? SqliteException as ex -> return Error ex
     | ex -> return Error(toSqliteError ex.Message)

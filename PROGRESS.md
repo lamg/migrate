@@ -152,9 +152,18 @@ src/
 - **Subcommand help coverage added**: integration test now validates `--help` output for `migrate`, `drain`, `cutover`, `cleanup-old`, and `status`.
 - **Parser contract locked down**: tests now enforce expected migrate usage shape with optional `--old/--schema/--new` in current auto-discovery mode.
 
+## Update (2026-02-18, schema identity metadata)
+
+- **Schema identity table added**: new DB initialization now creates `_schema_identity(id=0, schema_hash, schema_commit, created_utc)` during `runMigrate`.
+- **Schema hash persistence added**: migrate computes a normalized-content schema hash and writes it to `_schema_identity`.
+- **Optional commit metadata added**: migrate records `schema_commit` when `MIG_SCHEMA_COMMIT` is set in the environment.
+- **Status exposure added**: `getStatus` now reads schema identity metadata and `mig status --new` prints schema hash/commit when available.
+- **Coverage added**: tests now validate schema identity in status reporting, CLI status output, and migrate initialization of `_schema_identity`.
+- **Docs aligned**: specs/runbook now include `_schema_identity` in new DB migration metadata.
+
 ## What's next
 
-1. Add schema-identity metadata table in the new database (schema hash + optional commit) and expose it in `mig status`.
+1. Decide commit-source contract for schema metadata (`MIG_SCHEMA_COMMIT` env var vs explicit `mig migrate --schema-commit` option).
 
 ## Completed next-step items
 
@@ -173,3 +182,4 @@ src/
 12. End-to-end operator runbook with preflight/rollback notes
 13. Deterministic default new DB path from schema hash
 14. CLI integration coverage for argument-parser help/usage output
+15. Schema identity metadata table + status exposure

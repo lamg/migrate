@@ -26,6 +26,13 @@ CREATE TABLE _migration_progress(
   last_replayed_log_id INTEGER NOT NULL,
   drain_completed INTEGER NOT NULL
 );
+
+CREATE TABLE _schema_identity(
+  id INTEGER PRIMARY KEY CHECK (id = 0),
+  schema_hash TEXT NOT NULL,
+  schema_commit TEXT,
+  created_utc TEXT NOT NULL
+);
 ```
 
 In the **old database**:
@@ -48,7 +55,7 @@ CREATE TABLE _migration_log(
 
 ### Phase 1: Migrate (`mig migrate`)
 
-1. `mig` creates the new SQLite file with the new schema, `_id_mapping`, and `_migration_status(status='migrating')`
+1. `mig` creates the new SQLite file with the new schema, `_id_mapping`, `_migration_status(status='migrating')`, and `_schema_identity`
 2. `mig` writes `_migration_marker(status='recording')` and `_migration_log` to the old database
 3. MigLib in the old service detects the marker and enters recording mode. The `taskTxn` CE transparently records every write operation into `_migration_log` with:
    - `txn_id`: groups operations that belong to the same transaction

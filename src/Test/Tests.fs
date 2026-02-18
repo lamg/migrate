@@ -75,15 +75,18 @@ let private runMigCliInDirectory (workingDirectory: string option) (args: string
 
 let private runMigCli (args: string list) = runMigCliInDirectory None args
 
-let private deriveDeterministicNewDbPathFromSchema (directoryPath: string) (schemaPath: string) =
+let private deriveShortSchemaHashFromScript (schemaPath: string) =
   let normalizeLineEndings (text: string) =
     text.Replace("\r\n", "\n").Replace("\r", "\n")
 
-  let normalizedSchema = File.ReadAllText(schemaPath) |> normalizeLineEndings
+  let normalizedSchema = File.ReadAllText schemaPath |> normalizeLineEndings
   use sha256 = SHA256.Create()
   let schemaBytes = Encoding.UTF8.GetBytes normalizedSchema
   let hashBytes = sha256.ComputeHash schemaBytes
-  let schemaHash = Convert.ToHexString(hashBytes).ToLowerInvariant().Substring(0, 16)
+  Convert.ToHexString(hashBytes).ToLowerInvariant().Substring(0, 16)
+
+let private deriveDeterministicNewDbPathFromSchema (directoryPath: string) (schemaPath: string) =
+  let schemaHash = deriveShortSchemaHashFromScript schemaPath
   let directoryName = DirectoryInfo(directoryPath).Name
   Path.Combine(directoryPath, $"{directoryName}-{schemaHash}.sqlite")
 
@@ -1192,6 +1195,8 @@ let ``migration status reports old and new database markers and counts`` () =
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');"
+    "CREATE TABLE _schema_identity(id INTEGER PRIMARY KEY CHECK (id = 0), schema_hash TEXT NOT NULL, schema_commit TEXT, created_utc TEXT NOT NULL);"
+    "INSERT INTO _schema_identity(id, schema_hash, schema_commit, created_utc) VALUES (0, '1111222233334444', 'abc1234', '2026-02-18T00:00:00.0000000Z');"
     "CREATE TABLE _migration_progress(id INTEGER PRIMARY KEY CHECK (id = 0), last_replayed_log_id INTEGER NOT NULL, drain_completed INTEGER NOT NULL);"
     "INSERT INTO _migration_progress(id, last_replayed_log_id, drain_completed) VALUES (0, 1, 0);"
     "CREATE TABLE _id_mapping(table_name TEXT NOT NULL, old_id INTEGER NOT NULL, new_id INTEGER NOT NULL, PRIMARY KEY(table_name, old_id));"
@@ -1213,6 +1218,8 @@ let ``migration status reports old and new database markers and counts`` () =
     Assert.Equal(Some "migrating", report.newMigrationStatus)
     Assert.Equal(Some true, report.idMappingTablePresent)
     Assert.Equal(Some true, report.migrationProgressTablePresent)
+    Assert.Equal(Some "1111222233334444", report.schemaIdentityHash)
+    Assert.Equal(Some "abc1234", report.schemaIdentityCommit)
 
   oldConn.Close()
   newConn.Close()
@@ -1247,6 +1254,8 @@ let ``migration status handles databases without migration tables`` () =
     Assert.Equal(None, report.newMigrationStatus)
     Assert.Equal(None, report.idMappingTablePresent)
     Assert.Equal(None, report.migrationProgressTablePresent)
+    Assert.Equal(None, report.schemaIdentityHash)
+    Assert.Equal(None, report.schemaIdentityCommit)
 
   oldConn.Close()
   Directory.Delete(tempDir, true)
@@ -1276,7 +1285,9 @@ let ``migration status reports cleanup state after cutover`` () =
   newConn.Open()
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
-    "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');" ]
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');"
+    "CREATE TABLE _schema_identity(id INTEGER PRIMARY KEY CHECK (id = 0), schema_hash TEXT NOT NULL, schema_commit TEXT, created_utc TEXT NOT NULL);"
+    "INSERT INTO _schema_identity(id, schema_hash, schema_commit, created_utc) VALUES (0, '9999aaaabbbbcccc', 'deadbeef', '2026-02-18T00:00:00.0000000Z');" ]
   |> List.iter (fun sql ->
     use cmd = new SqliteCommand(sql, newConn)
     cmd.ExecuteNonQuery() |> ignore)
@@ -1293,6 +1304,8 @@ let ``migration status reports cleanup state after cutover`` () =
     Assert.Equal(Some 0L, report.idMappingEntries)
     Assert.Equal(Some false, report.idMappingTablePresent)
     Assert.Equal(Some false, report.migrationProgressTablePresent)
+    Assert.Equal(Some "9999aaaabbbbcccc", report.schemaIdentityHash)
+    Assert.Equal(Some "deadbeef", report.schemaIdentityCommit)
 
   oldConn.Close()
   newConn.Close()
@@ -1366,7 +1379,9 @@ let ``cutover is idempotent when migration status is already ready`` () =
   newConn.Open()
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
-    "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');" ]
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');"
+    "CREATE TABLE _schema_identity(id INTEGER PRIMARY KEY CHECK (id = 0), schema_hash TEXT NOT NULL, schema_commit TEXT, created_utc TEXT NOT NULL);"
+    "INSERT INTO _schema_identity(id, schema_hash, schema_commit, created_utc) VALUES (0, '9999aaaabbbbcccc', 'deadbeef', '2026-02-18T00:00:00.0000000Z');" ]
   |> List.iter (fun sql ->
     use cmd = new SqliteCommand(sql, newConn)
     cmd.ExecuteNonQuery() |> ignore)
@@ -1570,7 +1585,9 @@ let ``cli status prints cutover-complete cleanup state`` () =
   newConn.Open()
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
-    "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');" ]
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');"
+    "CREATE TABLE _schema_identity(id INTEGER PRIMARY KEY CHECK (id = 0), schema_hash TEXT NOT NULL, schema_commit TEXT, created_utc TEXT NOT NULL);"
+    "INSERT INTO _schema_identity(id, schema_hash, schema_commit, created_utc) VALUES (0, '9999aaaabbbbcccc', 'deadbeef', '2026-02-18T00:00:00.0000000Z');" ]
   |> List.iter (fun sql ->
     use cmd = new SqliteCommand(sql, newConn)
     cmd.ExecuteNonQuery() |> ignore)
@@ -1582,6 +1599,8 @@ let ``cli status prints cutover-complete cleanup state`` () =
   Assert.Contains($"Old database: {oldDbPath}", stdOut)
   Assert.Contains("Marker status: draining", stdOut)
   Assert.Contains("Migration status: ready", stdOut)
+  Assert.Contains("Schema hash: 9999aaaabbbbcccc", stdOut)
+  Assert.Contains("Schema commit: deadbeef", stdOut)
   Assert.Contains("Pending replay entries: 0 (cutover complete)", stdOut)
   Assert.Contains("_id_mapping: removed", stdOut)
   Assert.Contains("_migration_progress: removed", stdOut)
@@ -1945,6 +1964,7 @@ type Invoice = {{ id: int64; account: Account; total: float }}
 """
 
   File.WriteAllText(schemaPath, script.Trim())
+  let expectedSchemaHash = deriveShortSchemaHashFromScript schemaPath
 
   let migrateResult = runMigrate oldDbPath schemaPath newDbPath |> fun t -> t.Result
 
@@ -2008,6 +2028,12 @@ type Invoice = {{ id: int64; account: Account; total: float }}
   Assert.Equal(0L, progressReader.GetInt64(0))
   Assert.Equal(0L, progressReader.GetInt64(1))
   Assert.False(progressReader.Read())
+
+  use schemaIdentityCmd =
+    new SqliteCommand("SELECT schema_hash FROM _schema_identity WHERE id = 0", verifyNewConn)
+
+  let storedSchemaHash = schemaIdentityCmd.ExecuteScalar() |> string
+  Assert.Equal(expectedSchemaHash, storedSchemaHash)
 
   verifyOldConn.Close()
   verifyNewConn.Close()

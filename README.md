@@ -58,6 +58,7 @@ mig cleanup-old --old old.sqlite
 - F# schema reflection from `.fsx` scripts
 - FK-aware bulk copy and replay with ID mapping
 - Replay checkpoints and drain safety validation
+- Schema identity metadata (`schema_hash`, optional `schema_commit`) persisted in new database
 - Operational status reporting for old/new database migration state
 - Optional old-database migration-table cleanup after cutover
 
