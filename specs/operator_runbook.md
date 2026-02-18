@@ -27,6 +27,7 @@ Default no-flag mode (`mig migrate` from project directory):
 - uses `./schema.fsx`
 - derives target path `./<dir-name>-<schema-hash>.sqlite`
 - auto-detects source DB as exactly one `./<dir-name>-<old-hash>.sqlite` file excluding the target
+- the same path inference is used by `mig status`, `mig drain`, `mig cutover`, and `mig cleanup-old` when their path flags are omitted
 
 Optional metadata:
 
@@ -42,7 +43,7 @@ Expected outcomes:
 Validation:
 
 ```sh
-mig status --old old.db --new new.db
+mig status [--old old.db] [--new new.db]
 ```
 
 Check that:
@@ -60,7 +61,7 @@ It should remain blocked from serving while `_migration_status='migrating'`.
 ## Phase 2: Drain
 
 ```sh
-mig drain --old old.db --new new.db
+mig drain [--old old.db] [--new new.db]
 ```
 
 Expected outcomes:
@@ -73,7 +74,7 @@ Expected outcomes:
 Validation:
 
 ```sh
-mig status --old old.db --new new.db
+mig status [--old old.db] [--new new.db]
 ```
 
 Check that pending replay entries are `0` before cutover.
@@ -81,7 +82,7 @@ Check that pending replay entries are `0` before cutover.
 ## Phase 3: Cutover
 
 ```sh
-mig cutover --new new.db
+mig cutover [--new new.db]
 ```
 
 Expected outcomes:
@@ -93,7 +94,7 @@ Expected outcomes:
 Validation:
 
 ```sh
-mig status --old old.db --new new.db
+mig status [--old old.db] [--new new.db]
 ```
 
 Check that:
@@ -109,7 +110,7 @@ Move application traffic from old service to new service only after successful c
 ## Optional Phase 4: Cleanup Old DB Migration Tables
 
 ```sh
-mig cleanup-old --old old.db
+mig cleanup-old [--old old.db]
 ```
 
 Expected outcomes:

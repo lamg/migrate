@@ -41,7 +41,7 @@ No recording, replay, or drain phases are needed since no service is writing to 
 
 ## Online mode
 
-When services are deployed, the administrator uses three required commands plus one optional cleanup command:
+When services are deployed, the administrator uses three required phase commands plus one optional cleanup command:
 
 ### `mig migrate`
 
@@ -69,8 +69,13 @@ After this command the old service continues operating normally while recording 
 ### `mig drain`
 
 ```
-mig drain --old old.db --new new.db
+mig drain [--old old.db] [--new new.db]
 ```
+
+Default behavior when run as `mig drain` from a project directory:
+
+- Derives target path as `./<dir-name>-<schema-hash>.sqlite` from `./schema.fsx`
+- Auto-detects source DB as exactly one `./<dir-name>-<old-hash>.sqlite` file excluding the target path
 
 1. Updates `_migration_marker` status to 'draining' in the old database
 2. MigLib in the old service detects the status change and stops accepting writes. Read queries continue to be served from the old database.
@@ -83,10 +88,12 @@ Only writes are unavailable between drain and cutover. This window depends on ho
 ### `mig cutover`
 
 ```
-mig cutover --new new.db
+mig cutover [--new new.db]
 ```
 
 Run after `mig drain` has exited:
+
+- If `--new` is omitted, derives target path as `./<dir-name>-<schema-hash>.sqlite` from `./schema.fsx`
 
 - Verifies that drain is complete (`_migration_log` fully consumed)
 - Drops replay-only tables (`_id_mapping`, `_migration_progress`) from the new database
@@ -100,10 +107,12 @@ Old migration tables (`_migration_marker`, `_migration_log`) are retained until 
 ### `mig cleanup-old`
 
 ```
-mig cleanup-old --old old.db
+mig cleanup-old [--old old.db]
 ```
 
 Optional command for archived environments, run after traffic has moved to the new service:
+
+- If `--old` is omitted, auto-detects source DB as exactly one `./<dir-name>-<old-hash>.sqlite` file (excluding inferred current-schema target when available)
 
 - Validates the old database is not still in `_migration_marker(status='recording')`
 - Drops old migration tables (`_migration_marker`, `_migration_log`) when present
@@ -114,10 +123,13 @@ The command is idempotent: if migration tables are already gone, it succeeds and
 ### `mig status`
 
 ```
-mig status --old old.db [--new new.db]
+mig status [--old old.db] [--new new.db]
 ```
 
 Shows the current migration state:
+
+- If `--old` is omitted, auto-detects source DB as exactly one `./<dir-name>-<old-hash>.sqlite` file (excluding `--new` or inferred new target when present)
+- If `--new` is omitted, infers `./<dir-name>-<schema-hash>.sqlite` from `./schema.fsx` and includes it only when that file exists
 
 - Marker status in old database (recording, draining, or no marker)
 - Number of entries in `_migration_log`

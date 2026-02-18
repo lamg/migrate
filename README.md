@@ -45,12 +45,12 @@ Assuming:
 # - derives target db as <dir>-<schema-hash>.sqlite
 mig migrate
 
-# then continue with explicit paths printed by migrate output
-mig status --old old.sqlite --new project-<schema-hash>.sqlite
-mig drain --old old.sqlite --new project-<schema-hash>.sqlite
-mig cutover --new project-<schema-hash>.sqlite
+# then continue in the same directory (paths auto-resolve)
+mig status
+mig drain
+mig cutover
 # optional, after traffic has fully moved to the new service:
-mig cleanup-old --old old.sqlite
+mig cleanup-old
 ```
 
 ## Features
@@ -72,10 +72,10 @@ mig cleanup-old --old old.sqlite
 ## Commands
 
 - `mig migrate [--old <path>] [--schema <path>] [--new <path>]` - Create the new DB from schema, copy data, and start recording on old DB (`mig migrate` defaults to current-directory auto-discovery and `./<dir>-<schema-hash>.sqlite` target naming; commit metadata is detected automatically from git).
-- `mig drain --old <path> --new <path>` - Switch old DB to draining mode and replay pending migration log entries.
-- `mig cutover --new <path>` - Verify drain completion, switch new DB to `ready`, and remove replay-only tables.
-- `mig cleanup-old --old <path>` - Optional cleanup of old DB migration tables (`_migration_marker`, `_migration_log`).
-- `mig status --old <path> [--new <path>]` - Show marker/status state and migration counters for operational visibility.
+- `mig drain [--old <path>] [--new <path>]` - Switch old DB to draining mode and replay pending migration log entries (defaults to current-directory old/new inference based on `./schema.fsx`).
+- `mig cutover [--new <path>]` - Verify drain completion, switch new DB to `ready`, and remove replay-only tables (defaults to `./<dir>-<schema-hash>.sqlite` from `./schema.fsx`).
+- `mig cleanup-old [--old <path>]` - Optional cleanup of old DB migration tables (`_migration_marker`, `_migration_log`) with current-directory old DB auto-discovery by default.
+- `mig status [--old <path>] [--new <path>]` - Show marker/status state and migration counters for operational visibility (defaults to current-directory old inference and includes inferred new DB when it exists).
 
 ## Contributing
 

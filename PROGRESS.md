@@ -167,9 +167,18 @@ src/
 - **Manual metadata input removed**: migrate no longer accepts a manual schema-commit argument/configuration.
 - **Coverage added**: CLI integration test validates automatic commit metadata persistence into `_schema_identity.schema_commit`.
 
+## Update (2026-02-18, deterministic operational command pathing)
+
+- **Drain defaults expanded**: `mig drain` now supports no-arg mode by inferring new DB from `./schema.fsx` and auto-detecting old DB from `./<dir>-<old-hash>.sqlite` excluding that target.
+- **Cutover defaults expanded**: `mig cutover` now supports no-arg mode by inferring `./<dir>-<schema-hash>.sqlite` from `./schema.fsx`.
+- **Status defaults expanded**: `mig status` now supports no-arg old/new inference in the current directory and includes inferred new DB only when the file exists.
+- **Cleanup-old defaults expanded**: `mig cleanup-old` now supports no-arg mode by auto-detecting old DB from `./<dir>-<old-hash>.sqlite` while excluding inferred current-schema target when available.
+- **Coverage added**: CLI integration tests now validate no-flag `migrate -> drain -> cutover -> status -> cleanup-old` execution in a deterministic directory setup.
+- **Docs aligned**: README/specs/runbook now describe optional path flags for `drain`, `cutover`, `status`, and `cleanup-old`.
+
 ## What's next
 
-1. Evaluate auto path resolution for `status`/`drain`/`cutover` using current-directory naming conventions to reduce required flags.
+1. Evaluate support for `mig status --new` without requiring/inferring `--old` (new-only post-cleanup inspections).
 
 ## Completed next-step items
 
@@ -190,3 +199,5 @@ src/
 14. CLI integration coverage for argument-parser help/usage output
 15. Schema identity metadata table + status exposure
 16. Schema commit auto-detection (git `HEAD` from schema path)
+17. Deterministic operational command pathing for `drain`/`cutover`/`status`
+18. Deterministic operational command pathing for `cleanup-old`

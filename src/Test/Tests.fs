@@ -1674,11 +1674,13 @@ let ``cli subcommand help shows usage and options`` () =
     [ ([ "migrate"; "--help" ],
        "USAGE: mig migrate [--help] [--old <path>] [--schema <path>]",
        [ "--old <path>"; "--schema <path>"; "--new <path>" ])
-      ([ "drain"; "--help" ], "USAGE: mig drain [--help] --old <path> --new <path>", [ "--old <path>"; "--new <path>" ])
-      ([ "cutover"; "--help" ], "USAGE: mig cutover [--help] --new <path>", [ "--new <path>" ])
-      ([ "cleanup-old"; "--help" ], "USAGE: mig cleanup-old [--help] --old <path>", [ "--old <path>" ])
+      ([ "drain"; "--help" ],
+       "USAGE: mig drain [--help] [--old <path>] [--new <path>]",
+       [ "--old <path>"; "--new <path>" ])
+      ([ "cutover"; "--help" ], "USAGE: mig cutover [--help] [--new <path>]", [ "--new <path>" ])
+      ([ "cleanup-old"; "--help" ], "USAGE: mig cleanup-old [--help] [--old <path>]", [ "--old <path>" ])
       ([ "status"; "--help" ],
-       "USAGE: mig status [--help] --old <path> [--new <path>]",
+       "USAGE: mig status [--help] [--old <path>] [--new <path>]",
        [ "--old <path>"; "--new <path>" ]) ]
 
   for args, expectedUsage, expectedFragments in cases do
@@ -1981,6 +1983,87 @@ type Student = {{ id: int64; name: string }}
   Assert.Equal(1L, studentCount)
 
   verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli drain cutover status and cleanup-old auto-discover deterministic paths from current directory`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_operational_auto_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+
+  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  setupOldConn.Open()
+
+  [ "PRAGMA foreign_keys = ON;"
+    "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  setupOldConn.Close()
+
+  let migrateExitCode, migrateStdOut, migrateStdErr =
+    runMigCliInDirectory (Some tempDir) [ "migrate" ]
+
+  Assert.Equal(0, migrateExitCode)
+  Assert.True(String.IsNullOrWhiteSpace migrateStdErr, $"Expected no stderr output, got: {migrateStdErr}")
+  Assert.Contains($"Old database: {oldDbPath}", migrateStdOut)
+  Assert.Contains($"New database: {expectedNewDbPath}", migrateStdOut)
+
+  let drainExitCode, drainStdOut, drainStdErr =
+    runMigCliInDirectory (Some tempDir) [ "drain" ]
+
+  Assert.Equal(0, drainExitCode)
+  Assert.True(String.IsNullOrWhiteSpace drainStdErr, $"Expected no stderr output, got: {drainStdErr}")
+  Assert.Contains($"Old database: {oldDbPath}", drainStdOut)
+  Assert.Contains($"New database: {expectedNewDbPath}", drainStdOut)
+
+  let cutoverExitCode, cutoverStdOut, cutoverStdErr =
+    runMigCliInDirectory (Some tempDir) [ "cutover" ]
+
+  Assert.Equal(0, cutoverExitCode)
+  Assert.True(String.IsNullOrWhiteSpace cutoverStdErr, $"Expected no stderr output, got: {cutoverStdErr}")
+  Assert.Contains($"New database: {expectedNewDbPath}", cutoverStdOut)
+  Assert.Contains("Current migration status: ready", cutoverStdOut)
+
+  let statusExitCode, statusStdOut, statusStdErr =
+    runMigCliInDirectory (Some tempDir) [ "status" ]
+
+  Assert.Equal(0, statusExitCode)
+  Assert.True(String.IsNullOrWhiteSpace statusStdErr, $"Expected no stderr output, got: {statusStdErr}")
+  Assert.Contains($"Old database: {oldDbPath}", statusStdOut)
+  Assert.Contains($"New database: {expectedNewDbPath}", statusStdOut)
+  Assert.Contains("Migration status: ready", statusStdOut)
+
+  let cleanupExitCode, cleanupStdOut, cleanupStdErr =
+    runMigCliInDirectory (Some tempDir) [ "cleanup-old" ]
+
+  Assert.Equal(0, cleanupExitCode)
+  Assert.True(String.IsNullOrWhiteSpace cleanupStdErr, $"Expected no stderr output, got: {cleanupStdErr}")
+  Assert.Contains($"Old database: {oldDbPath}", cleanupStdOut)
+  Assert.Contains("Dropped _migration_marker: yes", cleanupStdOut)
+  Assert.Contains("Dropped _migration_log: yes", cleanupStdOut)
+
   Directory.Delete(tempDir, true)
 
 [<Fact>]
