@@ -156,7 +156,7 @@ The command is idempotent: if migration tables are already gone, it succeeds and
 ### `mig reset`
 
 ```sh
-mig reset [--dir|-d /path/to/project]
+mig reset [--dir|-d /path/to/project] [--dry-run]
 ```
 
 Optional command for failed/aborted migrations before cutover:
@@ -171,6 +171,7 @@ Behavior:
 - Deletes inferred new database file when present and not `ready`
 - Refuses reset when inferred new database has `_migration_status='ready'`
 - Reports previous old marker status plus new-db deletion outcome
+- With `--dry-run`, prints the same inferred impact (`would drop`, `would delete`, blocking reason) without mutating old/new artifacts; exits `0` when reset is actionable and `1` when blocked.
 
 Use `mig reset` to return to a clean pre-migration state after a failed migrate attempt.
 
@@ -221,5 +222,5 @@ MigLib in the new service checks the `_migration_status` table on startup and pe
 | `mig drain` | Sets drain marker, replays all accumulated writes, exits | Old service stops writes |
 | `mig cutover` | Sets ready marker, removes replay-only tables | New service starts serving |
 | `mig cleanup-old` | Removes old migration tables from archived old DB | — |
-| `mig reset` | Clears failed-migration artifacts (old marker/log + non-ready target DB) | — |
+| `mig reset` | Clears failed-migration artifacts (old marker/log + non-ready target DB), or reports dry-run impact with `--dry-run` | — |
 | `mig status` | Shows migration progress | — |

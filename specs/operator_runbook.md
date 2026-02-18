@@ -144,10 +144,15 @@ Safety rule:
 ## Optional Failure Reset: Clear Aborted Migration Artifacts
 
 ```sh
-mig reset [--dir|-d /path/to/project]
+mig reset [--dir|-d /path/to/project] [--dry-run]
 ```
 
 Use when `mig migrate` failed and you want to restart from a clean state.
+
+Recommended sequence:
+
+1. `mig reset --dry-run` to inspect inferred impact and confirm the command is not blocked.
+2. `mig reset` to apply cleanup when the dry run reports `Reset can be applied: yes`.
 
 Expected outcomes:
 

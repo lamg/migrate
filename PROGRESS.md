@@ -263,9 +263,16 @@ src/
 - **CLI wiring added**: `mig cutover` now uses the guarded path whenever old DB inference succeeds in deterministic directory mode.
 - **Coverage added**: CLI integration tests now validate cutover rejection for both `recording` marker-state risk and unreplayed old-log entries beyond the replay checkpoint.
 
+## Update (2026-02-18, reset dry-run impact mode)
+
+- **Reset planning API added**: `MigLib.HotMigration.getResetMigrationPlan` now reports reset impact without mutating old/new artifacts.
+- **Dry-run CLI mode added**: `mig reset --dry-run` now prints inferred reset actions (`would drop` / `would delete`) plus blocked reason when target status is `ready`.
+- **Exit semantics added**: dry-run exits `0` when reset is actionable and `1` when reset is blocked by safety guard.
+- **Coverage and docs aligned**: CLI help and integration tests now cover `reset --dry-run` success/blocked paths; README/spec/runbook now document dry-run usage.
+
 ## What's next
 
-1. Add a `mig reset --dry-run` mode to inspect reset impact before mutating old/new artifacts.
+1. No pending plan items.
 
 ## Completed next-step items
 
@@ -301,3 +308,4 @@ src/
 29. Trigger runtime validation coverage for drain replay and post-cutover writes
 30. Migration reset command (`mig reset`) for failed/aborted attempts
 31. Pre-cutover old-state safety guard for replay-divergence risk
+32. Reset dry-run impact mode (`mig reset --dry-run`)

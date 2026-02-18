@@ -57,6 +57,7 @@ mig cleanup-old
 mig migrate -d /path/to/project
 
 # if migrate fails and you need to clear failed migration artifacts:
+mig reset --dry-run
 mig reset
 ```
 
@@ -83,7 +84,7 @@ mig reset
 - `mig drain [--dir|-d <path>]` - Switch old DB to draining mode and replay pending migration log entries.
 - `mig cutover [--dir|-d <path>]` - Verify drain completion plus old marker/log replay safety, switch new DB to `ready`, and remove replay-only tables.
 - `mig cleanup-old [--dir|-d <path>]` - Optional cleanup of old DB migration tables (`_migration_marker`, `_migration_log`).
-- `mig reset [--dir|-d <path>]` - Reset failed/aborted migration artifacts (old marker/log cleanup + delete non-ready inferred new DB).
+- `mig reset [--dir|-d <path>] [--dry-run]` - Reset failed/aborted migration artifacts, or inspect reset impact without mutating DB files.
 - `mig status [--dir|-d <path>]` - Show marker/status state and migration counters for operational visibility.
 
 ## Contributing

@@ -75,6 +75,18 @@ type ResetMigrationResult =
     newDatabaseExisted: bool
     newDatabaseDeleted: bool }
 
+type ResetMigrationPlan =
+  { previousOldMarkerStatus: string option
+    oldMarkerPresent: bool
+    oldLogPresent: bool
+    previousNewStatus: string option
+    newDatabaseExisted: bool
+    willDropOldMarker: bool
+    willDropOldLog: bool
+    willDeleteNewDatabase: bool
+    canApplyReset: bool
+    blockedReason: string option }
+
 type private TableInfoRow =
   { name: string
     declaredType: string
@@ -109,6 +121,9 @@ let private migrationTables =
       "_schema_identity" ]
 
 let private toSqliteError (message: string) = SqliteException(message, 0)
+
+let private readyResetBlockedMessage (newDbPath: string) =
+  $"Refusing reset because new database status is ready at '{newDbPath}'. This command is only for failed or aborted migrations."
 
 let private createCommand
   (connection: SqliteConnection)
@@ -1914,7 +1929,7 @@ let runCleanupOld (oldDbPath: string) : Task<Result<CleanupOldResult, SqliteExce
     | ex -> return Error(toSqliteError ex.Message)
   }
 
-let runResetMigration (oldDbPath: string) (newDbPath: string) : Task<Result<ResetMigrationResult, SqliteException>> =
+let getResetMigrationPlan (oldDbPath: string) (newDbPath: string) : Task<Result<ResetMigrationPlan, SqliteException>> =
   task {
     try
       if not (File.Exists oldDbPath) then
@@ -1940,56 +1955,93 @@ let runResetMigration (oldDbPath: string) (newDbPath: string) : Task<Result<Rese
         match previousNewStatusResult with
         | Error ex -> return Error ex
         | Ok previousNewStatus ->
+          use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
+          do! oldConnection.OpenAsync()
+
+          let! previousOldMarkerStatus = readMarkerStatus oldConnection None "_migration_marker"
+          let! oldHasMarker = tableExists oldConnection None "_migration_marker"
+          let! oldHasLog = tableExists oldConnection None "_migration_log"
+
           let newIsReady =
             previousNewStatus
             |> Option.exists (fun status -> status.Equals("ready", StringComparison.OrdinalIgnoreCase))
 
-          if newIsReady then
-            return
-              Error(
-                toSqliteError
-                  $"Refusing reset because new database status is ready at '{newDbPath}'. This command is only for failed or aborted migrations."
-              )
-          else
-            use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
-            do! oldConnection.OpenAsync()
+          let blockedReason =
+            if newIsReady then
+              Some(readyResetBlockedMessage newDbPath)
+            else
+              None
 
-            use transaction = oldConnection.BeginTransaction()
-            let! previousOldMarkerStatus = readMarkerStatus oldConnection (Some transaction) "_migration_marker"
-            let! oldHasMarker = tableExists oldConnection (Some transaction) "_migration_marker"
-            let! oldHasLog = tableExists oldConnection (Some transaction) "_migration_log"
+          let canApplyReset = blockedReason.IsNone
 
-            if oldHasMarker then
-              use dropMarkerCmd =
-                createCommand oldConnection (Some transaction) "DROP TABLE _migration_marker"
+          return
+            Ok
+              { previousOldMarkerStatus = previousOldMarkerStatus
+                oldMarkerPresent = oldHasMarker
+                oldLogPresent = oldHasLog
+                previousNewStatus = previousNewStatus
+                newDatabaseExisted = newDatabaseExisted
+                willDropOldMarker = oldHasMarker
+                willDropOldLog = oldHasLog
+                willDeleteNewDatabase = newDatabaseExisted && canApplyReset
+                canApplyReset = canApplyReset
+                blockedReason = blockedReason }
+    with
+    | :? SqliteException as ex -> return Error ex
+    | ex -> return Error(toSqliteError ex.Message)
+  }
 
-              let! _ = dropMarkerCmd.ExecuteNonQueryAsync()
-              ()
+let runResetMigration (oldDbPath: string) (newDbPath: string) : Task<Result<ResetMigrationResult, SqliteException>> =
+  task {
+    try
+      let! planResult = getResetMigrationPlan oldDbPath newDbPath
 
-            if oldHasLog then
-              use dropLogCmd =
-                createCommand oldConnection (Some transaction) "DROP TABLE _migration_log"
+      match planResult with
+      | Error ex -> return Error ex
+      | Ok plan ->
+        if not plan.canApplyReset then
+          let message = plan.blockedReason |> Option.defaultValue "Reset cannot be applied."
+          return Error(toSqliteError message)
+        else
+          use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
+          do! oldConnection.OpenAsync()
 
-              let! _ = dropLogCmd.ExecuteNonQueryAsync()
-              ()
+          use transaction = oldConnection.BeginTransaction()
+          let! previousOldMarkerStatus = readMarkerStatus oldConnection (Some transaction) "_migration_marker"
+          let! oldHasMarker = tableExists oldConnection (Some transaction) "_migration_marker"
+          let! oldHasLog = tableExists oldConnection (Some transaction) "_migration_log"
 
-            transaction.Commit()
+          if oldHasMarker then
+            use dropMarkerCmd =
+              createCommand oldConnection (Some transaction) "DROP TABLE _migration_marker"
 
-            let newDatabaseDeleted =
-              if newDatabaseExisted then
-                File.Delete newDbPath
-                true
-              else
-                false
+            let! _ = dropMarkerCmd.ExecuteNonQueryAsync()
+            ()
 
-            return
-              Ok
-                { previousOldMarkerStatus = previousOldMarkerStatus
-                  oldMarkerDropped = oldHasMarker
-                  oldLogDropped = oldHasLog
-                  previousNewStatus = previousNewStatus
-                  newDatabaseExisted = newDatabaseExisted
-                  newDatabaseDeleted = newDatabaseDeleted }
+          if oldHasLog then
+            use dropLogCmd =
+              createCommand oldConnection (Some transaction) "DROP TABLE _migration_log"
+
+            let! _ = dropLogCmd.ExecuteNonQueryAsync()
+            ()
+
+          transaction.Commit()
+
+          let newDatabaseDeleted =
+            if plan.newDatabaseExisted then
+              File.Delete newDbPath
+              true
+            else
+              false
+
+          return
+            Ok
+              { previousOldMarkerStatus = previousOldMarkerStatus
+                oldMarkerDropped = oldHasMarker
+                oldLogDropped = oldHasLog
+                previousNewStatus = plan.previousNewStatus
+                newDatabaseExisted = plan.newDatabaseExisted
+                newDatabaseDeleted = newDatabaseDeleted }
     with
     | :? SqliteException as ex -> return Error ex
     | ex -> return Error(toSqliteError ex.Message)

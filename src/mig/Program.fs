@@ -55,11 +55,13 @@ type CleanupOldArgs =
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type ResetArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
+  | Dry_Run
 
   interface IArgParserTemplate with
     member this.Usage =
       match this with
       | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
+      | Dry_Run -> "print reset impact without dropping old migration tables or deleting the new database"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type StatusArgs =
@@ -546,6 +548,8 @@ let cleanupOld (args: ParseResults<CleanupOldArgs>) =
         1
 
 let reset (args: ParseResults<ResetArgs>) =
+  let isDryRun = args.Contains ResetArgs.Dry_Run
+
   match resolveCommandDirectory "reset" (args.TryGetResult ResetArgs.Dir) with
   | Error message ->
     eprintfn $"reset failed: {message}"
@@ -572,36 +576,75 @@ let reset (args: ParseResults<ResetArgs>) =
         eprintfn $"reset failed: {message}"
         1
       | Ok old ->
-        match runResetMigration old newDb |> fun t -> t.Result with
-        | Error ex ->
-          eprintfn $"reset failed: {ex.Message}"
-          1
-        | Ok result ->
-          let previousOldMarkerStatus =
-            result.previousOldMarkerStatus |> Option.defaultValue "no marker"
+        if isDryRun then
+          match getResetMigrationPlan old newDb |> fun t -> t.Result with
+          | Error ex ->
+            eprintfn $"reset failed: {ex.Message}"
+            1
+          | Ok plan ->
+            let previousOldMarkerStatus =
+              plan.previousOldMarkerStatus |> Option.defaultValue "no marker"
 
-          let droppedOldMarker = if result.oldMarkerDropped then "yes" else "no"
-          let droppedOldLog = if result.oldLogDropped then "yes" else "no"
+            let wouldDropOldMarker = if plan.willDropOldMarker then "yes" else "no"
+            let wouldDropOldLog = if plan.willDropOldLog then "yes" else "no"
 
-          let previousNewStatus =
-            result.previousNewStatus |> Option.defaultValue "no status marker"
+            let previousNewStatus =
+              plan.previousNewStatus |> Option.defaultValue "no status marker"
 
-          let newDatabaseExisted = if result.newDatabaseExisted then "yes" else "no"
-          let newDatabaseDeleted = if result.newDatabaseDeleted then "yes" else "no"
+            let newDatabaseExisted = if plan.newDatabaseExisted then "yes" else "no"
+            let wouldDeleteNewDatabase = if plan.willDeleteNewDatabase then "yes" else "no"
+            let resetCanApply = if plan.canApplyReset then "yes" else "no"
 
-          printfn "Migration reset complete."
-          printfn $"Old database: {old}"
-          printfn $"Previous old marker status: {previousOldMarkerStatus}"
-          printfn $"Dropped _migration_marker: {droppedOldMarker}"
-          printfn $"Dropped _migration_log: {droppedOldLog}"
-          printfn $"New database: {newDb}"
-          printfn $"New database existed: {newDatabaseExisted}"
+            printfn "Migration reset dry run."
+            printfn $"Old database: {old}"
+            printfn $"Previous old marker status: {previousOldMarkerStatus}"
+            printfn $"Would drop _migration_marker: {wouldDropOldMarker}"
+            printfn $"Would drop _migration_log: {wouldDropOldLog}"
+            printfn $"New database: {newDb}"
+            printfn $"New database existed: {newDatabaseExisted}"
 
-          if result.newDatabaseExisted then
-            printfn $"Previous new migration status: {previousNewStatus}"
+            if plan.newDatabaseExisted then
+              printfn $"Previous new migration status: {previousNewStatus}"
 
-          printfn $"Deleted new database: {newDatabaseDeleted}"
-          0
+            printfn $"Would delete new database: {wouldDeleteNewDatabase}"
+            printfn $"Reset can be applied: {resetCanApply}"
+
+            if not plan.canApplyReset then
+              let blockedReason = plan.blockedReason |> Option.defaultValue "Reset is blocked."
+              printfn $"Blocked reason: {blockedReason}"
+
+            if plan.canApplyReset then 0 else 1
+        else
+          match runResetMigration old newDb |> fun t -> t.Result with
+          | Error ex ->
+            eprintfn $"reset failed: {ex.Message}"
+            1
+          | Ok result ->
+            let previousOldMarkerStatus =
+              result.previousOldMarkerStatus |> Option.defaultValue "no marker"
+
+            let droppedOldMarker = if result.oldMarkerDropped then "yes" else "no"
+            let droppedOldLog = if result.oldLogDropped then "yes" else "no"
+
+            let previousNewStatus =
+              result.previousNewStatus |> Option.defaultValue "no status marker"
+
+            let newDatabaseExisted = if result.newDatabaseExisted then "yes" else "no"
+            let newDatabaseDeleted = if result.newDatabaseDeleted then "yes" else "no"
+
+            printfn "Migration reset complete."
+            printfn $"Old database: {old}"
+            printfn $"Previous old marker status: {previousOldMarkerStatus}"
+            printfn $"Dropped _migration_marker: {droppedOldMarker}"
+            printfn $"Dropped _migration_log: {droppedOldLog}"
+            printfn $"New database: {newDb}"
+            printfn $"New database existed: {newDatabaseExisted}"
+
+            if result.newDatabaseExisted then
+              printfn $"Previous new migration status: {previousNewStatus}"
+
+            printfn $"Deleted new database: {newDatabaseDeleted}"
+            0
 
 let status (args: ParseResults<StatusArgs>) =
   match resolveCommandDirectory "status" (args.TryGetResult StatusArgs.Dir) with
