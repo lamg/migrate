@@ -210,9 +210,19 @@ src/
 - **Error clarity improved**: old-source inference failures now distinguish between `no sqlite files found` and `sqlite files found but invalid naming contract`.
 - **Coverage added**: CLI integration test validates `mig drain` failure messaging for non-deterministic old DB filenames.
 
+## Update (2026-02-18, schema-object consistency direction)
+
+- **View/index migration scope clarified**: views and indexes are treated as target-schema artifacts from `schema.fsx`, not as old/new reconciliation objects.
+- **Trigger scope clarified**: triggers are also generated from target schema; old/new trigger equivalence is out of scope for structural migration.
+- **Behavioral caveat captured**: trigger effects during drain/replay and post-cutover are considered part of new-schema behavior validation, not schema-diff identity checks.
+
 ## What's next
 
-1. Evaluate whether status output should include the inferred directory root explicitly (`Dir: <path>`) for multi-project shell workflows.
+1. Define and test a trigger-behavior validation checklist for drain/replay and post-cutover writes.
+2. Add a strict preflight drift report (before migrate writes anything) that classifies supported vs unsupported schema differences.
+3. Extend explicit diff/reporting coverage for non-table objects (views/indexes/triggers) as target-schema consistency checks.
+4. Add a dry-run planning mode that prints inferred paths, schema copy plan, and replay prerequisites without mutating databases.
+5. Improve failure-recovery guidance/output for partial `migrate` failures (what exists, safe cleanup, safe rerun).
 
 ## Completed next-step items
 
@@ -240,3 +250,4 @@ src/
 21. Schema argument removal (`mig migrate --schema`)
 22. Schema preflight validation for deterministic pathing
 23. Old DB candidate naming preflight diagnostics
+24. Schema-object consistency direction (target-only views/indexes/triggers)
