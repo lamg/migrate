@@ -67,6 +67,14 @@ type CleanupOldResult =
     markerDropped: bool
     logDropped: bool }
 
+type ResetMigrationResult =
+  { previousOldMarkerStatus: string option
+    oldMarkerDropped: bool
+    oldLogDropped: bool
+    previousNewStatus: string option
+    newDatabaseExisted: bool
+    newDatabaseDeleted: bool }
+
 type private TableInfoRow =
   { name: string
     declaredType: string
@@ -1901,6 +1909,87 @@ let runCleanupOld (oldDbPath: string) : Task<Result<CleanupOldResult, SqliteExce
               { previousMarkerStatus = markerStatus
                 markerDropped = hasMarker
                 logDropped = hasLog }
+    with
+    | :? SqliteException as ex -> return Error ex
+    | ex -> return Error(toSqliteError ex.Message)
+  }
+
+let runResetMigration (oldDbPath: string) (newDbPath: string) : Task<Result<ResetMigrationResult, SqliteException>> =
+  task {
+    try
+      if not (File.Exists oldDbPath) then
+        return Error(toSqliteError $"Old database was not found: {oldDbPath}")
+      else
+        let newDatabaseExisted = File.Exists newDbPath
+
+        let! previousNewStatusResult =
+          if newDatabaseExisted then
+            task {
+              try
+                use newConnection = new SqliteConnection($"Data Source={newDbPath}")
+                do! newConnection.OpenAsync()
+                let! status = readMarkerStatus newConnection None "_migration_status"
+                return Ok status
+              with
+              | :? SqliteException as ex -> return Error ex
+              | ex -> return Error(toSqliteError ex.Message)
+            }
+          else
+            Task.FromResult(Ok None)
+
+        match previousNewStatusResult with
+        | Error ex -> return Error ex
+        | Ok previousNewStatus ->
+          let newIsReady =
+            previousNewStatus
+            |> Option.exists (fun status -> status.Equals("ready", StringComparison.OrdinalIgnoreCase))
+
+          if newIsReady then
+            return
+              Error(
+                toSqliteError
+                  $"Refusing reset because new database status is ready at '{newDbPath}'. This command is only for failed or aborted migrations."
+              )
+          else
+            use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
+            do! oldConnection.OpenAsync()
+
+            use transaction = oldConnection.BeginTransaction()
+            let! previousOldMarkerStatus = readMarkerStatus oldConnection (Some transaction) "_migration_marker"
+            let! oldHasMarker = tableExists oldConnection (Some transaction) "_migration_marker"
+            let! oldHasLog = tableExists oldConnection (Some transaction) "_migration_log"
+
+            if oldHasMarker then
+              use dropMarkerCmd =
+                createCommand oldConnection (Some transaction) "DROP TABLE _migration_marker"
+
+              let! _ = dropMarkerCmd.ExecuteNonQueryAsync()
+              ()
+
+            if oldHasLog then
+              use dropLogCmd =
+                createCommand oldConnection (Some transaction) "DROP TABLE _migration_log"
+
+              let! _ = dropLogCmd.ExecuteNonQueryAsync()
+              ()
+
+            transaction.Commit()
+
+            let newDatabaseDeleted =
+              if newDatabaseExisted then
+                File.Delete newDbPath
+                true
+              else
+                false
+
+            return
+              Ok
+                { previousOldMarkerStatus = previousOldMarkerStatus
+                  oldMarkerDropped = oldHasMarker
+                  oldLogDropped = oldHasLog
+                  previousNewStatus = previousNewStatus
+                  newDatabaseExisted = newDatabaseExisted
+                  newDatabaseDeleted = newDatabaseDeleted }
     with
     | :? SqliteException as ex -> return Error ex
     | ex -> return Error(toSqliteError ex.Message)

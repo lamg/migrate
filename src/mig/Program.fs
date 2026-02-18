@@ -53,6 +53,15 @@ type CleanupOldArgs =
       | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
+type ResetArgs =
+  | [<AltCommandLine("-d")>] Dir of path: string
+
+  interface IArgParserTemplate with
+    member this.Usage =
+      match this with
+      | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
+
+[<CliPrefix(CliPrefix.DoubleDash)>]
 type StatusArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
 
@@ -67,6 +76,7 @@ type Command =
   | [<CliPrefix(CliPrefix.None)>] Drain of ParseResults<DrainArgs>
   | [<CliPrefix(CliPrefix.None)>] Cutover of ParseResults<CutoverArgs>
   | [<CliPrefix(CliPrefix.None); CustomCommandLine("cleanup-old")>] CleanupOld of ParseResults<CleanupOldArgs>
+  | [<CliPrefix(CliPrefix.None)>] Reset of ParseResults<ResetArgs>
   | [<CliPrefix(CliPrefix.None)>] Status of ParseResults<StatusArgs>
 
   interface IArgParserTemplate with
@@ -77,6 +87,7 @@ type Command =
       | Drain _ -> "stop writes on old database and replay accumulated changes"
       | Cutover _ -> "mark new database as ready for serving"
       | CleanupOld _ -> "drop old-database migration tables after cutover"
+      | Reset _ -> "reset failed migration artifacts on old/new databases"
       | Status _ -> "show current migration state"
 
 type private DeterministicNewDbPath =
@@ -526,6 +537,64 @@ let cleanupOld (args: ParseResults<CleanupOldArgs>) =
         eprintfn $"cleanup-old failed: {ex.Message}"
         1
 
+let reset (args: ParseResults<ResetArgs>) =
+  match resolveCommandDirectory "reset" (args.TryGetResult ResetArgs.Dir) with
+  | Error message ->
+    eprintfn $"reset failed: {message}"
+    1
+  | Ok currentDirectory ->
+    let directoryName = DirectoryInfo(currentDirectory).Name
+
+    let newResult =
+      resolveDefaultNewDbFromCurrentSchema "reset" currentDirectory directoryName
+      |> Result.map _.path
+
+    match newResult with
+    | Error message ->
+      eprintfn $"reset failed: {message}"
+      1
+    | Ok newDb ->
+      let oldResult =
+        inferOldDbFromCurrentDirectory currentDirectory directoryName (Some newDb)
+        |> Result.mapError (fun message ->
+          $"{message} Excluding target '{newDb}'. Use `-d` to select a different directory.")
+
+      match oldResult with
+      | Error message ->
+        eprintfn $"reset failed: {message}"
+        1
+      | Ok old ->
+        match runResetMigration old newDb |> fun t -> t.Result with
+        | Error ex ->
+          eprintfn $"reset failed: {ex.Message}"
+          1
+        | Ok result ->
+          let previousOldMarkerStatus =
+            result.previousOldMarkerStatus |> Option.defaultValue "no marker"
+
+          let droppedOldMarker = if result.oldMarkerDropped then "yes" else "no"
+          let droppedOldLog = if result.oldLogDropped then "yes" else "no"
+
+          let previousNewStatus =
+            result.previousNewStatus |> Option.defaultValue "no status marker"
+
+          let newDatabaseExisted = if result.newDatabaseExisted then "yes" else "no"
+          let newDatabaseDeleted = if result.newDatabaseDeleted then "yes" else "no"
+
+          printfn "Migration reset complete."
+          printfn $"Old database: {old}"
+          printfn $"Previous old marker status: {previousOldMarkerStatus}"
+          printfn $"Dropped _migration_marker: {droppedOldMarker}"
+          printfn $"Dropped _migration_log: {droppedOldLog}"
+          printfn $"New database: {newDb}"
+          printfn $"New database existed: {newDatabaseExisted}"
+
+          if result.newDatabaseExisted then
+            printfn $"Previous new migration status: {previousNewStatus}"
+
+          printfn $"Deleted new database: {newDatabaseDeleted}"
+          0
+
 let status (args: ParseResults<StatusArgs>) =
   match resolveCommandDirectory "status" (args.TryGetResult StatusArgs.Dir) with
   | Error message ->
@@ -645,6 +714,7 @@ let main argv =
     | Drain args -> drain args
     | Cutover args -> cutover args
     | CleanupOld args -> cleanupOld args
+    | Reset args -> reset args
     | Status args -> status args
   with :? ArguParseException as ex ->
     printfn $"%s{ex.Message}"

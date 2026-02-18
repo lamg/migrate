@@ -41,7 +41,7 @@ No recording, replay, or drain phases are needed since no service is writing to 
 
 ## Online mode
 
-When services are deployed, the administrator can run one optional planning command, then three required phase commands plus one optional cleanup command:
+When services are deployed, the administrator can run one optional planning command, then three required phase commands plus optional cleanup/reset commands:
 
 ### `mig plan`
 
@@ -153,6 +153,27 @@ Optional command for archived environments, run after traffic has moved to the n
 
 The command is idempotent: if migration tables are already gone, it succeeds and reports no-op cleanup.
 
+### `mig reset`
+
+```sh
+mig reset [--dir|-d /path/to/project]
+```
+
+Optional command for failed/aborted migrations before cutover:
+
+- Uses the current directory as project root (override with `--dir` / `-d`)
+- Uses `<dir>/schema.fsx` to infer target path `<dir>/<dir-name>-<schema-hash>.sqlite`
+- Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file excluding the inferred target
+
+Behavior:
+
+- Drops old migration tables (`_migration_marker`, `_migration_log`) when present
+- Deletes inferred new database file when present and not `ready`
+- Refuses reset when inferred new database has `_migration_status='ready'`
+- Reports previous old marker status plus new-db deletion outcome
+
+Use `mig reset` to return to a clean pre-migration state after a failed migrate attempt.
+
 ### `mig status`
 
 ```
@@ -200,4 +221,5 @@ MigLib in the new service checks the `_migration_status` table on startup and pe
 | `mig drain` | Sets drain marker, replays all accumulated writes, exits | Old service stops writes |
 | `mig cutover` | Sets ready marker, removes replay-only tables | New service starts serving |
 | `mig cleanup-old` | Removes old migration tables from archived old DB | — |
+| `mig reset` | Clears failed-migration artifacts (old marker/log + non-ready target DB) | — |
 | `mig status` | Shows migration progress | — |

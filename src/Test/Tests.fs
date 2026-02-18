@@ -1811,6 +1811,7 @@ let ``cli root help shows current command surface`` () =
       "drain <options>"
       "cutover <options>"
       "cleanup-old <options>"
+      "reset <options>"
       "status <options>" ]
 
 [<Fact>]
@@ -1821,6 +1822,7 @@ let ``cli subcommand help shows usage and options`` () =
       ([ "drain"; "--help" ], "USAGE: mig drain [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "cutover"; "--help" ], "USAGE: mig cutover [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "cleanup-old"; "--help" ], "USAGE: mig cleanup-old [--help] [--dir <path>]", [ "--dir, -d <path>" ])
+      ([ "reset"; "--help" ], "USAGE: mig reset [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "status"; "--help" ], "USAGE: mig status [--help] [--dir <path>]", [ "--dir, -d <path>" ]) ]
 
   for args, expectedUsage, expectedFragments in cases do
@@ -2021,6 +2023,177 @@ let ``cli cleanup-old returns error while recording`` () =
   Assert.False(isNull markerExists)
 
   verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli reset clears old migration artifacts and deletes non-ready new database`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_reset_success_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-1122334455667788.sqlite")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+
+  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  oldConn.Open()
+
+  [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);"
+    "INSERT INTO _migration_log(txn_id, ordering, operation, table_name, row_data) VALUES (1, 1, 'insert', 'student', '{\"id\":1,\"name\":\"Alice\"}');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, oldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  oldConn.Close()
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+
+  use newConn = new SqliteConnection($"Data Source={newDbPath}")
+  newConn.Open()
+
+  [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, newConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  newConn.Close()
+
+  let exitCode, stdOut, stdErr = runMigCli [ "reset"; "-d"; tempDir ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains("Migration reset complete.", stdOut)
+  Assert.Contains($"Old database: {oldDbPath}", stdOut)
+  Assert.Contains("Previous old marker status: recording", stdOut)
+  Assert.Contains("Dropped _migration_marker: yes", stdOut)
+  Assert.Contains("Dropped _migration_log: yes", stdOut)
+  Assert.Contains($"New database: {newDbPath}", stdOut)
+  Assert.Contains("New database existed: yes", stdOut)
+  Assert.Contains("Previous new migration status: migrating", stdOut)
+  Assert.Contains("Deleted new database: yes", stdOut)
+
+  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  verifyOldConn.Open()
+
+  use markerExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_marker' LIMIT 1",
+      verifyOldConn
+    )
+
+  let markerExists = markerExistsCmd.ExecuteScalar()
+  Assert.True(isNull markerExists)
+
+  use logExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_log' LIMIT 1",
+      verifyOldConn
+    )
+
+  let logExists = logExistsCmd.ExecuteScalar()
+  Assert.True(isNull logExists)
+
+  Assert.False(File.Exists newDbPath)
+
+  verifyOldConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli reset refuses to delete ready new database and leaves old artifacts intact`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_reset_ready_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-8899aabbccddeeff.sqlite")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+
+  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  oldConn.Open()
+
+  [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, oldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  oldConn.Close()
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+
+  use newConn = new SqliteConnection($"Data Source={newDbPath}")
+  newConn.Open()
+
+  [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, newConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  newConn.Close()
+
+  let exitCode, stdOut, stdErr = runMigCli [ "reset"; "-d"; tempDir ]
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("reset failed: Refusing reset because new database status is ready", stdErr)
+
+  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  verifyOldConn.Open()
+
+  use markerExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_marker' LIMIT 1",
+      verifyOldConn
+    )
+
+  let markerExists = markerExistsCmd.ExecuteScalar()
+  Assert.False(isNull markerExists)
+
+  use logExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_log' LIMIT 1",
+      verifyOldConn
+    )
+
+  let logExists = logExistsCmd.ExecuteScalar()
+  Assert.False(isNull logExists)
+
+  Assert.True(File.Exists newDbPath)
+
+  verifyOldConn.Close()
   Directory.Delete(tempDir, true)
 
 [<Fact>]

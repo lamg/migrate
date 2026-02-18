@@ -249,10 +249,17 @@ src/
 - **Post-cutover trigger coverage added**: integration test now verifies writes after cutover still execute target-database triggers correctly.
 - **Runbook checklist expanded**: operator runbook now includes explicit trigger-behavior validation steps for drain replay and post-cutover writes.
 
+## Update (2026-02-18, migration reset command)
+
+- **Reset command added**: new `mig reset` command clears failed/aborted migration artifacts using deterministic old/new path inference plus `--dir` override.
+- **Safety guard added**: reset refuses to delete an inferred new database when `_migration_status='ready'`.
+- **Reset execution implemented**: `MigLib.HotMigration.runResetMigration` now drops old migration tables (`_migration_marker`, `_migration_log`) and deletes non-ready inferred new DB files.
+- **Coverage and docs aligned**: CLI integration tests now cover `reset` help/success/ready-guard flows; README/spec/runbook now document reset usage.
+
 ## What's next
 
-1. Add an explicit migration-reset command for failed/aborted attempts so operators can safely clear old/new migration artifacts without manual SQL.
-2. Add a pre-cutover safety check that blocks when old DB marker/log state indicates replay divergence risk.
+1. Add a pre-cutover safety check that blocks when old DB marker/log state indicates replay divergence risk.
+2. Add a `mig reset --dry-run` mode to inspect reset impact before mutating old/new artifacts.
 
 ## Completed next-step items
 
@@ -286,3 +293,4 @@ src/
 27. Dry-run migration planning command (`mig plan`) with preflight report output
 28. Migrate failure recovery snapshot and rerun guidance output
 29. Trigger runtime validation coverage for drain replay and post-cutover writes
+30. Migration reset command (`mig reset`) for failed/aborted attempts

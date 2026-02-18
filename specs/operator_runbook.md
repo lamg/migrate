@@ -141,6 +141,20 @@ Safety rule:
 
 - cleanup fails if old marker is still `recording`
 
+## Optional Failure Reset: Clear Aborted Migration Artifacts
+
+```sh
+mig reset [--dir|-d /path/to/project]
+```
+
+Use when `mig migrate` failed and you want to restart from a clean state.
+
+Expected outcomes:
+
+- old migration tables (`_migration_marker`, `_migration_log`) are removed when present
+- inferred target DB file is deleted when present and not `ready`
+- command fails if inferred target DB is already `ready` (to avoid destroying an active target)
+
 ## Rollback Guidance
 
 Before cutover (`_migration_status='migrating'`):
@@ -163,7 +177,7 @@ After `cleanup-old`:
 - `migrate failed: ...`
   - read the printed `Recovery snapshot` and `Recovery guidance` blocks
   - keep old DB/service as source of truth; do not run `drain`/`cutover`
-  - run `mig plan` after cleanup/reset to verify rerun safety
+  - run `mig reset` (if needed), then `mig plan` to verify rerun safety
 - `cutover failed: Drain is not complete...`
   - rerun `mig drain`, then recheck `mig status`
 - `cleanup-old failed: Old database is still in recording mode...`
