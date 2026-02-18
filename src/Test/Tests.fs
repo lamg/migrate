@@ -1625,8 +1625,8 @@ let ``cli root help shows current command surface`` () =
 let ``cli subcommand help shows usage and options`` () =
   let cases: (string list * string * string list) list =
     [ ([ "migrate"; "--help" ],
-       "USAGE: mig migrate [--help] [--old <path>] [--schema <path>] [--new <path>]",
-       [ "--old <path>"; "--schema <path>"; "--new <path>" ])
+       "USAGE: mig migrate [--help] [--old <path>] [--schema <path>]",
+       [ "--old <path>"; "--schema <path>"; "--schema-commit <value>"; "--new <path>" ])
       ([ "drain"; "--help" ], "USAGE: mig drain [--help] --old <path> --new <path>", [ "--old <path>"; "--new <path>" ])
       ([ "cutover"; "--help" ], "USAGE: mig cutover [--help] --new <path>", [ "--new <path>" ])
       ([ "cleanup-old"; "--help" ], "USAGE: mig cleanup-old [--help] --old <path>", [ "--old <path>" ])
@@ -1815,6 +1815,71 @@ type Student = {{ id: int64; name: string }}
   use studentCountCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
   let studentCount = studentCountCmd.ExecuteScalar() |> unbox<int64>
   Assert.Equal(1L, studentCount)
+
+  verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli migrate stores schema commit metadata when provided`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_schema_commit_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-1111222233334444.sqlite")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let schemaCommit = "deadbeefcafebabe"
+
+  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  setupOldConn.Open()
+
+  [ "PRAGMA foreign_keys = ON;"
+    "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  setupOldConn.Close()
+
+  let exitCode, stdOut, stdErr =
+    runMigCliInDirectory
+      (Some tempDir)
+      [ "migrate"
+        "--old"
+        oldDbPath
+        "--schema"
+        schemaPath
+        "--schema-commit"
+        schemaCommit ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains($"New database: {expectedNewDbPath}", stdOut)
+
+  use verifyConn = new SqliteConnection($"Data Source={expectedNewDbPath}")
+  verifyConn.Open()
+
+  use schemaIdentityCmd =
+    new SqliteCommand("SELECT schema_commit FROM _schema_identity WHERE id = 0", verifyConn)
+
+  let storedSchemaCommit = schemaIdentityCmd.ExecuteScalar() |> string
+  Assert.Equal(schemaCommit, storedSchemaCommit)
 
   verifyConn.Close()
   Directory.Delete(tempDir, true)

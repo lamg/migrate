@@ -95,14 +95,6 @@ let private quoteIdentifier (name: string) =
 let private normalizeLineEndings (text: string) =
   text.Replace("\r\n", "\n").Replace("\r", "\n")
 
-let private readOptionalEnvironmentVariable (name: string) : string option =
-  let rawValue = Environment.GetEnvironmentVariable name
-
-  if isNull rawValue || String.IsNullOrWhiteSpace rawValue then
-    None
-  else
-    Some rawValue
-
 let private computeSchemaHashFromScriptPath (schemaPath: string) : Result<string, SqliteException> =
   try
     let normalizedSchema = File.ReadAllText schemaPath |> normalizeLineEndings
@@ -1239,10 +1231,11 @@ let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<Migra
     | ex -> return Error(toSqliteError ex.Message)
   }
 
-let runMigrate
+let runMigrateWithSchemaCommit
   (oldDbPath: string)
   (schemaPath: string)
   (newDbPath: string)
+  (schemaCommit: string option)
   : Task<Result<MigrateResult, SqliteException>> =
   task {
     try
@@ -1256,8 +1249,6 @@ let runMigrate
         match schemaHashResult with
         | Error ex -> return Error ex
         | Ok schemaHash ->
-          let schemaCommit = readOptionalEnvironmentVariable "MIG_SCHEMA_COMMIT"
-
           let! targetSchema =
             match parseSchemaFromScript schemaPath with
             | Ok schema -> Task.FromResult(Ok schema)
@@ -1314,6 +1305,13 @@ let runMigrate
     | :? SqliteException as ex -> return Error ex
     | ex -> return Error(toSqliteError ex.Message)
   }
+
+let runMigrate
+  (oldDbPath: string)
+  (schemaPath: string)
+  (newDbPath: string)
+  : Task<Result<MigrateResult, SqliteException>> =
+  runMigrateWithSchemaCommit oldDbPath schemaPath newDbPath None
 
 let runDrain (oldDbPath: string) (newDbPath: string) : Task<Result<DrainResult, SqliteException>> =
   task {

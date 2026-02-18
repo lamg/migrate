@@ -161,9 +161,16 @@ src/
 - **Coverage added**: tests now validate schema identity in status reporting, CLI status output, and migrate initialization of `_schema_identity`.
 - **Docs aligned**: specs/runbook now include `_schema_identity` in new DB migration metadata.
 
+## Update (2026-02-18, schema commit source contract)
+
+- **Explicit CLI metadata input added**: `mig migrate` now accepts `--schema-commit <value>` for deterministic schema commit recording.
+- **Fallback contract retained**: when `--schema-commit` is omitted, migrate reads `MIG_SCHEMA_COMMIT` if present.
+- **API split added**: MigLib now exposes `runMigrateWithSchemaCommit` while preserving `runMigrate` for existing callers.
+- **Coverage added**: CLI integration test now validates commit metadata persistence into `_schema_identity.schema_commit`.
+
 ## What's next
 
-1. Decide commit-source contract for schema metadata (`MIG_SCHEMA_COMMIT` env var vs explicit `mig migrate --schema-commit` option).
+1. Evaluate auto path resolution for `status`/`drain`/`cutover` using current-directory naming conventions to reduce required flags.
 
 ## Completed next-step items
 
@@ -183,3 +190,4 @@ src/
 13. Deterministic default new DB path from schema hash
 14. CLI integration coverage for argument-parser help/usage output
 15. Schema identity metadata table + status exposure
+16. Schema commit source contract (`--schema-commit` + env fallback)

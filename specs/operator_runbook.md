@@ -19,7 +19,7 @@ This runbook describes how to execute and validate a hot migration using the cur
 ## Phase 1: Migrate
 
 ```sh
-mig migrate [--old old.db] [--schema schema.fsx] [--new new.db]
+mig migrate [--old old.db] [--schema schema.fsx] [--schema-commit <value>] [--new new.db]
 ```
 
 Default no-flag mode (`mig migrate` from project directory):
@@ -27,6 +27,11 @@ Default no-flag mode (`mig migrate` from project directory):
 - uses `./schema.fsx`
 - derives target path `./<dir-name>-<schema-hash>.sqlite`
 - auto-detects source DB as exactly one `./<dir-name>-<old-hash>.sqlite` file excluding the target
+
+Optional metadata:
+
+- `--schema-commit` stores deployment/source commit metadata in `_schema_identity.schema_commit`
+- if omitted, `MIG_SCHEMA_COMMIT` is used when present
 
 Expected outcomes:
 
