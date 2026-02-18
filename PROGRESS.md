@@ -118,9 +118,23 @@ src/
 - **CLI command added**: `mig cleanup-old --old <path>` now reports previous marker status plus whether each migration table was dropped.
 - **Coverage added**: tests now validate successful cleanup, idempotent no-op behavior when tables are already absent, and guarded failure in recording mode.
 
+## Update (2026-02-18, CLI integration coverage)
+
+- **CLI integration harness added**: test project now references `mig` and runs real CLI parsing/dispatch through `Mig.Program.main`.
+- **Status output path covered**: integration test verifies `mig status --new` output semantics after cutover cleanup (`pending replay` annotation and removed-table reporting).
+- **Cutover error path covered**: integration test verifies `mig cutover` non-zero exit + stderr when drain is incomplete.
+- **Cleanup-old output/error paths covered**: integration tests verify both successful cleanup summaries and guarded failure while marker status is `recording`.
+- **CLI command naming hardened**: `cleanup-old` subcommand now uses explicit command-line naming (hyphenated) via `CustomCommandLine`.
+
+## Update (2026-02-18, README refresh)
+
+- **Root docs aligned with current CLI**: `README.md` now documents the active command set (`migrate`, `drain`, `cutover`, `cleanup-old`, `status`) and removes legacy command references.
+- **Operational quickstart updated**: README quickstart now shows the online hot-migration flow used by the implemented toolchain.
+- **Spec links clarified**: README now points directly to `specs/database_dsl.md`, `specs/hot_migrations.md`, and `specs/mig_command.md`.
+
 ## What's next
 
-1. CLI integration tests for `mig` output/error paths (status, cutover, cleanup-old)
+1. Add a short end-to-end operator runbook doc with preflight checks and rollback notes (built from current behavior).
 
 ## Completed next-step items
 
@@ -134,3 +148,5 @@ src/
 7. Migration safety hardening
 8. Operational cleanup policy (migration table retention/removal and status output after cutover)
 9. Optional old-database cleanup command for archived environments
+10. CLI integration tests for `mig` output/error paths (status, cutover, cleanup-old)
+11. Refresh root README to current command surface

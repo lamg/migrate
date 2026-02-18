@@ -61,7 +61,7 @@ type Command =
   | [<CliPrefix(CliPrefix.None)>] Migrate of ParseResults<MigrateArgs>
   | [<CliPrefix(CliPrefix.None)>] Drain of ParseResults<DrainArgs>
   | [<CliPrefix(CliPrefix.None)>] Cutover of ParseResults<CutoverArgs>
-  | [<CliPrefix(CliPrefix.None)>] CleanupOld of ParseResults<CleanupOldArgs>
+  | [<CliPrefix(CliPrefix.None); CustomCommandLine("cleanup-old")>] CleanupOld of ParseResults<CleanupOldArgs>
   | [<CliPrefix(CliPrefix.None)>] Status of ParseResults<StatusArgs>
 
   interface IArgParserTemplate with

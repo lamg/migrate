@@ -14,5 +14,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../MigLib/MigLib.fsproj" />
+    <ProjectReference Include="../mig/mig.fsproj" />
   </ItemGroup>
 </Project>

@@ -7,7 +7,8 @@
 [![NuGet Downloads][nuget-downloads]][migtool]
 ![Tests][tests]
 
-Migrate is a tool for performing declarative migrations by finding differences between an expected database schema and the existing one, currently in a SQLite database. It also generates type-safe F# code with CRUD operations for your database schema.
+Migrate is a SQLite-first migration toolchain built around F# schema scripts (`.fsx`).
+It provides a hot-migration workflow (`migrate` -> `drain` -> `cutover`) plus type-safe code generation from reflected schema types.
 
 ## Installation
 
@@ -30,43 +31,43 @@ After having [.Net][dotnet] in your system you can run
 dotnet tool install --global migtool
 ```
 
-## Quickstart
+## Quickstart (Online Migration)
+
+Assuming:
+
+- an existing SQLite database at `old.db`
+- a target schema script at `schema.fsx`
 
 ```sh
-mkdir test_db
-cd test_db
-mig init
-# generated project files with example definitions
-mig status
-# output shows migration for existing definitions
-mig commit
-# generates and executes migration
-mig log
-# output shows migration metadata and a summary of executed steps
-mig codegen --async
-# generate type-safe F# code for CRUD operations returning a Task<Result<'T,SqliteException>> value
-mig seed
-# seed the database by executing insert statements in SQL code
+mig migrate --old old.db --schema schema.fsx --new new.db
+mig status --old old.db --new new.db
+mig drain --old old.db --new new.db
+mig cutover --new new.db
+# optional, after traffic has fully moved to the new service:
+mig cleanup-old --old old.db
 ```
 
 ## Features
 
-- [Declarative migrations](./src/MigLib/DeclarativeMigrations/README.md)
-- [Migration execution](./src/MigLib/Execution/README.md)
-- [Migration execution as library](./src/MigLib/Execution/README.md#migration-execution-using-miglib)
-- [F# code generation with type-safe CRUD operations](./src/MigLib/CodeGen/README.md)
-- [Migration log](./src/MigLib/MigrationLog/README.md)
-- [Seed data management with idempotent upserts](./spec.md#9-seed-data-management-with-idempotent-upserts)
+- F# schema reflection from `.fsx` scripts
+- FK-aware bulk copy and replay with ID mapping
+- Replay checkpoints and drain safety validation
+- Operational status reporting for old/new database migration state
+- Optional old-database migration-table cleanup after cutover
+
+## Specs
+
+- [`specs/database_dsl.md`](./specs/database_dsl.md)
+- [`specs/hot_migrations.md`](./specs/hot_migrations.md)
+- [`specs/mig_command.md`](./specs/mig_command.md)
 
 ## Commands
 
-- `mig init` - Initialize a new migration project with example schema files
-- `mig status` - Generate migration SQL by comparing expected schema with current database
-- `mig commit [-m <message>]` - Generate and execute migrations step by step
-- `mig schema` - Show the current database schema
-- `mig log [-s <steps-id>]` - Show migration history and execution metadata
-- `mig codegen [-d <directory>]` - Generate type-safe F# code with CRUD operations from SQL schema files
-- `mig seed` - Execute seed statements (INSERT OR REPLACE) from SQL files
+- `mig migrate --old <path> --schema <path> [--new <path>]` - Create the new DB from schema, copy data, and start recording on old DB.
+- `mig drain --old <path> --new <path>` - Switch old DB to draining mode and replay pending migration log entries.
+- `mig cutover --new <path>` - Verify drain completion, switch new DB to `ready`, and remove replay-only tables.
+- `mig cleanup-old --old <path>` - Optional cleanup of old DB migration tables (`_migration_marker`, `_migration_log`).
+- `mig status --old <path> [--new <path>]` - Show marker/status state and migration counters for operational visibility.
 
 ## Contributing
 

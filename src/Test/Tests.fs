@@ -47,6 +47,24 @@ let private mkLogEntry id txnId ordering operation sourceTable rowData =
     sourceTable = sourceTable
     rowData = rowData }
 
+let private cliIoLock = obj ()
+
+let private runMigCli (args: string list) =
+  lock cliIoLock (fun () ->
+    let originalOut = Console.Out
+    let originalErr = Console.Error
+    use outWriter = new StringWriter()
+    use errWriter = new StringWriter()
+    Console.SetOut outWriter
+    Console.SetError errWriter
+
+    try
+      let exitCode = Mig.Program.main (args |> List.toArray)
+      exitCode, outWriter.ToString(), errWriter.ToString()
+    finally
+      Console.SetOut originalOut
+      Console.SetError originalErr)
+
 [<AutoIncPK "id">]
 [<Unique "name">]
 [<Index "name">]
@@ -1493,6 +1511,178 @@ let ``cleanup old fails while marker status is recording`` () =
   | Error ex -> Assert.Contains("recording mode", ex.Message)
 
   oldConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli status prints cutover-complete cleanup state`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_status_cutover_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+  let newDbPath = Path.Combine(tempDir, "new.db")
+
+  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  oldConn.Open()
+
+  [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'draining');"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);"
+    "INSERT INTO _migration_log(txn_id, ordering, operation, table_name, row_data) VALUES (1, 1, 'insert', 'student', '{\"id\":1,\"name\":\"A\"}');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, oldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  use newConn = new SqliteConnection($"Data Source={newDbPath}")
+  newConn.Open()
+
+  [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, newConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let exitCode, stdOut, stdErr =
+    runMigCli [ "status"; "--old"; oldDbPath; "--new"; newDbPath ]
+
+  Assert.Equal(0, exitCode)
+  Assert.Contains($"Old database: {oldDbPath}", stdOut)
+  Assert.Contains("Marker status: draining", stdOut)
+  Assert.Contains("Migration status: ready", stdOut)
+  Assert.Contains("Pending replay entries: 0 (cutover complete)", stdOut)
+  Assert.Contains("_id_mapping: removed", stdOut)
+  Assert.Contains("_migration_progress: removed", stdOut)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+
+  oldConn.Close()
+  newConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli cutover returns error when drain not complete`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_cutover_not_drained_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let newDbPath = Path.Combine(tempDir, "new.db")
+
+  use newConn = new SqliteConnection($"Data Source={newDbPath}")
+  newConn.Open()
+
+  [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');"
+    "CREATE TABLE _migration_progress(id INTEGER PRIMARY KEY CHECK (id = 0), last_replayed_log_id INTEGER NOT NULL, drain_completed INTEGER NOT NULL);"
+    "INSERT INTO _migration_progress(id, last_replayed_log_id, drain_completed) VALUES (0, 12, 0);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, newConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let exitCode, stdOut, stdErr = runMigCli [ "cutover"; "--new"; newDbPath ]
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("cutover failed: Drain is not complete", stdErr)
+
+  newConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli cleanup-old prints dropped table summary`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_cleanup_old_success_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+
+  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  oldConn.Open()
+
+  [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'draining');"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, oldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  oldConn.Close()
+
+  let exitCode, stdOut, stdErr = runMigCli [ "cleanup-old"; "--old"; oldDbPath ]
+
+  Assert.Equal(0, exitCode)
+  Assert.Contains("Old database cleanup complete.", stdOut)
+  Assert.Contains($"Old database: {oldDbPath}", stdOut)
+  Assert.Contains("Previous marker status: draining", stdOut)
+  Assert.Contains("Dropped _migration_marker: yes", stdOut)
+  Assert.Contains("Dropped _migration_log: yes", stdOut)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+
+  use verifyConn = new SqliteConnection($"Data Source={oldDbPath}")
+  verifyConn.Open()
+
+  use markerExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_marker' LIMIT 1",
+      verifyConn
+    )
+
+  let markerExists = markerExistsCmd.ExecuteScalar()
+  Assert.True(isNull markerExists)
+
+  use logExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_log' LIMIT 1",
+      verifyConn
+    )
+
+  let logExists = logExistsCmd.ExecuteScalar()
+  Assert.True(isNull logExists)
+
+  verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli cleanup-old returns error while recording`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_cleanup_old_recording_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+
+  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  oldConn.Open()
+
+  [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, oldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  oldConn.Close()
+
+  let exitCode, stdOut, stdErr = runMigCli [ "cleanup-old"; "--old"; oldDbPath ]
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("cleanup-old failed: Old database is still in recording mode.", stdErr)
+
+  use verifyConn = new SqliteConnection($"Data Source={oldDbPath}")
+  verifyConn.Open()
+
+  use markerExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_marker' LIMIT 1",
+      verifyConn
+    )
+
+  let markerExists = markerExistsCmd.ExecuteScalar()
+  Assert.False(isNull markerExists)
+
+  verifyConn.Close()
   Directory.Delete(tempDir, true)
 
 [<Fact>]
