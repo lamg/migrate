@@ -463,6 +463,84 @@ let ``schema copy plan keeps renamed table mappings`` () =
   Assert.Contains(("full_name", "name"), userTableMapping.renamedColumns)
 
 [<Fact>]
+let ``non-table consistency report passes for valid target schema objects`` () =
+  let targetSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "student"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              [] ]
+        indexes =
+          [ { name = "ix_student_name"
+              table = "student"
+              columns = [ "name" ] } ]
+        views =
+          [ { name = "student_view"
+              sqlTokens = [ "CREATE VIEW student_view AS SELECT id, name FROM student;" ]
+              dependencies = [ "student" ]
+              queryByAnnotations = []
+              queryLikeAnnotations = []
+              queryByOrCreateAnnotations = []
+              insertOrIgnoreAnnotations = [] } ]
+        triggers =
+          [ { name = "trg_student_insert"
+              sqlTokens = [ "CREATE TRIGGER trg_student_insert AFTER INSERT ON student BEGIN SELECT 1; END;" ]
+              dependencies = [ "student" ] } ] }
+
+  let report = analyzeNonTableConsistency targetSchema
+
+  Assert.Empty report.unsupportedLines
+  Assert.Contains("non-table consistency checks: passed", report.supportedLines)
+
+[<Fact>]
+let ``non-table consistency report flags invalid target schema objects`` () =
+  let targetSchema =
+    { emptyFile with
+        tables = [ mkTable "student" [ mkColumn "id" SqlInteger [ NotNull ] ] [] ]
+        indexes =
+          [ { name = "ix_student_ghost"
+              table = "student"
+              columns = [ "ghost" ] } ]
+        views =
+          [ { name = "student_view"
+              sqlTokens = [ "CREATE VIEW student_view AS SELECT id FROM student;" ]
+              dependencies = [ "student"; "missing_table" ]
+              queryByAnnotations = []
+              queryLikeAnnotations = []
+              queryByOrCreateAnnotations = []
+              insertOrIgnoreAnnotations = [] }
+            { name = "student_view"
+              sqlTokens = [ "CREATE VIEW student_view AS SELECT id FROM student;" ]
+              dependencies = [ "student" ]
+              queryByAnnotations = []
+              queryLikeAnnotations = []
+              queryByOrCreateAnnotations = []
+              insertOrIgnoreAnnotations = [] } ]
+        triggers =
+          [ { name = "trg_student_insert"
+              sqlTokens = []
+              dependencies = [ "missing_table" ] } ] }
+
+  let report = analyzeNonTableConsistency targetSchema
+  let unsupportedSummary = report.unsupportedLines |> String.concat "\n"
+
+  Assert.NotEmpty report.unsupportedLines
+  Assert.Contains("non-table consistency checks: found unsupported target-schema issues", report.supportedLines)
+  Assert.Contains("Index 'ix_student_ghost' references missing columns", unsupportedSummary)
+  Assert.Contains("Target view 'student_view' is declared 2 times.", unsupportedSummary)
+  Assert.Contains("View 'student_view' references missing dependencies: missing_table.", unsupportedSummary)
+  Assert.Contains("Trigger 'trg_student_insert' references missing dependencies: missing_table.", unsupportedSummary)
+  Assert.Contains("Trigger 'trg_student_insert' has no SQL tokens.", unsupportedSummary)
+
+[<Fact>]
 let ``taskTxn records writes into migration log when marker is recording`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_tasktxn_recording_{Guid.NewGuid()}")

@@ -223,12 +223,17 @@ src/
 - **Safety behavior locked down**: on preflight failure, migrate exits before creating old-db recording tables or creating the new database file.
 - **Coverage added**: migration tests now verify preflight failure reporting and assert zero side effects (`_migration_marker`/`_migration_log` absent; new DB file absent).
 
+## Update (2026-02-18, non-table consistency preflight coverage)
+
+- **Target non-table checks added**: migrate preflight now validates target-schema indexes/views/triggers for consistency (duplicate names, missing dependencies, missing SQL tokens, invalid index table/column references).
+- **Preflight reporting expanded**: schema preflight output now includes explicit non-table summaries and folds non-table consistency failures into `Unsupported differences`.
+- **Coverage added**: unit tests now verify `analyzeNonTableConsistency` for both valid and invalid target non-table definitions.
+
 ## What's next
 
 1. Define and test a trigger-behavior validation checklist for drain/replay and post-cutover writes.
-2. Extend explicit diff/reporting coverage for non-table objects (views/indexes/triggers) as target-schema consistency checks.
-3. Add a dry-run planning mode that prints inferred paths, schema copy plan, and replay prerequisites without mutating databases.
-4. Improve failure-recovery guidance/output for partial `migrate` failures (what exists, safe cleanup, safe rerun).
+2. Add a dry-run planning mode that prints inferred paths, schema copy plan, and replay prerequisites without mutating databases.
+3. Improve failure-recovery guidance/output for partial `migrate` failures (what exists, safe cleanup, safe rerun).
 
 ## Completed next-step items
 
@@ -258,3 +263,4 @@ src/
 23. Old DB candidate naming preflight diagnostics
 24. Schema-object consistency direction (target-only views/indexes/triggers)
 25. Strict preflight drift reporting before migration side effects
+26. Non-table object consistency checks in migrate preflight reporting

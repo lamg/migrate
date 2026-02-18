@@ -1248,6 +1248,161 @@ let private formatTableMappingDelta (mapping: TableCopyMapping) : string option 
     let changeSummary = changes |> String.concat "; "
     Some $"table '{mapping.targetTable}': {changeSummary}"
 
+type internal NonTableConsistencyReport =
+  { supportedLines: string list
+    unsupportedLines: string list }
+
+let private summarizeIndexDefinitions (indexes: CreateIndex list) =
+  match indexes with
+  | [] -> "target indexes: none"
+  | values ->
+    let details =
+      values
+      |> List.map (fun index ->
+        let columns = index.columns |> String.concat ", "
+        $"{index.name} ({index.table}: {columns})")
+      |> String.concat ", "
+
+    $"target indexes: {details}"
+
+let private summarizeViewDefinitions (views: CreateView list) =
+  match views with
+  | [] -> "target views: none"
+  | values ->
+    let details =
+      values
+      |> List.map (fun view ->
+        let dependencies = view.dependencies |> joinOrNone
+        $"{view.name} (deps: {dependencies})")
+      |> String.concat ", "
+
+    $"target views: {details}"
+
+let private summarizeTriggerDefinitions (triggers: CreateTrigger list) =
+  match triggers with
+  | [] -> "target triggers: none"
+  | values ->
+    let details =
+      values
+      |> List.map (fun trigger ->
+        let dependencies = trigger.dependencies |> joinOrNone
+        $"{trigger.name} (deps: {dependencies})")
+      |> String.concat ", "
+
+    $"target triggers: {details}"
+
+let private detectDuplicateObjectNames (objectType: string) (names: string list) =
+  names
+  |> List.groupBy id
+  |> List.choose (fun (name, values) ->
+    if values.Length > 1 then
+      Some $"Target {objectType} '{name}' is declared {values.Length} times."
+    else
+      None)
+
+let private validateIndexConsistency (targetSchema: SqlFile) =
+  let tablesByName =
+    targetSchema.tables |> List.map (fun table -> table.name, table) |> Map.ofList
+
+  targetSchema.indexes
+  |> List.collect (fun index ->
+    match tablesByName.TryFind index.table with
+    | None -> [ $"Index '{index.name}' references missing table '{index.table}'." ]
+    | Some tableDef ->
+      let tableColumns = tableDef.columns |> List.map _.name |> Set.ofList
+
+      let missingColumns =
+        index.columns
+        |> List.filter (fun columnName -> not (tableColumns.Contains columnName))
+
+      if missingColumns.IsEmpty then
+        []
+      else
+        let missingColumnText = missingColumns |> String.concat ", "
+        [ $"Index '{index.name}' references missing columns on '{index.table}': {missingColumnText}." ])
+
+let private validateViewConsistency (targetSchema: SqlFile) =
+  let tableNames = targetSchema.tables |> List.map _.name |> Set.ofList
+  let viewNames = targetSchema.views |> List.map _.name |> Set.ofList
+  let knownDependencies = Set.union tableNames viewNames
+
+  targetSchema.views
+  |> List.collect (fun view ->
+    let missingDependencies =
+      view.dependencies
+      |> List.filter (fun dependency -> not (knownDependencies.Contains dependency))
+
+    let dependencyErrors =
+      if missingDependencies.IsEmpty then
+        []
+      else
+        let missingDependencyText = missingDependencies |> String.concat ", "
+        [ $"View '{view.name}' references missing dependencies: {missingDependencyText}." ]
+
+    let tokenErrors =
+      if view.sqlTokens |> Seq.isEmpty then
+        [ $"View '{view.name}' has no SQL tokens." ]
+      else
+        []
+
+    dependencyErrors @ tokenErrors)
+
+let private validateTriggerConsistency (targetSchema: SqlFile) =
+  let tableNames = targetSchema.tables |> List.map _.name |> Set.ofList
+  let viewNames = targetSchema.views |> List.map _.name |> Set.ofList
+  let knownDependencies = Set.union tableNames viewNames
+
+  targetSchema.triggers
+  |> List.collect (fun trigger ->
+    let missingDependencies =
+      trigger.dependencies
+      |> List.filter (fun dependency -> not (knownDependencies.Contains dependency))
+
+    let dependencyErrors =
+      if missingDependencies.IsEmpty then
+        []
+      else
+        let missingDependencyText = missingDependencies |> String.concat ", "
+        [ $"Trigger '{trigger.name}' references missing dependencies: {missingDependencyText}." ]
+
+    let tokenErrors =
+      if trigger.sqlTokens |> Seq.isEmpty then
+        [ $"Trigger '{trigger.name}' has no SQL tokens." ]
+      else
+        []
+
+    dependencyErrors @ tokenErrors)
+
+let internal analyzeNonTableConsistency (targetSchema: SqlFile) : NonTableConsistencyReport =
+  let duplicateIndexNames =
+    targetSchema.indexes |> List.map _.name |> detectDuplicateObjectNames "index"
+
+  let duplicateViewNames =
+    targetSchema.views |> List.map _.name |> detectDuplicateObjectNames "view"
+
+  let duplicateTriggerNames =
+    targetSchema.triggers |> List.map _.name |> detectDuplicateObjectNames "trigger"
+
+  let unsupportedLines =
+    duplicateIndexNames
+    @ duplicateViewNames
+    @ duplicateTriggerNames
+    @ validateIndexConsistency targetSchema
+    @ validateViewConsistency targetSchema
+    @ validateTriggerConsistency targetSchema
+
+  let supportedLines =
+    [ summarizeIndexDefinitions targetSchema.indexes
+      summarizeViewDefinitions targetSchema.views
+      summarizeTriggerDefinitions targetSchema.triggers
+      if unsupportedLines.IsEmpty then
+        "non-table consistency checks: passed"
+      else
+        "non-table consistency checks: found unsupported target-schema issues" ]
+
+  { supportedLines = supportedLines
+    unsupportedLines = unsupportedLines }
+
 let private describeSupportedDifferences (schemaPlan: SchemaCopyPlan) : string list =
   let diff = schemaPlan.diff
 
@@ -1279,12 +1434,22 @@ let private renderPreflightReport (supported: string list) (unsupported: string 
 
 let private buildCopyPlan (sourceSchema: SqlFile) (targetSchema: SqlFile) : Result<BulkCopyPlan, SqliteException> =
   let schemaPlan = buildSchemaCopyPlan sourceSchema targetSchema
-  let supportedDifferences = describeSupportedDifferences schemaPlan
+  let tableDifferences = describeSupportedDifferences schemaPlan
+  let nonTableConsistency = analyzeNonTableConsistency targetSchema
+  let supportedDifferences = tableDifferences @ nonTableConsistency.supportedLines
 
   match buildBulkCopyPlan sourceSchema targetSchema with
-  | Ok plan -> Ok plan
+  | Ok plan ->
+    if nonTableConsistency.unsupportedLines.IsEmpty then
+      Ok plan
+    else
+      let report =
+        renderPreflightReport supportedDifferences nonTableConsistency.unsupportedLines
+
+      Error(toSqliteError report)
   | Error message ->
-    let report = renderPreflightReport supportedDifferences [ message ]
+    let unsupported = nonTableConsistency.unsupportedLines @ [ message ]
+    let report = renderPreflightReport supportedDifferences unsupported
     Error(toSqliteError report)
 
 let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<MigrationStatusReport, SqliteException>> =
