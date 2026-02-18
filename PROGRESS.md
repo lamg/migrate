@@ -132,9 +132,15 @@ src/
 - **Operational quickstart updated**: README quickstart now shows the online hot-migration flow used by the implemented toolchain.
 - **Spec links clarified**: README now points directly to `specs/database_dsl.md`, `specs/hot_migrations.md`, and `specs/mig_command.md`.
 
+## Update (2026-02-18, operator runbook)
+
+- **Runbook added**: new `specs/operator_runbook.md` documents end-to-end hot migration operations with preflight checks, phase-by-phase validation, and common failure triage.
+- **Rollback notes added**: runbook now captures practical rollback guidance before and after cutover/cleanup to reduce operator ambiguity.
+- **README linked**: root README now includes the runbook in the specs section.
+
 ## What's next
 
-1. Add a short end-to-end operator runbook doc with preflight checks and rollback notes (built from current behavior).
+1. Add CLI integration coverage for argument-parser help/usage output (root `--help` and subcommand `--help`).
 
 ## Completed next-step items
 
@@ -150,3 +156,4 @@ src/
 9. Optional old-database cleanup command for archived environments
 10. CLI integration tests for `mig` output/error paths (status, cutover, cleanup-old)
 11. Refresh root README to current command surface
+12. End-to-end operator runbook with preflight/rollback notes

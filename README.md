@@ -60,6 +60,7 @@ mig cleanup-old --old old.db
 - [`specs/database_dsl.md`](./specs/database_dsl.md)
 - [`specs/hot_migrations.md`](./specs/hot_migrations.md)
 - [`specs/mig_command.md`](./specs/mig_command.md)
+- [`specs/operator_runbook.md`](./specs/operator_runbook.md)
 
 ## Commands
 
