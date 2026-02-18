@@ -146,9 +146,15 @@ src/
 - **Coverage added**: CLI integration tests now validate deterministic current-directory pathing, no-arg auto-discovery flow, and schema-matched no-op behavior.
 - **Docs aligned**: README/specs/runbook now describe current-directory deterministic behavior for `mig migrate`.
 
+## Update (2026-02-18, CLI help/usage integration coverage)
+
+- **Root help coverage added**: integration test now validates `mig --help` output includes the full current subcommand surface.
+- **Subcommand help coverage added**: integration test now validates `--help` output for `migrate`, `drain`, `cutover`, `cleanup-old`, and `status`.
+- **Parser contract locked down**: tests now enforce expected migrate usage shape with optional `--old/--schema/--new` in current auto-discovery mode.
+
 ## What's next
 
-1. Add CLI integration coverage for argument-parser help/usage output (root `--help` and subcommand `--help`).
+1. Add schema-identity metadata table in the new database (schema hash + optional commit) and expose it in `mig status`.
 
 ## Completed next-step items
 
@@ -166,3 +172,4 @@ src/
 11. Refresh root README to current command surface
 12. End-to-end operator runbook with preflight/rollback notes
 13. Deterministic default new DB path from schema hash
+14. CLI integration coverage for argument-parser help/usage output

@@ -87,6 +87,16 @@ let private deriveDeterministicNewDbPathFromSchema (directoryPath: string) (sche
   let directoryName = DirectoryInfo(directoryPath).Name
   Path.Combine(directoryPath, $"{directoryName}-{schemaHash}.sqlite")
 
+let private assertCliHelpOutput (args: string list) (expectedUsage: string) (expectedFragments: string list) =
+  let exitCode, stdOut, stdErr = runMigCli args
+  Assert.Equal(1, exitCode)
+  Assert.Contains(expectedUsage, stdOut)
+
+  expectedFragments
+  |> List.iter (fun fragment -> Assert.Contains(fragment, stdOut))
+
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+
 [<AutoIncPK "id">]
 [<Unique "name">]
 [<Index "name">]
@@ -1580,6 +1590,33 @@ let ``cli status prints cutover-complete cleanup state`` () =
   oldConn.Close()
   newConn.Close()
   Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli root help shows current command surface`` () =
+  assertCliHelpOutput
+    [ "--help" ]
+    "USAGE: mig [--help] [<subcommand> [<options>]]"
+    [ "migrate <options>"
+      "drain <options>"
+      "cutover <options>"
+      "cleanup-old <options>"
+      "status <options>" ]
+
+[<Fact>]
+let ``cli subcommand help shows usage and options`` () =
+  let cases: (string list * string * string list) list =
+    [ ([ "migrate"; "--help" ],
+       "USAGE: mig migrate [--help] [--old <path>] [--schema <path>] [--new <path>]",
+       [ "--old <path>"; "--schema <path>"; "--new <path>" ])
+      ([ "drain"; "--help" ], "USAGE: mig drain [--help] --old <path> --new <path>", [ "--old <path>"; "--new <path>" ])
+      ([ "cutover"; "--help" ], "USAGE: mig cutover [--help] --new <path>", [ "--new <path>" ])
+      ([ "cleanup-old"; "--help" ], "USAGE: mig cleanup-old [--help] --old <path>", [ "--old <path>" ])
+      ([ "status"; "--help" ],
+       "USAGE: mig status [--help] --old <path> [--new <path>]",
+       [ "--old <path>"; "--new <path>" ]) ]
+
+  for args, expectedUsage, expectedFragments in cases do
+    assertCliHelpOutput args expectedUsage expectedFragments
 
 [<Fact>]
 let ``cli cutover returns error when drain not complete`` () =
