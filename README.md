@@ -31,6 +31,33 @@ After having [.Net][dotnet] in your system you can run
 dotnet tool install --global migtool
 ```
 
+## Local Tool Build/Install (FAKE)
+
+Build and install the current branch as a local tool into `./.tools/mig`:
+
+```sh
+dotnet fsi build.fsx
+```
+
+Run specific FAKE targets when needed:
+
+```sh
+dotnet fsi build.fsx -- --target Build
+dotnet fsi build.fsx -- --target PackTool
+```
+
+Use a custom local package version when needed:
+
+```sh
+MIG_LOCAL_VERSION=0.0.0-local.1 dotnet fsi build.fsx
+```
+
+Run the installed local tool directly:
+
+```sh
+./.tools/mig/mig --help
+```
+
 ## Quickstart (Online Migration)
 
 Assuming:
