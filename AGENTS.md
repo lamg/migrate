@@ -66,12 +66,12 @@ All F# code must be formatted using [Fantomas](https://fsprojects.github.io/fant
 **Format all files in the project:**
 ```bash
 cd src
-dotnet fantomas .
+fantomas .
 ```
 
 **Format specific files:**
 ```bash
-dotnet fantomas src/MigLib/Db.fs
+fantomas src/MigLib/Db.fs
 ```
 
 This ensures consistent code style across the entire codebase and prevents formatting-related diffs in commits.

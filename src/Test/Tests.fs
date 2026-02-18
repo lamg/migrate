@@ -1161,6 +1161,8 @@ let ``migration status reports old and new database markers and counts`` () =
     Assert.Equal(Some 1L, report.pendingReplayEntries)
     Assert.Equal(Some 2L, report.idMappingEntries)
     Assert.Equal(Some "migrating", report.newMigrationStatus)
+    Assert.Equal(Some true, report.idMappingTablePresent)
+    Assert.Equal(Some true, report.migrationProgressTablePresent)
 
   oldConn.Close()
   newConn.Close()
@@ -1193,12 +1195,61 @@ let ``migration status handles databases without migration tables`` () =
     Assert.Equal(None, report.pendingReplayEntries)
     Assert.Equal(None, report.idMappingEntries)
     Assert.Equal(None, report.newMigrationStatus)
+    Assert.Equal(None, report.idMappingTablePresent)
+    Assert.Equal(None, report.migrationProgressTablePresent)
 
   oldConn.Close()
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cutover sets ready status and drops id mapping table`` () =
+let ``migration status reports cleanup state after cutover`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_status_cutover_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+  let newDbPath = Path.Combine(tempDir, "new.db")
+
+  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  oldConn.Open()
+
+  [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'draining');"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);"
+    "INSERT INTO _migration_log(txn_id, ordering, operation, table_name, row_data) VALUES (1, 1, 'insert', 'student', '{\"id\":1,\"name\":\"A\"}');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, oldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  use newConn = new SqliteConnection($"Data Source={newDbPath}")
+  newConn.Open()
+
+  [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, newConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let statusResult = getStatus oldDbPath (Some newDbPath) |> fun t -> t.Result
+
+  match statusResult with
+  | Error ex -> failwith $"Expected status read after cutover cleanup to succeed, got {ex.Message}"
+  | Ok report ->
+    Assert.Equal(Some "draining", report.oldMarkerStatus)
+    Assert.Equal(1L, report.migrationLogEntries)
+    Assert.Equal(Some "ready", report.newMigrationStatus)
+    Assert.Equal(Some 0L, report.pendingReplayEntries)
+    Assert.Equal(Some 0L, report.idMappingEntries)
+    Assert.Equal(Some false, report.idMappingTablePresent)
+    Assert.Equal(Some false, report.migrationProgressTablePresent)
+
+  oldConn.Close()
+  newConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cutover sets ready status and drops id mapping and progress tables`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cutover_success_{Guid.NewGuid()}")
 
@@ -1226,6 +1277,7 @@ let ``cutover sets ready status and drops id mapping table`` () =
   | Ok result ->
     Assert.Equal("migrating", result.previousStatus)
     Assert.True(result.idMappingDropped)
+    Assert.True(result.migrationProgressDropped)
 
   use verifyStatusCmd =
     new SqliteCommand("SELECT status FROM _migration_status WHERE id = 0", newConn)
@@ -1238,6 +1290,45 @@ let ``cutover sets ready status and drops id mapping table`` () =
 
   let idMappingExists = existsCmd.ExecuteScalar()
   Assert.True(isNull idMappingExists)
+
+  use progressExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_progress' LIMIT 1",
+      newConn
+    )
+
+  let progressExists = progressExistsCmd.ExecuteScalar()
+  Assert.True(isNull progressExists)
+
+  newConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cutover is idempotent when migration status is already ready`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cutover_ready_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let newDbPath = Path.Combine(tempDir, "new.db")
+
+  use newConn = new SqliteConnection($"Data Source={newDbPath}")
+  newConn.Open()
+
+  [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, newConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let cutoverResult = runCutover newDbPath |> fun t -> t.Result
+
+  match cutoverResult with
+  | Error ex -> failwith $"Expected idempotent cutover to succeed, got {ex.Message}"
+  | Ok result ->
+    Assert.Equal("ready", result.previousStatus)
+    Assert.False(result.idMappingDropped)
+    Assert.False(result.migrationProgressDropped)
 
   newConn.Close()
   Directory.Delete(tempDir, true)
@@ -1298,6 +1389,110 @@ let ``cutover fails when drain has not completed`` () =
   | Error ex -> Assert.Contains("Drain is not complete", ex.Message)
 
   newConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cleanup old drops migration marker and log tables`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cleanup_old_success_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+
+  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  oldConn.Open()
+
+  [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'draining');"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);"
+    "INSERT INTO _migration_log(txn_id, ordering, operation, table_name, row_data) VALUES (1, 1, 'insert', 'student', '{\"id\":1,\"name\":\"A\"}');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, oldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let cleanupResult = runCleanupOld oldDbPath |> fun t -> t.Result
+
+  match cleanupResult with
+  | Error ex -> failwith $"Expected cleanup old to succeed, got {ex.Message}"
+  | Ok result ->
+    Assert.Equal(Some "draining", result.previousMarkerStatus)
+    Assert.True(result.markerDropped)
+    Assert.True(result.logDropped)
+
+  use markerExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_marker' LIMIT 1",
+      oldConn
+    )
+
+  let markerExists = markerExistsCmd.ExecuteScalar()
+  Assert.True(isNull markerExists)
+
+  use logExistsCmd =
+    new SqliteCommand("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_log' LIMIT 1", oldConn)
+
+  let logExists = logExistsCmd.ExecuteScalar()
+  Assert.True(isNull logExists)
+
+  oldConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cleanup old is idempotent when migration tables are missing`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cleanup_old_missing_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+
+  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  oldConn.Open()
+
+  use initCmd =
+    new SqliteCommand("CREATE TABLE student(id INTEGER PRIMARY KEY, name TEXT NOT NULL);", oldConn)
+
+  initCmd.ExecuteNonQuery() |> ignore
+
+  let cleanupResult = runCleanupOld oldDbPath |> fun t -> t.Result
+
+  match cleanupResult with
+  | Error ex -> failwith $"Expected idempotent cleanup old to succeed, got {ex.Message}"
+  | Ok result ->
+    Assert.Equal(None, result.previousMarkerStatus)
+    Assert.False(result.markerDropped)
+    Assert.False(result.logDropped)
+
+  oldConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cleanup old fails while marker status is recording`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cleanup_old_recording_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+
+  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  oldConn.Open()
+
+  [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, oldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let cleanupResult = runCleanupOld oldDbPath |> fun t -> t.Result
+
+  match cleanupResult with
+  | Ok _ -> failwith "Expected cleanup old to fail while marker status is recording"
+  | Error ex -> Assert.Contains("recording mode", ex.Message)
+
+  oldConn.Close()
   Directory.Delete(tempDir, true)
 
 [<Fact>]

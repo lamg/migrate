@@ -17,6 +17,7 @@ They communicate through marker tables in the databases:
 - `_migration_status` in the **new database**: read by MigLib in the new service
   - `status = 'migrating'` → MigLib rejects all requests
   - `status = 'ready'` → MigLib starts serving
+- `_migration_progress` in the **new database**: replay checkpoint state for drain safety and status reporting
 
 ## Offline mode
 
@@ -39,7 +40,7 @@ No recording, replay, or drain phases are needed since no service is writing to 
 
 ## Online mode
 
-When services are deployed, the administrator uses three commands:
+When services are deployed, the administrator uses three required commands plus one optional cleanup command:
 
 ### `mig migrate`
 
@@ -79,12 +80,27 @@ mig cutover --new new.db
 Run after `mig drain` has exited:
 
 - Verifies that drain is complete (`_migration_log` fully consumed)
-- Drops `_id_mapping` from the new database
+- Drops replay-only tables (`_id_mapping`, `_migration_progress`) from the new database
 - Updates `_migration_status` to 'ready' in the new database
 - MigLib in the new service detects the status change and starts serving
 - Reports completion
 
 The administrator then switches traffic from the old service to the new one.
+Old migration tables (`_migration_marker`, `_migration_log`) are retained until the old database is archived/deleted.
+
+### `mig cleanup-old`
+
+```
+mig cleanup-old --old old.db
+```
+
+Optional command for archived environments, run after traffic has moved to the new service:
+
+- Validates the old database is not still in `_migration_marker(status='recording')`
+- Drops old migration tables (`_migration_marker`, `_migration_log`) when present
+- Reports previous marker status and cleanup actions
+
+The command is idempotent: if migration tables are already gone, it succeeds and reports no-op cleanup.
 
 ### `mig status`
 
@@ -97,7 +113,8 @@ Shows the current migration state:
 - Marker status in old database (recording, draining, or no marker)
 - Number of entries in `_migration_log`
 - Number of entries pending replay (if `--new` is provided)
-- Number of entries in `_id_mapping`
+- `_id_mapping` state (entry count or removed)
+- `_migration_progress` state (present or removed)
 - Migration status in new database (migrating, ready)
 
 ## MigLib behavior
@@ -123,5 +140,6 @@ MigLib in the new service checks the `_migration_status` table on startup and pe
 |---|---|---|
 | `mig migrate` | Creates new DB, copies data, exits | Old service starts recording writes |
 | `mig drain` | Sets drain marker, replays all accumulated writes, exits | Old service stops writes |
-| `mig cutover` | Sets ready marker, cleans up migration tables | New service starts serving |
+| `mig cutover` | Sets ready marker, removes replay-only tables | New service starts serving |
+| `mig cleanup-old` | Removes old migration tables from archived old DB | — |
 | `mig status` | Shows migration progress | — |

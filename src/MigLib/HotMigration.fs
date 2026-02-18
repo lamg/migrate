@@ -17,11 +17,14 @@ type MigrationStatusReport =
     migrationLogEntries: int64
     pendingReplayEntries: int64 option
     idMappingEntries: int64 option
-    newMigrationStatus: string option }
+    newMigrationStatus: string option
+    idMappingTablePresent: bool option
+    migrationProgressTablePresent: bool option }
 
 type CutoverResult =
   { previousStatus: string
-    idMappingDropped: bool }
+    idMappingDropped: bool
+    migrationProgressDropped: bool }
 
 type MigrateResult =
   { newDbPath: string
@@ -31,6 +34,11 @@ type MigrateResult =
 type DrainResult =
   { replayedEntries: int
     remainingEntries: int64 }
+
+type CleanupOldResult =
+  { previousMarkerStatus: string option
+    markerDropped: bool
+    logDropped: bool }
 
 type private TableInfoRow =
   { name: string
@@ -1079,19 +1087,36 @@ let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<Migra
               migrationLogEntries = migrationLogEntries
               pendingReplayEntries = None
               idMappingEntries = None
-              newMigrationStatus = None }
+              newMigrationStatus = None
+              idMappingTablePresent = None
+              migrationProgressTablePresent = None }
       | Some newPath ->
         use newConnection = new SqliteConnection($"Data Source={newPath}")
         do! newConnection.OpenAsync()
 
-        let! idMappingEntries = countRowsIfTableExists newConnection None "_id_mapping"
+        let! idMappingTablePresent = tableExists newConnection None "_id_mapping"
+
+        let! idMappingEntries =
+          if idMappingTablePresent then
+            countRows newConnection None "_id_mapping"
+          else
+            Task.FromResult 0L
+
         let! newMigrationStatus = readMarkerStatus newConnection None "_migration_status"
+        let! migrationProgressTablePresent = tableExists newConnection None "_migration_progress"
         let! progress = readMigrationProgress newConnection None
 
+        let isReady =
+          newMigrationStatus
+          |> Option.exists (fun status -> status.Equals("ready", StringComparison.OrdinalIgnoreCase))
+
         let! pendingReplayEntries =
-          match progress with
-          | Some row -> countPendingLogEntries oldConnection None row.lastReplayedLogId
-          | None -> Task.FromResult migrationLogEntries
+          if isReady then
+            Task.FromResult 0L
+          else
+            match progress with
+            | Some row -> countPendingLogEntries oldConnection None row.lastReplayedLogId
+            | None -> Task.FromResult migrationLogEntries
 
         return
           Ok
@@ -1099,7 +1124,9 @@ let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<Migra
               migrationLogEntries = migrationLogEntries
               pendingReplayEntries = Some pendingReplayEntries
               idMappingEntries = Some idMappingEntries
-              newMigrationStatus = newMigrationStatus }
+              newMigrationStatus = newMigrationStatus
+              idMappingTablePresent = Some idMappingTablePresent
+              migrationProgressTablePresent = Some migrationProgressTablePresent }
     with
     | :? SqliteException as ex -> return Error ex
     | ex -> return Error(toSqliteError ex.Message)
@@ -1258,6 +1285,58 @@ let runDrain (oldDbPath: string) (newDbPath: string) : Task<Result<DrainResult, 
     | ex -> return Error(toSqliteError ex.Message)
   }
 
+let runCleanupOld (oldDbPath: string) : Task<Result<CleanupOldResult, SqliteException>> =
+  task {
+    try
+      if not (File.Exists oldDbPath) then
+        return Error(toSqliteError $"Old database was not found: {oldDbPath}")
+      else
+        use connection = new SqliteConnection($"Data Source={oldDbPath}")
+        do! connection.OpenAsync()
+        use transaction = connection.BeginTransaction()
+        let! markerStatus = readMarkerStatus connection (Some transaction) "_migration_marker"
+
+        let markerIsRecording =
+          markerStatus
+          |> Option.exists (fun status -> status.Equals("recording", StringComparison.OrdinalIgnoreCase))
+
+        if markerIsRecording then
+          transaction.Rollback()
+
+          return
+            Error(
+              toSqliteError "Old database is still in recording mode. Run `mig drain` and `mig cutover` before cleanup."
+            )
+        else
+          let! hasMarker = tableExists connection (Some transaction) "_migration_marker"
+          let! hasLog = tableExists connection (Some transaction) "_migration_log"
+
+          if hasMarker then
+            use dropMarkerCmd =
+              createCommand connection (Some transaction) "DROP TABLE _migration_marker"
+
+            let! _ = dropMarkerCmd.ExecuteNonQueryAsync()
+            ()
+
+          if hasLog then
+            use dropLogCmd =
+              createCommand connection (Some transaction) "DROP TABLE _migration_log"
+
+            let! _ = dropLogCmd.ExecuteNonQueryAsync()
+            ()
+
+          transaction.Commit()
+
+          return
+            Ok
+              { previousMarkerStatus = markerStatus
+                markerDropped = hasMarker
+                logDropped = hasLog }
+    with
+    | :? SqliteException as ex -> return Error ex
+    | ex -> return Error(toSqliteError ex.Message)
+  }
+
 let runCutover (newDbPath: string) : Task<Result<CutoverResult, SqliteException>> =
   task {
     try
@@ -1292,44 +1371,62 @@ let runCutover (newDbPath: string) : Task<Result<CutoverResult, SqliteException>
           transaction.Rollback()
           return Error error
         | Ok status ->
-          let! progress = readMigrationProgress connection (Some transaction)
+          let isMigrating = status.Equals("migrating", StringComparison.OrdinalIgnoreCase)
+          let isReady = status.Equals("ready", StringComparison.OrdinalIgnoreCase)
 
-          match progress with
-          | None ->
+          if not isMigrating && not isReady then
             transaction.Rollback()
 
             return
               Error(
                 toSqliteError
-                  "_migration_progress is missing in the new database. Run `mig drain` before `mig cutover`."
+                  $"Unsupported _migration_status value '{status}'. Expected 'migrating' or 'ready' before cutover."
               )
-          | Some progressRow when not progressRow.drainCompleted ->
-            transaction.Rollback()
+          else
+            let! readyForCutover =
+              if isMigrating then
+                task {
+                  let! progress = readMigrationProgress connection (Some transaction)
 
-            return
-              Error(
-                toSqliteError
-                  "Drain is not complete. Pending replay entries still exist. Run `mig drain` again before `mig cutover`."
-              )
-          | Some _ ->
-            let isMigrating = status.Equals("migrating", StringComparison.OrdinalIgnoreCase)
-            let isReady = status.Equals("ready", StringComparison.OrdinalIgnoreCase)
+                  match progress with
+                  | None ->
+                    return
+                      Error(
+                        toSqliteError
+                          "_migration_progress is missing in the new database. Run `mig drain` before `mig cutover`."
+                      )
+                  | Some progressRow when not progressRow.drainCompleted ->
+                    return
+                      Error(
+                        toSqliteError
+                          "Drain is not complete. Pending replay entries still exist. Run `mig drain` again before `mig cutover`."
+                      )
+                  | Some _ -> return Ok()
+                }
+              else
+                Task.FromResult(Ok())
 
-            if not isMigrating && not isReady then
+            match readyForCutover with
+            | Error error ->
               transaction.Rollback()
-
-              return
-                Error(
-                  toSqliteError
-                    $"Unsupported _migration_status value '{status}'. Expected 'migrating' or 'ready' before cutover."
-                )
-            else
+              return Error error
+            | Ok() ->
               let! hasIdMapping = tableExists connection (Some transaction) "_id_mapping"
 
               if hasIdMapping then
-                use dropCmd = createCommand connection (Some transaction) "DROP TABLE _id_mapping"
+                use dropIdMappingCmd =
+                  createCommand connection (Some transaction) "DROP TABLE _id_mapping"
 
-                let! _ = dropCmd.ExecuteNonQueryAsync()
+                let! _ = dropIdMappingCmd.ExecuteNonQueryAsync()
+                ()
+
+              let! hasMigrationProgress = tableExists connection (Some transaction) "_migration_progress"
+
+              if hasMigrationProgress then
+                use dropProgressCmd =
+                  createCommand connection (Some transaction) "DROP TABLE _migration_progress"
+
+                let! _ = dropProgressCmd.ExecuteNonQueryAsync()
                 ()
 
               do! upsertStatusRow connection (Some transaction) "_migration_status" "ready"
@@ -1338,7 +1435,8 @@ let runCutover (newDbPath: string) : Task<Result<CutoverResult, SqliteException>
               return
                 Ok
                   { previousStatus = status
-                    idMappingDropped = hasIdMapping }
+                    idMappingDropped = hasIdMapping
+                    migrationProgressDropped = hasMigrationProgress }
     with
     | :? SqliteException as ex -> return Error ex
     | ex -> return Error(toSqliteError ex.Message)

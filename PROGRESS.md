@@ -103,9 +103,24 @@ src/
 - **Stricter cutover prechecks added**: cutover now requires `_migration_progress` to exist with `drain_completed=1` before switching `_migration_status` to `ready`.
 - **Coverage added**: tests now validate pending replay checkpoint math, cutover rejection before drain completion, migrate initialization of checkpoint state, and drain checkpoint progression.
 
+## Update (2026-02-18, operational cleanup policy)
+
+- **Cutover cleanup expanded**: `runCutover` now drops both replay-only tables in the new DB (`_id_mapping`, `_migration_progress`) before setting `_migration_status` to `ready`.
+- **Cutover idempotency improved**: rerunning cutover while already `ready` now succeeds even after replay tables were removed.
+- **Status reporting hardened post-cutover**: `getStatus` now reports table presence (`_id_mapping`, `_migration_progress`) and treats pending replay as `0` when the new DB is `ready`.
+- **CLI status output clarified**: `mig status --new` now prints removed/present migration-table state after cutover instead of only raw counts.
+- **Coverage added**: tests now validate post-cutover status output semantics, replay-table cleanup on cutover, and idempotent ready-state cutover.
+
+## Update (2026-02-18, old database cleanup command)
+
+- **Old-db cleanup flow added**: `MigLib.HotMigration.runCleanupOld` now removes `_migration_marker` and `_migration_log` in one transaction for archived old databases.
+- **Safety guard added**: cleanup fails while the old marker status is still `recording` to prevent deleting active migration state mid-flight.
+- **CLI command added**: `mig cleanup-old --old <path>` now reports previous marker status plus whether each migration table was dropped.
+- **Coverage added**: tests now validate successful cleanup, idempotent no-op behavior when tables are already absent, and guarded failure in recording mode.
+
 ## What's next
 
-1. Operational cleanup policy (migration table retention/removal and status output after cutover)
+1. CLI integration tests for `mig` output/error paths (status, cutover, cleanup-old)
 
 ## Completed next-step items
 
@@ -117,3 +132,5 @@ src/
 5. Cutover and status commands
 6. Migrate and drain command execution flow
 7. Migration safety hardening
+8. Operational cleanup policy (migration table retention/removal and status output after cutover)
+9. Optional old-database cleanup command for archived environments

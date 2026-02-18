@@ -20,6 +20,12 @@ CREATE TABLE _migration_status(
   id INTEGER PRIMARY KEY CHECK (id = 0),
   status TEXT NOT NULL  -- 'migrating', 'ready'
 );
+
+CREATE TABLE _migration_progress(
+  id INTEGER PRIMARY KEY CHECK (id = 0),
+  last_replayed_log_id INTEGER NOT NULL,
+  drain_completed INTEGER NOT NULL
+);
 ```
 
 In the **old database**:
@@ -72,10 +78,19 @@ Only writes are unavailable between drain and cutover. This window depends on ho
 ### Phase 3: Cutover (`mig cutover`)
 
 1. `mig` verifies that drain is complete (`_migration_log` fully consumed)
-2. `mig` drops `_id_mapping` from the new database
+2. `mig` drops replay-only tables (`_id_mapping`, `_migration_progress`) from the new database
 3. `mig` updates `_migration_status` to 'ready' in the new database
 4. MigLib in the new service detects the status change and starts serving
-5. The administrator switches traffic from old to new and archives or deletes the old database
+5. The administrator switches traffic from old to new
+6. Old database migration tables (`_migration_marker`, `_migration_log`) are retained until the old database is archived/deleted
+
+### Phase 4 (optional): Old DB cleanup (`mig cleanup-old`)
+
+1. `mig` verifies the old marker is not still in `recording` mode
+2. `mig` drops old migration tables (`_migration_marker`, `_migration_log`) from the old database
+3. `mig` reports cleanup actions and exits
+
+This step is intended for archived environments after traffic has already moved to the new service. It is idempotent.
 
 ## Alternative approaches
 
