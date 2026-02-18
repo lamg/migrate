@@ -87,6 +87,12 @@ mig status [--dir|-d /path/to/project]
 
 Check that pending replay entries are `0` before cutover.
 
+If your target schema defines triggers, run a focused replay check:
+
+1. Insert a controlled write into the old DB and append the corresponding `_migration_log` entry.
+2. Run `mig drain`.
+3. Validate the trigger side effects in the new DB (for example, audit rows/counters written by the trigger).
+
 ## Phase 3: Cutover
 
 ```sh
@@ -110,6 +116,11 @@ Check that:
 - migration status is `ready`
 - pending replay entries show `0 (cutover complete)`
 - `_id_mapping` and `_migration_progress` are reported as removed
+
+If your target schema defines triggers, run a focused post-cutover write check:
+
+1. Execute a controlled write against the new service/database.
+2. Verify trigger side effects are still correct after cutover (same audit/counter expectations used during drain validation).
 
 ## Traffic Switch
 

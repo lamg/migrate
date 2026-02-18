@@ -2866,6 +2866,209 @@ type Invoice = {{ id: int64; account: Account; total: float }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
+let ``drain replay applies target triggers for replayed writes`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_drain_trigger_replay_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+  let newDbPath = Path.Combine(tempDir, "new.db")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+
+  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  setupOldConn.Open()
+
+  [ "PRAGMA foreign_keys = ON;"
+    "CREATE TABLE account(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "CREATE TABLE invoice(id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, total REAL NOT NULL, FOREIGN KEY(account_id) REFERENCES account(id));"
+    "INSERT INTO account(id, name) VALUES (10, 'Alice');"
+    "INSERT INTO invoice(id, account_id, total) VALUES (100, 10, 42.5);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Account = {{ id: int64; name: string }}
+
+[<AutoIncPK "id">]
+type Invoice = {{ id: int64; account: Account; total: float }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+
+  let migrateResult = runMigrate oldDbPath schemaPath newDbPath |> fun t -> t.Result
+
+  match migrateResult with
+  | Error ex -> failwith $"Expected migrate to succeed before trigger replay test, got {ex.Message}"
+  | Ok _ -> ()
+
+  use triggerSetupConn = new SqliteConnection($"Data Source={newDbPath}")
+  triggerSetupConn.Open()
+
+  [ "CREATE TABLE invoice_replay_audit(id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_id INTEGER NOT NULL, operation TEXT NOT NULL);"
+    "CREATE TRIGGER trg_invoice_replay_audit AFTER INSERT ON invoice BEGIN INSERT INTO invoice_replay_audit(invoice_id, operation) VALUES (NEW.id, 'insert'); END;" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, triggerSetupConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  triggerSetupConn.Close()
+
+  [ "INSERT INTO account(id, name) VALUES (11, 'Bob');"
+    "INSERT INTO invoice(id, account_id, total) VALUES (101, 11, 15.0);"
+    "INSERT INTO _migration_log(txn_id, ordering, operation, table_name, row_data) VALUES (1, 1, 'insert', 'account', '{\"id\":11,\"name\":\"Bob\"}');"
+    "INSERT INTO _migration_log(txn_id, ordering, operation, table_name, row_data) VALUES (1, 2, 'insert', 'invoice', '{\"id\":101,\"account_id\":11,\"total\":15.0}');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let drainResult = runDrain oldDbPath newDbPath |> fun t -> t.Result
+
+  match drainResult with
+  | Error ex -> failwith $"Expected drain to succeed for trigger replay test, got {ex.Message}"
+  | Ok result ->
+    Assert.Equal(2, result.replayedEntries)
+    Assert.Equal(0L, result.remainingEntries)
+
+  use verifyNewConn = new SqliteConnection($"Data Source={newDbPath}")
+  verifyNewConn.Open()
+
+  use auditCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM invoice_replay_audit", verifyNewConn)
+
+  let auditCount = auditCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(1L, auditCount)
+
+  use auditJoinCountCmd =
+    new SqliteCommand(
+      "SELECT COUNT(*) FROM invoice_replay_audit a JOIN invoice i ON i.id = a.invoice_id WHERE a.operation = 'insert'",
+      verifyNewConn
+    )
+
+  let joinedAuditCount = auditJoinCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(1L, joinedAuditCount)
+
+  verifyNewConn.Close()
+  setupOldConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``post-cutover writes keep target triggers active`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cutover_trigger_writes_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+  let newDbPath = Path.Combine(tempDir, "new.db")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+
+  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  setupOldConn.Open()
+
+  [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+
+  let migrateResult = runMigrate oldDbPath schemaPath newDbPath |> fun t -> t.Result
+
+  match migrateResult with
+  | Error ex -> failwith $"Expected migrate to succeed before cutover trigger test, got {ex.Message}"
+  | Ok _ -> ()
+
+  use triggerSetupConn = new SqliteConnection($"Data Source={newDbPath}")
+  triggerSetupConn.Open()
+
+  [ "CREATE TABLE student_write_audit(id INTEGER PRIMARY KEY AUTOINCREMENT, student_id INTEGER NOT NULL);"
+    "CREATE TRIGGER trg_student_write_audit AFTER INSERT ON student BEGIN INSERT INTO student_write_audit(student_id) VALUES (NEW.id); END;" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, triggerSetupConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  triggerSetupConn.Close()
+
+  let drainResult = runDrain oldDbPath newDbPath |> fun t -> t.Result
+
+  match drainResult with
+  | Error ex -> failwith $"Expected drain to succeed before cutover trigger test, got {ex.Message}"
+  | Ok _ -> ()
+
+  let cutoverResult = runCutover newDbPath |> fun t -> t.Result
+
+  match cutoverResult with
+  | Error ex -> failwith $"Expected cutover to succeed before trigger write test, got {ex.Message}"
+  | Ok result -> Assert.Equal("migrating", result.previousStatus)
+
+  let writeResult =
+    taskTxn newDbPath {
+      let! _ =
+        fun tx ->
+          task {
+            MigrationLog.ensureWriteAllowed tx
+
+            use cmd =
+              new SqliteCommand("INSERT INTO student(name) VALUES (@name)", tx.Connection, tx)
+
+            cmd.Parameters.AddWithValue("@name", "Bob") |> ignore
+            let! _ = cmd.ExecuteNonQueryAsync()
+            return Ok()
+          }
+
+      return ()
+    }
+    |> fun t -> t.Result
+
+  match writeResult with
+  | Error ex -> failwith $"Expected write after cutover to succeed, got {ex.Message}"
+  | Ok _ -> ()
+
+  use verifyNewConn = new SqliteConnection($"Data Source={newDbPath}")
+  verifyNewConn.Open()
+
+  use auditCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM student_write_audit", verifyNewConn)
+
+  let auditCount = auditCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(1L, auditCount)
+
+  use auditedNameCmd =
+    new SqliteCommand(
+      "SELECT s.name FROM student_write_audit a JOIN student s ON s.id = a.student_id ORDER BY a.id",
+      verifyNewConn
+    )
+
+  let auditedName = auditedNameCmd.ExecuteScalar() |> string
+  Assert.Equal("Bob", auditedName)
+
+  verifyNewConn.Close()
+  setupOldConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
 let ``schema reflection maps DU optional cases into extension tables`` () =
   let types = [ typeof<ReflectionStudent>; typeof<ReflectionStudentOpt> ]
 

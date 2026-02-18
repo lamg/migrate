@@ -243,10 +243,16 @@ src/
 - **Old-side status API added**: `MigLib.HotMigration.getOldDatabaseStatus` now reports `_migration_marker` + `_migration_log` presence/count for recovery reporting.
 - **Coverage added**: CLI integration test now validates partial-migrate failure output and resulting artifact state.
 
+## Update (2026-02-18, trigger runtime validation coverage)
+
+- **Drain replay trigger coverage added**: integration test now verifies replayed drain writes execute target-database triggers and produce expected side effects.
+- **Post-cutover trigger coverage added**: integration test now verifies writes after cutover still execute target-database triggers correctly.
+- **Runbook checklist expanded**: operator runbook now includes explicit trigger-behavior validation steps for drain replay and post-cutover writes.
+
 ## What's next
 
-1. Add targeted trigger-behavior validation for drain/replay and post-cutover writes (runtime behavior checks, not schema-identity checks).
-2. Add an explicit migration-reset command for failed/aborted attempts so operators can safely clear old/new migration artifacts without manual SQL.
+1. Add an explicit migration-reset command for failed/aborted attempts so operators can safely clear old/new migration artifacts without manual SQL.
+2. Add a pre-cutover safety check that blocks when old DB marker/log state indicates replay divergence risk.
 
 ## Completed next-step items
 
@@ -279,3 +285,4 @@ src/
 26. Non-table object consistency checks in migrate preflight reporting
 27. Dry-run migration planning command (`mig plan`) with preflight report output
 28. Migrate failure recovery snapshot and rerun guidance output
+29. Trigger runtime validation coverage for drain replay and post-cutover writes
