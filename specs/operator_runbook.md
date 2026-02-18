@@ -4,22 +4,22 @@ This runbook describes how to execute and validate a hot migration using the cur
 
 ## Scope
 
-- Source: existing SQLite database (`old.db`)
-- Target: new SQLite database generated from `schema.fsx` (`new.db`)
+- Source: existing SQLite database (`<dir-name>-<old-hash>.sqlite`)
+- Target: new SQLite database generated from `schema.fsx` (`<dir-name>-<schema-hash>.sqlite`)
 - Migration mode: online (old service keeps serving reads while migration progresses)
 
 ## Preflight Checks
 
-1. Confirm backups exist for `old.db`.
+1. Confirm backups exist for the source SQLite file (`<dir-name>-<old-hash>.sqlite`).
 2. Confirm the new schema script compiles and reflects correctly (same file intended for `mig migrate --schema`).
-3. Ensure the new service build is ready to run against `new.db`.
+3. Ensure the new service build is ready to run against the inferred target database path.
 4. Ensure old and new service instances can be monitored during migration.
 5. Ensure disk space is sufficient for a second database file plus migration overhead tables.
 
 ## Phase 1: Migrate
 
 ```sh
-mig migrate [--old old.db] [--schema schema.fsx] [--new new.db]
+mig migrate [--dir|-d /path/to/project] [--schema schema.fsx]
 ```
 
 Default no-flag mode (`mig migrate` from project directory):
@@ -27,7 +27,8 @@ Default no-flag mode (`mig migrate` from project directory):
 - uses `./schema.fsx`
 - derives target path `./<dir-name>-<schema-hash>.sqlite`
 - auto-detects source DB as exactly one `./<dir-name>-<old-hash>.sqlite` file excluding the target
-- the same path inference is used by `mig status`, `mig drain`, `mig cutover`, and `mig cleanup-old` when their path flags are omitted
+- the same path inference is used by `mig status`, `mig drain`, `mig cutover`, and `mig cleanup-old`
+- use `--dir` / `-d` to run the same workflow from a different working directory
 
 Optional metadata:
 
@@ -43,7 +44,7 @@ Expected outcomes:
 Validation:
 
 ```sh
-mig status [--old old.db] [--new new.db]
+mig status [--dir|-d /path/to/project]
 ```
 
 Check that:
@@ -53,6 +54,8 @@ Check that:
 - migration status is `migrating`
 - schema hash is reported for the new database
 
+If the old DB has already been archived and only the inferred new DB remains, `mig status` prints old-side metrics as unavailable (`n/a`) and still reports new DB metadata.
+
 ## Deploy New Service (Still Blocked)
 
 Deploy/start the new service pointing at `new.db`.
@@ -61,7 +64,7 @@ It should remain blocked from serving while `_migration_status='migrating'`.
 ## Phase 2: Drain
 
 ```sh
-mig drain [--old old.db] [--new new.db]
+mig drain [--dir|-d /path/to/project]
 ```
 
 Expected outcomes:
@@ -74,7 +77,7 @@ Expected outcomes:
 Validation:
 
 ```sh
-mig status [--old old.db] [--new new.db]
+mig status [--dir|-d /path/to/project]
 ```
 
 Check that pending replay entries are `0` before cutover.
@@ -82,7 +85,7 @@ Check that pending replay entries are `0` before cutover.
 ## Phase 3: Cutover
 
 ```sh
-mig cutover [--new new.db]
+mig cutover [--dir|-d /path/to/project]
 ```
 
 Expected outcomes:
@@ -94,7 +97,7 @@ Expected outcomes:
 Validation:
 
 ```sh
-mig status [--old old.db] [--new new.db]
+mig status [--dir|-d /path/to/project]
 ```
 
 Check that:
@@ -110,7 +113,7 @@ Move application traffic from old service to new service only after successful c
 ## Optional Phase 4: Cleanup Old DB Migration Tables
 
 ```sh
-mig cleanup-old [--old old.db]
+mig cleanup-old [--dir|-d /path/to/project]
 ```
 
 Expected outcomes:

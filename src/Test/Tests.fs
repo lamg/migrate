@@ -1614,8 +1614,23 @@ let ``cli status prints cutover-complete cleanup state`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let oldDbPath = Path.Combine(tempDir, "old.db")
-  let newDbPath = Path.Combine(tempDir, "new.db")
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-1111222233334444.sqlite")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
 
   use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
   oldConn.Open()
@@ -1639,8 +1654,7 @@ let ``cli status prints cutover-complete cleanup state`` () =
     use cmd = new SqliteCommand(sql, newConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let exitCode, stdOut, stdErr =
-    runMigCli [ "status"; "--old"; oldDbPath; "--new"; newDbPath ]
+  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "status" ]
 
   Assert.Equal(0, exitCode)
   Assert.Contains($"Old database: {oldDbPath}", stdOut)
@@ -1654,6 +1668,58 @@ let ``cli status prints cutover-complete cleanup state`` () =
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
 
   oldConn.Close()
+  newConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli status supports inferred new-only inspection`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_status_new_only_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+
+  use newConn = new SqliteConnection($"Data Source={newDbPath}")
+  newConn.Open()
+
+  [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');"
+    "CREATE TABLE _schema_identity(id INTEGER PRIMARY KEY CHECK (id = 0), schema_hash TEXT NOT NULL, schema_commit TEXT, created_utc TEXT NOT NULL);"
+    "INSERT INTO _schema_identity(id, schema_hash, schema_commit, created_utc) VALUES (0, 'abcddcba12344321', 'cafebabe', '2026-02-18T00:00:00.0000000Z');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, newConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "status" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains("Old database: n/a (not inferred)", stdOut)
+  Assert.Contains("Marker status: n/a", stdOut)
+  Assert.Contains("Migration log entries: n/a", stdOut)
+  Assert.Contains($"New database: {newDbPath}", stdOut)
+  Assert.Contains("Migration status: ready", stdOut)
+  Assert.Contains("Schema hash: abcddcba12344321", stdOut)
+  Assert.Contains("Schema commit: cafebabe", stdOut)
+  Assert.Contains("Pending replay entries: n/a (old database unavailable)", stdOut)
+  Assert.Contains("_id_mapping: removed", stdOut)
+  Assert.Contains("_migration_progress: removed", stdOut)
+
   newConn.Close()
   Directory.Delete(tempDir, true)
 
@@ -1672,16 +1738,12 @@ let ``cli root help shows current command surface`` () =
 let ``cli subcommand help shows usage and options`` () =
   let cases: (string list * string * string list) list =
     [ ([ "migrate"; "--help" ],
-       "USAGE: mig migrate [--help] [--old <path>] [--schema <path>]",
-       [ "--old <path>"; "--schema <path>"; "--new <path>" ])
-      ([ "drain"; "--help" ],
-       "USAGE: mig drain [--help] [--old <path>] [--new <path>]",
-       [ "--old <path>"; "--new <path>" ])
-      ([ "cutover"; "--help" ], "USAGE: mig cutover [--help] [--new <path>]", [ "--new <path>" ])
-      ([ "cleanup-old"; "--help" ], "USAGE: mig cleanup-old [--help] [--old <path>]", [ "--old <path>" ])
-      ([ "status"; "--help" ],
-       "USAGE: mig status [--help] [--old <path>] [--new <path>]",
-       [ "--old <path>"; "--new <path>" ]) ]
+       "USAGE: mig migrate [--help] [--dir <path>] [--schema <path>]",
+       [ "--dir, -d <path>"; "--schema <path>" ])
+      ([ "drain"; "--help" ], "USAGE: mig drain [--help] [--dir <path>]", [ "--dir, -d <path>" ])
+      ([ "cutover"; "--help" ], "USAGE: mig cutover [--help] [--dir <path>]", [ "--dir, -d <path>" ])
+      ([ "cleanup-old"; "--help" ], "USAGE: mig cleanup-old [--help] [--dir <path>]", [ "--dir, -d <path>" ])
+      ([ "status"; "--help" ], "USAGE: mig status [--help] [--dir <path>]", [ "--dir, -d <path>" ]) ]
 
   for args, expectedUsage, expectedFragments in cases do
     assertCliHelpOutput args expectedUsage expectedFragments
@@ -1693,7 +1755,21 @@ let ``cli cutover returns error when drain not complete`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let newDbPath = Path.Combine(tempDir, "new.db")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
 
   use newConn = new SqliteConnection($"Data Source={newDbPath}")
   newConn.Open()
@@ -1706,7 +1782,7 @@ let ``cli cutover returns error when drain not complete`` () =
     use cmd = new SqliteCommand(sql, newConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let exitCode, stdOut, stdErr = runMigCli [ "cutover"; "--new"; newDbPath ]
+  let exitCode, stdOut, stdErr = runMigCli [ "cutover"; "-d"; tempDir ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
@@ -1722,7 +1798,8 @@ let ``cli cleanup-old prints dropped table summary`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let oldDbPath = Path.Combine(tempDir, "old.db")
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-99990000aaaabbbb.sqlite")
 
   use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
   oldConn.Open()
@@ -1736,7 +1813,7 @@ let ``cli cleanup-old prints dropped table summary`` () =
 
   oldConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCli [ "cleanup-old"; "--old"; oldDbPath ]
+  let exitCode, stdOut, stdErr = runMigCli [ "cleanup-old"; "-d"; tempDir ]
 
   Assert.Equal(0, exitCode)
   Assert.Contains("Old database cleanup complete.", stdOut)
@@ -1777,7 +1854,8 @@ let ``cli cleanup-old returns error while recording`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let oldDbPath = Path.Combine(tempDir, "old.db")
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-ccccddddeeeeffff.sqlite")
 
   use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
   oldConn.Open()
@@ -1791,7 +1869,7 @@ let ``cli cleanup-old returns error while recording`` () =
 
   oldConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCli [ "cleanup-old"; "--old"; oldDbPath ]
+  let exitCode, stdOut, stdErr = runMigCli [ "cleanup-old"; "-d"; tempDir ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
@@ -1851,8 +1929,7 @@ type Student = {{ id: int64; name: string }}
 
   setupOldConn.Close()
 
-  let exitCode, stdOut, stdErr =
-    runMigCliInDirectory (Some tempDir) [ "migrate"; "--old"; oldDbPath; "--schema"; schemaPath ]
+  let exitCode, stdOut, stdErr = runMigCli [ "migrate"; "-d"; tempDir ]
 
   Assert.Equal(0, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
@@ -1911,8 +1988,7 @@ type Student = {{ id: int64; name: string }}
   let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
   setupOldConn.Close()
 
-  let exitCode, stdOut, stdErr =
-    runMigCliInDirectory (Some tempDir) [ "migrate"; "--old"; oldDbPath; "--schema"; schemaPath ]
+  let exitCode, stdOut, stdErr = runMigCli [ "migrate"; "-d"; tempDir ]
 
   Assert.Equal(0, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")

@@ -25,13 +25,13 @@ They communicate through marker tables in the databases:
 When no service is deployed, the entire migration can be performed in a single command:
 
 ```
-mig migrate --old old.db --schema schema.fsx [--new new.db]
+mig migrate [--dir|-d /path/to/project] [--schema schema.fsx]
 ```
 
 This command:
 
 1. Evaluates `schema.fsx` and derives the new schema via reflection
-2. Creates a new SQLite file with the new schema (named `old.db.new` by default)
+2. Creates a new SQLite file with deterministic name `<dir-name>-<schema-hash>.sqlite`
 3. Diffs the old and new schemas to derive column mapping
 4. Copies all data from the old database to the new one in FK dependency order, building the `_id_mapping` table
 5. Drops `_id_mapping` from the new database
@@ -46,14 +46,15 @@ When services are deployed, the administrator uses three required phase commands
 ### `mig migrate`
 
 ```
-mig migrate [--old old.db] [--schema schema.fsx] [--new new.db]
+mig migrate [--dir|-d /path/to/project] [--schema schema.fsx]
 ```
 
-Default behavior when run as `mig migrate` from a project directory:
+Default behavior:
 
-- Uses `./schema.fsx` as schema input
-- Derives target path as `./<dir-name>-<schema-hash>.sqlite`
-- Auto-detects source DB as exactly one `./<dir-name>-<old-hash>.sqlite` file excluding the target path
+- Uses the current directory as project root (override with `--dir` / `-d`)
+- Uses `<dir>/schema.fsx` as schema input (override with `--schema`)
+- Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite`
+- Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file excluding the target path
 
 If the schema-matched target database already exists and no source candidate is found, migrate is skipped as a no-op.
 
@@ -69,13 +70,14 @@ After this command the old service continues operating normally while recording 
 ### `mig drain`
 
 ```
-mig drain [--old old.db] [--new new.db]
+mig drain [--dir|-d /path/to/project]
 ```
 
-Default behavior when run as `mig drain` from a project directory:
+Default behavior:
 
-- Derives target path as `./<dir-name>-<schema-hash>.sqlite` from `./schema.fsx`
-- Auto-detects source DB as exactly one `./<dir-name>-<old-hash>.sqlite` file excluding the target path
+- Uses the current directory as project root (override with `--dir` / `-d`)
+- Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite` from `<dir>/schema.fsx`
+- Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file excluding the target path
 
 1. Updates `_migration_marker` status to 'draining' in the old database
 2. MigLib in the old service detects the status change and stops accepting writes. Read queries continue to be served from the old database.
@@ -88,12 +90,13 @@ Only writes are unavailable between drain and cutover. This window depends on ho
 ### `mig cutover`
 
 ```
-mig cutover [--new new.db]
+mig cutover [--dir|-d /path/to/project]
 ```
 
 Run after `mig drain` has exited:
 
-- If `--new` is omitted, derives target path as `./<dir-name>-<schema-hash>.sqlite` from `./schema.fsx`
+- Uses the current directory as project root (override with `--dir` / `-d`)
+- Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite` from `<dir>/schema.fsx`
 
 - Verifies that drain is complete (`_migration_log` fully consumed)
 - Drops replay-only tables (`_id_mapping`, `_migration_progress`) from the new database
@@ -107,12 +110,13 @@ Old migration tables (`_migration_marker`, `_migration_log`) are retained until 
 ### `mig cleanup-old`
 
 ```
-mig cleanup-old [--old old.db]
+mig cleanup-old [--dir|-d /path/to/project]
 ```
 
 Optional command for archived environments, run after traffic has moved to the new service:
 
-- If `--old` is omitted, auto-detects source DB as exactly one `./<dir-name>-<old-hash>.sqlite` file (excluding inferred current-schema target when available)
+- Uses the current directory as project root (override with `--dir` / `-d`)
+- Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file (excluding inferred current-schema target when available)
 
 - Validates the old database is not still in `_migration_marker(status='recording')`
 - Drops old migration tables (`_migration_marker`, `_migration_log`) when present
@@ -123,17 +127,19 @@ The command is idempotent: if migration tables are already gone, it succeeds and
 ### `mig status`
 
 ```
-mig status [--old old.db] [--new new.db]
+mig status [--dir|-d /path/to/project]
 ```
 
 Shows the current migration state:
 
-- If `--old` is omitted, auto-detects source DB as exactly one `./<dir-name>-<old-hash>.sqlite` file (excluding `--new` or inferred new target when present)
-- If `--new` is omitted, infers `./<dir-name>-<schema-hash>.sqlite` from `./schema.fsx` and includes it only when that file exists
+- Uses the current directory as project root (override with `--dir` / `-d`)
+- Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file (excluding inferred new target when present)
+- Infers new DB as `<dir>/<dir-name>-<schema-hash>.sqlite` from `<dir>/schema.fsx` and includes it only when that file exists
+- If old DB cannot be inferred but inferred new DB exists, status falls back to new-only inspection (pending replay/old marker metrics become unavailable)
 
 - Marker status in old database (recording, draining, or no marker)
 - Number of entries in `_migration_log`
-- Number of entries pending replay (if `--new` is provided)
+- Number of entries pending replay (when both old and new DB are available)
 - `_id_mapping` state (entry count or removed)
 - `_migration_progress` state (present or removed)
 - Migration status in new database (migrating, ready)

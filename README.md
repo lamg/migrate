@@ -35,7 +35,7 @@ dotnet tool install --global migtool
 
 Assuming:
 
-- an existing SQLite database at `old.db`
+- an existing SQLite database named `<dir>-<old-hash>.sqlite`
 - a target schema script at `schema.fsx`
 
 ```sh
@@ -51,6 +51,9 @@ mig drain
 mig cutover
 # optional, after traffic has fully moved to the new service:
 mig cleanup-old
+
+# from a different directory:
+mig migrate -d /path/to/project
 ```
 
 ## Features
@@ -71,11 +74,11 @@ mig cleanup-old
 
 ## Commands
 
-- `mig migrate [--old <path>] [--schema <path>] [--new <path>]` - Create the new DB from schema, copy data, and start recording on old DB (`mig migrate` defaults to current-directory auto-discovery and `./<dir>-<schema-hash>.sqlite` target naming; commit metadata is detected automatically from git).
-- `mig drain [--old <path>] [--new <path>]` - Switch old DB to draining mode and replay pending migration log entries (defaults to current-directory old/new inference based on `./schema.fsx`).
-- `mig cutover [--new <path>]` - Verify drain completion, switch new DB to `ready`, and remove replay-only tables (defaults to `./<dir>-<schema-hash>.sqlite` from `./schema.fsx`).
-- `mig cleanup-old [--old <path>]` - Optional cleanup of old DB migration tables (`_migration_marker`, `_migration_log`) with current-directory old DB auto-discovery by default.
-- `mig status [--old <path>] [--new <path>]` - Show marker/status state and migration counters for operational visibility (defaults to current-directory old inference and includes inferred new DB when it exists).
+- `mig migrate [--dir|-d <path>] [--schema <path>]` - Create the new DB from schema, copy data, and start recording on old DB.
+- `mig drain [--dir|-d <path>]` - Switch old DB to draining mode and replay pending migration log entries.
+- `mig cutover [--dir|-d <path>]` - Verify drain completion, switch new DB to `ready`, and remove replay-only tables.
+- `mig cleanup-old [--dir|-d <path>]` - Optional cleanup of old DB migration tables (`_migration_marker`, `_migration_log`).
+- `mig status [--dir|-d <path>]` - Show marker/status state and migration counters for operational visibility.
 
 ## Contributing
 

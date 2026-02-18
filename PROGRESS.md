@@ -150,14 +150,14 @@ src/
 
 - **Root help coverage added**: integration test now validates `mig --help` output includes the full current subcommand surface.
 - **Subcommand help coverage added**: integration test now validates `--help` output for `migrate`, `drain`, `cutover`, `cleanup-old`, and `status`.
-- **Parser contract locked down**: tests now enforce expected migrate usage shape with optional `--old/--schema/--new` in current auto-discovery mode.
+- **Parser contract locked down**: tests now enforce expected migrate usage shape with optional `--dir`/`--schema` in current auto-discovery mode.
 
 ## Update (2026-02-18, schema identity metadata)
 
 - **Schema identity table added**: new DB initialization now creates `_schema_identity(id=0, schema_hash, schema_commit, created_utc)` during `runMigrate`.
 - **Schema hash persistence added**: migrate computes a normalized-content schema hash and writes it to `_schema_identity`.
 - **Optional commit metadata added**: migrate records `schema_commit` when the schema path resolves inside a git repository.
-- **Status exposure added**: `getStatus` now reads schema identity metadata and `mig status --new` prints schema hash/commit when available.
+- **Status exposure added**: `getStatus` now reads schema identity metadata and `mig status` prints schema hash/commit when inferred new DB is available.
 - **Coverage added**: tests now validate schema identity in status reporting, CLI status output, and migrate initialization of `_schema_identity`.
 - **Docs aligned**: specs/runbook now include `_schema_identity` in new DB migration metadata.
 
@@ -174,11 +174,27 @@ src/
 - **Status defaults expanded**: `mig status` now supports no-arg old/new inference in the current directory and includes inferred new DB only when the file exists.
 - **Cleanup-old defaults expanded**: `mig cleanup-old` now supports no-arg mode by auto-detecting old DB from `./<dir>-<old-hash>.sqlite` while excluding inferred current-schema target when available.
 - **Coverage added**: CLI integration tests now validate no-flag `migrate -> drain -> cutover -> status -> cleanup-old` execution in a deterministic directory setup.
-- **Docs aligned**: README/specs/runbook now describe optional path flags for `drain`, `cutover`, `status`, and `cleanup-old`.
+- **Docs aligned**: README/specs/runbook now describe deterministic auto-discovery for `drain`, `cutover`, `status`, and `cleanup-old`.
+
+## Update (2026-02-18, status new-only fallback)
+
+- **New-only status path added**: `mig status` now falls back to inferred new-only reporting when old DB inference fails but inferred new DB exists.
+- **New DB status API added**: `MigLib.HotMigration.getNewDatabaseStatus` now reads `_migration_status`, `_id_mapping`, `_migration_progress`, and `_schema_identity` without requiring old DB access.
+- **CLI output clarified**: new-only status reports old metrics as unavailable (`n/a`) and still prints new DB schema/migration metadata.
+- **Coverage added**: CLI integration test now validates inferred new-only status inspection with no old DB candidate.
+- **Docs aligned**: README/specs/runbook now document inferred new-only status usage for post-cleanup/archived old DB scenarios.
+
+## Update (2026-02-18, old/new CLI flag removal and shared directory targeting)
+
+- **CLI path flags removed**: `--old` and `--new` are no longer accepted by `migrate`, `drain`, `cutover`, `cleanup-old`, or `status`.
+- **Shared directory override added**: all operational subcommands now accept `--dir` / `-d` to run deterministic path inference against another directory.
+- **Command behavior simplified**: all old/new resolution now follows one contract (`<dir>-<old-hash>.sqlite` source + `<dir>-<schema-hash>.sqlite` target).
+- **Coverage updated**: CLI help and integration tests now validate the `--dir` contract and implicit old/new resolution flow.
+- **Specs aligned**: command specification and runbook now describe only implicit old/new detection plus `--dir` override.
 
 ## What's next
 
-1. Evaluate support for `mig status --new` without requiring/inferring `--old` (new-only post-cleanup inspections).
+1. Evaluate whether `mig migrate` should also support `--schema` as relative to `--dir` when both are provided (currently it resolves this way; decide if we want to lock it as an explicit compatibility contract in specs/tests).
 
 ## Completed next-step items
 
@@ -201,3 +217,5 @@ src/
 16. Schema commit auto-detection (git `HEAD` from schema path)
 17. Deterministic operational command pathing for `drain`/`cutover`/`status`
 18. Deterministic operational command pathing for `cleanup-old`
+19. Status inferred new-only fallback
+20. Old/new CLI flag removal + shared `--dir` override

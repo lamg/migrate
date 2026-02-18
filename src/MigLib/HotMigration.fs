@@ -26,6 +26,14 @@ type MigrationStatusReport =
     schemaIdentityHash: string option
     schemaIdentityCommit: string option }
 
+type NewDatabaseStatusReport =
+  { newMigrationStatus: string option
+    idMappingEntries: int64
+    idMappingTablePresent: bool
+    migrationProgressTablePresent: bool
+    schemaIdentityHash: string option
+    schemaIdentityCommit: string option }
+
 type CutoverResult =
   { previousStatus: string
     idMappingDropped: bool
@@ -1267,6 +1275,37 @@ let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<Migra
               migrationProgressTablePresent = Some migrationProgressTablePresent
               schemaIdentityHash = schemaIdentity |> Option.map _.schemaHash
               schemaIdentityCommit = schemaIdentity |> Option.bind _.schemaCommit }
+    with
+    | :? SqliteException as ex -> return Error ex
+    | ex -> return Error(toSqliteError ex.Message)
+  }
+
+let getNewDatabaseStatus (newDbPath: string) : Task<Result<NewDatabaseStatusReport, SqliteException>> =
+  task {
+    try
+      use newConnection = new SqliteConnection($"Data Source={newDbPath}")
+      do! newConnection.OpenAsync()
+
+      let! idMappingTablePresent = tableExists newConnection None "_id_mapping"
+
+      let! idMappingEntries =
+        if idMappingTablePresent then
+          countRows newConnection None "_id_mapping"
+        else
+          Task.FromResult 0L
+
+      let! newMigrationStatus = readMarkerStatus newConnection None "_migration_status"
+      let! migrationProgressTablePresent = tableExists newConnection None "_migration_progress"
+      let! schemaIdentity = readSchemaIdentity newConnection None
+
+      return
+        Ok
+          { newMigrationStatus = newMigrationStatus
+            idMappingEntries = idMappingEntries
+            idMappingTablePresent = idMappingTablePresent
+            migrationProgressTablePresent = migrationProgressTablePresent
+            schemaIdentityHash = schemaIdentity |> Option.map _.schemaHash
+            schemaIdentityCommit = schemaIdentity |> Option.bind _.schemaCommit }
     with
     | :? SqliteException as ex -> return Error ex
     | ex -> return Error(toSqliteError ex.Message)
