@@ -2362,6 +2362,77 @@ type Invoice = {{ id: int64; account: Account; total: float }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
+let ``migrate preflight reports unsupported drift before creating migration side effects`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_migrate_preflight_drift_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+  let newDbPath = Path.Combine(tempDir, "new.db")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+
+  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  setupOldConn.Open()
+
+  [ "CREATE TABLE student(id INTEGER NOT NULL, name TEXT NOT NULL);"
+    "INSERT INTO student(id, name) VALUES (10, 'Alice');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  setupOldConn.Close()
+
+  let migrateResult = runMigrate oldDbPath schemaPath newDbPath |> fun t -> t.Result
+
+  match migrateResult with
+  | Ok _ -> failwith "Expected migrate to fail during preflight drift validation."
+  | Error ex ->
+    Assert.Contains("Schema preflight report:", ex.Message)
+    Assert.Contains("Supported differences:", ex.Message)
+    Assert.Contains("Unsupported differences:", ex.Message)
+    Assert.Contains("PK mismatch", ex.Message)
+
+  Assert.False(File.Exists newDbPath)
+
+  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  verifyOldConn.Open()
+
+  use markerExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_marker' LIMIT 1",
+      verifyOldConn
+    )
+
+  let markerExists = markerExistsCmd.ExecuteScalar()
+  Assert.True(isNull markerExists)
+
+  use logExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_log' LIMIT 1",
+      verifyOldConn
+    )
+
+  let logExists = logExistsCmd.ExecuteScalar()
+  Assert.True(isNull logExists)
+
+  verifyOldConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
 let ``drain replays accumulated log entries and records replay checkpoint`` () =
   let tempDir = Path.Combine(Path.GetTempPath(), $"mig_drain_flow_{Guid.NewGuid()}")
 

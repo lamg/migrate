@@ -216,13 +216,19 @@ src/
 - **Trigger scope clarified**: triggers are also generated from target schema; old/new trigger equivalence is out of scope for structural migration.
 - **Behavioral caveat captured**: trigger effects during drain/replay and post-cutover are considered part of new-schema behavior validation, not schema-diff identity checks.
 
+## Update (2026-02-18, strict preflight drift reporting)
+
+- **Strict migrate preflight report added**: `runMigrate` now builds a schema preflight summary before creating migration side effects and reports `Supported differences` vs `Unsupported differences` when planning fails.
+- **Failure diagnostics improved**: planner failures now include table-level diff context (added/removed/renamed tables plus mapping deltas) alongside the blocking unsupported condition.
+- **Safety behavior locked down**: on preflight failure, migrate exits before creating old-db recording tables or creating the new database file.
+- **Coverage added**: migration tests now verify preflight failure reporting and assert zero side effects (`_migration_marker`/`_migration_log` absent; new DB file absent).
+
 ## What's next
 
 1. Define and test a trigger-behavior validation checklist for drain/replay and post-cutover writes.
-2. Add a strict preflight drift report (before migrate writes anything) that classifies supported vs unsupported schema differences.
-3. Extend explicit diff/reporting coverage for non-table objects (views/indexes/triggers) as target-schema consistency checks.
-4. Add a dry-run planning mode that prints inferred paths, schema copy plan, and replay prerequisites without mutating databases.
-5. Improve failure-recovery guidance/output for partial `migrate` failures (what exists, safe cleanup, safe rerun).
+2. Extend explicit diff/reporting coverage for non-table objects (views/indexes/triggers) as target-schema consistency checks.
+3. Add a dry-run planning mode that prints inferred paths, schema copy plan, and replay prerequisites without mutating databases.
+4. Improve failure-recovery guidance/output for partial `migrate` failures (what exists, safe cleanup, safe rerun).
 
 ## Completed next-step items
 
@@ -251,3 +257,4 @@ src/
 22. Schema preflight validation for deterministic pathing
 23. Old DB candidate naming preflight diagnostics
 24. Schema-object consistency direction (target-only views/indexes/triggers)
+25. Strict preflight drift reporting before migration side effects

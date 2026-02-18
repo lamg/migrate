@@ -1208,10 +1208,84 @@ let private parseSchemaFromScript (schemaPath: string) : Result<SqlFile, SqliteE
   | Ok schema -> Ok schema
   | Error message -> Error(toSqliteError message)
 
+let private joinOrNone (items: string list) =
+  match items with
+  | [] -> "none"
+  | values -> String.concat ", " values
+
+let private formatRenamePairs (pairs: (string * string) list) =
+  match pairs with
+  | [] -> "none"
+  | values ->
+    values
+    |> List.map (fun (sourceName, targetName) -> $"{sourceName}->{targetName}")
+    |> String.concat ", "
+
+let private formatTableMappingDelta (mapping: TableCopyMapping) : string option =
+  let deltas =
+    [ if not (mapping.sourceTable.Equals(mapping.targetTable, StringComparison.OrdinalIgnoreCase)) then
+        yield $"table rename {mapping.sourceTable}->{mapping.targetTable}"
+
+      if not mapping.renamedColumns.IsEmpty then
+        let renamedColumns =
+          mapping.renamedColumns
+          |> List.map (fun (sourceName, targetName) -> $"{sourceName}->{targetName}")
+          |> String.concat ", "
+
+        yield $"renamed columns [{renamedColumns}]"
+
+      if not mapping.addedTargetColumns.IsEmpty then
+        let addedTargetColumns = mapping.addedTargetColumns |> String.concat ", "
+        yield $"added target columns [{addedTargetColumns}]"
+
+      if not mapping.droppedSourceColumns.IsEmpty then
+        let droppedSourceColumns = mapping.droppedSourceColumns |> String.concat ", "
+        yield $"dropped source columns [{droppedSourceColumns}]" ]
+
+  match deltas with
+  | [] -> None
+  | changes ->
+    let changeSummary = changes |> String.concat "; "
+    Some $"table '{mapping.targetTable}': {changeSummary}"
+
+let private describeSupportedDifferences (schemaPlan: SchemaCopyPlan) : string list =
+  let diff = schemaPlan.diff
+
+  let tableLevelSummary =
+    [ $"added tables: {joinOrNone diff.addedTables}"
+      $"removed tables: {joinOrNone diff.removedTables}"
+      $"renamed tables: {formatRenamePairs diff.renamedTables}" ]
+
+  let mappingDeltas = schemaPlan.tableMappings |> List.choose formatTableMappingDelta
+
+  if mappingDeltas.IsEmpty then
+    tableLevelSummary @ [ "column/table mapping deltas: none" ]
+  else
+    tableLevelSummary @ mappingDeltas
+
+let private renderPreflightReport (supported: string list) (unsupported: string list) =
+  let renderSection (header: string) (lines: string list) =
+    let normalizedLines =
+      match lines with
+      | [] -> [ "none" ]
+      | values -> values
+
+    header :: (normalizedLines |> List.map (fun line -> $"  - {line}"))
+
+  [ "Schema preflight report:"
+    yield! renderSection "Supported differences:" supported
+    yield! renderSection "Unsupported differences:" unsupported ]
+  |> String.concat Environment.NewLine
+
 let private buildCopyPlan (sourceSchema: SqlFile) (targetSchema: SqlFile) : Result<BulkCopyPlan, SqliteException> =
+  let schemaPlan = buildSchemaCopyPlan sourceSchema targetSchema
+  let supportedDifferences = describeSupportedDifferences schemaPlan
+
   match buildBulkCopyPlan sourceSchema targetSchema with
   | Ok plan -> Ok plan
-  | Error message -> Error(toSqliteError message)
+  | Error message ->
+    let report = renderPreflightReport supportedDifferences [ message ]
+    Error(toSqliteError report)
 
 let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<MigrationStatusReport, SqliteException>> =
   task {
