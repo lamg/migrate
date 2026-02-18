@@ -198,9 +198,15 @@ src/
 - **CLI contract simplified**: migration pathing is now fully implicit from directory context plus optional `--dir` override.
 - **Coverage and docs aligned**: migrate help assertions and command docs were updated to remove `--schema`.
 
+## Update (2026-02-18, schema preflight validation)
+
+- **Schema existence preflight added**: deterministic new-path resolution now checks for `<dir>/schema.fsx` before hash computation.
+- **Error clarity improved**: commands that depend on schema inference now return explicit `Schema script was not found: <path>` messaging.
+- **Coverage added**: CLI integration test validates missing-schema failure path for `mig drain`.
+
 ## What's next
 
-1. Evaluate whether commands should validate schema presence up front with a dedicated preflight error before hash/path resolution.
+1. Evaluate whether we should add equivalent preflight checks for missing old DB candidates before attempting command-specific work.
 
 ## Completed next-step items
 
@@ -226,3 +232,4 @@ src/
 19. Status inferred new-only fallback
 20. Old/new CLI flag removal + shared `--dir` override
 21. Schema argument removal (`mig migrate --schema`)
+22. Schema preflight validation for deterministic pathing

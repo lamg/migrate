@@ -89,6 +89,12 @@ let private computeShortSchemaHash (schemaPath: string) : Result<string, string>
 let private defaultSchemaPathForCurrentDirectory (currentDirectory: string) =
   Path.Combine(currentDirectory, "schema.fsx")
 
+let private ensureSchemaScriptExists (schemaPath: string) : Result<unit, string> =
+  if File.Exists schemaPath then
+    Ok()
+  else
+    Error($"Schema script was not found: {schemaPath}")
+
 let private resolveCommandDirectory (commandName: string) (candidate: string option) : Result<string, string> =
   let targetDirectory =
     candidate
@@ -105,13 +111,16 @@ let private resolveDeterministicNewDbPath
   (directoryName: string)
   (schemaPath: string)
   : Result<DeterministicNewDbPath, string> =
-  match computeShortSchemaHash schemaPath with
+  match ensureSchemaScriptExists schemaPath with
   | Error message -> Error message
-  | Ok schemaHash ->
-    Ok
-      { schemaPath = schemaPath
-        schemaHash = schemaHash
-        path = Path.Combine(currentDirectory, $"{directoryName}-{schemaHash}.sqlite") }
+  | Ok() ->
+    match computeShortSchemaHash schemaPath with
+    | Error message -> Error message
+    | Ok schemaHash ->
+      Ok
+        { schemaPath = schemaPath
+          schemaHash = schemaHash
+          path = Path.Combine(currentDirectory, $"{directoryName}-{schemaHash}.sqlite") }
 
 let private isHexHashSegment (value: string) =
   value.Length = 16 && value |> Seq.forall Uri.IsHexDigit

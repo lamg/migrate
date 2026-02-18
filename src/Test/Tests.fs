@@ -1790,6 +1790,23 @@ type Student = {{ id: int64; name: string }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
+let ``cli drain reports missing schema script clearly`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_drain_missing_schema_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+  let expectedSchemaPath = Path.Combine(Path.GetFullPath tempDir, "schema.fsx")
+
+  let exitCode, stdOut, stdErr = runMigCli [ "drain"; "-d"; tempDir ]
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("drain failed: Could not infer new database automatically from schema", stdErr)
+  Assert.Contains($"Schema script was not found: {expectedSchemaPath}", stdErr)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
 let ``cli cleanup-old prints dropped table summary`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_cleanup_old_success_{Guid.NewGuid()}")
