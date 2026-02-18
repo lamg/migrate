@@ -17,6 +17,15 @@ type MigrateArgs =
       | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
+type PlanArgs =
+  | [<AltCommandLine("-d")>] Dir of path: string
+
+  interface IArgParserTemplate with
+    member this.Usage =
+      match this with
+      | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
+
+[<CliPrefix(CliPrefix.DoubleDash)>]
 type DrainArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
 
@@ -54,6 +63,7 @@ type StatusArgs =
 
 type Command =
   | [<CliPrefix(CliPrefix.None)>] Migrate of ParseResults<MigrateArgs>
+  | [<CliPrefix(CliPrefix.None)>] Plan of ParseResults<PlanArgs>
   | [<CliPrefix(CliPrefix.None)>] Drain of ParseResults<DrainArgs>
   | [<CliPrefix(CliPrefix.None)>] Cutover of ParseResults<CutoverArgs>
   | [<CliPrefix(CliPrefix.None); CustomCommandLine("cleanup-old")>] CleanupOld of ParseResults<CleanupOldArgs>
@@ -63,6 +73,7 @@ type Command =
     member this.Usage =
       match this with
       | Migrate _ -> "create new database and copy data from old"
+      | Plan _ -> "show dry-run migration plan without mutating databases"
       | Drain _ -> "stop writes on old database and replay accumulated changes"
       | Cutover _ -> "mark new database as ready for serving"
       | CleanupOld _ -> "drop old-database migration tables after cutover"
@@ -236,6 +247,73 @@ let migrate (args: ParseResults<MigrateArgs>) =
         | Error ex ->
           eprintfn $"migrate failed: {ex.Message}"
           1
+
+let plan (args: ParseResults<PlanArgs>) =
+  match resolveCommandDirectory "plan" (args.TryGetResult PlanArgs.Dir) with
+  | Error message ->
+    eprintfn $"plan failed: {message}"
+    1
+  | Ok currentDirectory ->
+    let directoryName = DirectoryInfo(currentDirectory).Name
+    let schemaPath = defaultSchemaPathForCurrentDirectory currentDirectory
+
+    match resolveDeterministicNewDbPath currentDirectory directoryName schemaPath with
+    | Error message ->
+      eprintfn $"plan failed: Could not resolve deterministic new database path from schema '{schemaPath}': {message}"
+
+      1
+    | Ok resolvedNew ->
+      let newDb = resolvedNew.path
+
+      let oldResult =
+        match inferOldDbFromCurrentDirectory currentDirectory directoryName (Some newDb) with
+        | Ok inferredOld -> Ok(Some inferredOld)
+        | Error _ when File.Exists newDb -> Ok None
+        | Error message -> Error($"{message} Excluding target '{newDb}'. Use `-d` to select a different directory.")
+
+      match oldResult with
+      | Error message ->
+        eprintfn $"plan failed: {message}"
+        1
+      | Ok None ->
+        printfn "Plan skipped."
+        printfn $"Schema script: {schemaPath}"
+        printfn $"Schema hash: {resolvedNew.schemaHash}"
+        printfn $"Database already present for current schema: {newDb}"
+        0
+      | Ok(Some old) ->
+        match getMigratePlan old schemaPath newDb |> fun t -> t.Result with
+        | Error ex ->
+          eprintfn $"plan failed: {ex.Message}"
+          1
+        | Ok report ->
+          let canRunMigrate = if report.canRunMigrate then "yes" else "no"
+
+          let printLines header lines =
+            printfn $"{header}"
+
+            match lines with
+            | [] -> printfn "  - none"
+            | values -> values |> List.iter (fun line -> printfn $"  - {line}")
+
+          printfn "Migration plan."
+          printfn $"Old database: {old}"
+          printfn $"Schema script: {schemaPath}"
+          printfn $"Schema hash: {report.schemaHash}"
+
+          match report.schemaCommit with
+          | Some schemaCommit -> printfn $"Schema commit: {schemaCommit}"
+          | None -> ()
+
+          printfn $"New database: {newDb}"
+          printfn $"Can run migrate now: {canRunMigrate}"
+
+          printLines "Planned copy targets (execution order):" report.plannedCopyTargets
+          printLines "Supported differences:" report.supportedDifferences
+          printLines "Unsupported differences:" report.unsupportedDifferences
+          printLines "Replay prerequisites:" report.replayPrerequisites
+
+          if report.canRunMigrate then 0 else 1
 
 let drain (args: ParseResults<DrainArgs>) =
   match resolveCommandDirectory "drain" (args.TryGetResult DrainArgs.Dir) with
@@ -471,6 +549,7 @@ let main argv =
 
     match results.GetSubCommand() with
     | Migrate args -> migrate args
+    | Plan args -> plan args
     | Drain args -> drain args
     | Cutover args -> cutover args
     | CleanupOld args -> cleanupOld args

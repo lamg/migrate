@@ -41,7 +41,34 @@ No recording, replay, or drain phases are needed since no service is writing to 
 
 ## Online mode
 
-When services are deployed, the administrator uses three required phase commands plus one optional cleanup command:
+When services are deployed, the administrator can run one optional planning command, then three required phase commands plus one optional cleanup command:
+
+### `mig plan`
+
+```sh
+mig plan [--dir|-d /path/to/project]
+```
+
+Dry-run planning mode (no database mutations):
+
+- Uses the current directory as project root (override with `--dir` / `-d`)
+- Uses `<dir>/schema.fsx` as schema input
+- Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite`
+- Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file excluding the target path
+
+Outputs:
+
+- Inferred old/schema/new paths
+- Schema hash and optional schema commit metadata
+- Planned table copy order
+- Supported vs unsupported schema differences (including target non-table consistency checks)
+- Replay prerequisites (`_migration_marker`, `_migration_log`, target-path availability)
+- `Can run migrate now: yes|no`
+
+Exit code:
+
+- `0` when migrate can run with current inferred inputs
+- `1` when blocking preflight issues are detected
 
 ### `mig migrate`
 
@@ -166,6 +193,7 @@ MigLib in the new service checks the `_migration_status` table on startup and pe
 
 | Command | What it does | Who reacts |
 |---|---|---|
+| `mig plan` | Prints dry-run migration plan and prerequisites without mutating DBs | — |
 | `mig migrate` | Creates new DB, copies data, exits | Old service starts recording writes |
 | `mig drain` | Sets drain marker, replays all accumulated writes, exits | Old service stops writes |
 | `mig cutover` | Sets ready marker, removes replay-only tables | New service starts serving |

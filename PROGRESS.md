@@ -229,11 +229,17 @@ src/
 - **Preflight reporting expanded**: schema preflight output now includes explicit non-table summaries and folds non-table consistency failures into `Unsupported differences`.
 - **Coverage added**: unit tests now verify `analyzeNonTableConsistency` for both valid and invalid target non-table definitions.
 
+## Update (2026-02-18, dry-run planning mode)
+
+- **Dry-run command added**: new `mig plan` command performs deterministic path inference and schema planning without mutating old/new databases.
+- **Planning API added**: `MigLib.HotMigration.getMigratePlan` now returns schema hash/commit, copy-order targets, supported/unsupported differences, and replay prerequisites.
+- **Exit semantics added**: `mig plan` exits `0` when migrate is runnable and `1` when blocking preflight issues exist, while still printing the full plan report.
+- **Coverage and docs aligned**: CLI integration tests now cover `plan` help and success/failure dry-run flows; README/spec/runbook were updated for plan usage.
+
 ## What's next
 
-1. Define and test a trigger-behavior validation checklist for drain/replay and post-cutover writes.
-2. Add a dry-run planning mode that prints inferred paths, schema copy plan, and replay prerequisites without mutating databases.
-3. Improve failure-recovery guidance/output for partial `migrate` failures (what exists, safe cleanup, safe rerun).
+1. Improve failure-recovery guidance/output for partial `migrate` failures (what exists, safe cleanup, safe rerun).
+2. Add targeted trigger-behavior validation for drain/replay and post-cutover writes (runtime behavior checks, not schema-identity checks).
 
 ## Completed next-step items
 
@@ -264,3 +270,4 @@ src/
 24. Schema-object consistency direction (target-only views/indexes/triggers)
 25. Strict preflight drift reporting before migration side effects
 26. Non-table object consistency checks in migrate preflight reporting
+27. Dry-run migration planning command (`mig plan`) with preflight report output

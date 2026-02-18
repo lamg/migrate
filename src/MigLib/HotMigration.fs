@@ -44,6 +44,15 @@ type MigrateResult =
     copiedTables: int
     copiedRows: int64 }
 
+type MigratePlanReport =
+  { schemaHash: string
+    schemaCommit: string option
+    supportedDifferences: string list
+    unsupportedDifferences: string list
+    plannedCopyTargets: string list
+    replayPrerequisites: string list
+    canRunMigrate: bool }
+
 type DrainResult =
   { replayedEntries: int
     remainingEntries: int64 }
@@ -1451,6 +1460,103 @@ let private buildCopyPlan (sourceSchema: SqlFile) (targetSchema: SqlFile) : Resu
     let unsupported = nonTableConsistency.unsupportedLines @ [ message ]
     let report = renderPreflightReport supportedDifferences unsupported
     Error(toSqliteError report)
+
+let getMigratePlan
+  (oldDbPath: string)
+  (schemaPath: string)
+  (newDbPath: string)
+  : Task<Result<MigratePlanReport, SqliteException>> =
+  task {
+    try
+      if not (File.Exists oldDbPath) then
+        return Error(toSqliteError $"Old database was not found: {oldDbPath}")
+      else
+        let schemaHashResult = computeSchemaHashFromScriptPath schemaPath
+
+        match schemaHashResult with
+        | Error ex -> return Error ex
+        | Ok schemaHash ->
+          let schemaCommit = tryResolveSchemaCommitFromGit schemaPath
+
+          let targetSchemaResult =
+            match parseSchemaFromScript schemaPath with
+            | Ok schema -> Ok schema
+            | Error ex -> Error ex
+
+          match targetSchemaResult with
+          | Error ex -> return Error ex
+          | Ok targetSchema ->
+            use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
+            do! oldConnection.OpenAsync()
+
+            let! sourceSchemaResult = loadSchemaFromDatabase oldConnection migrationTables
+
+            match sourceSchemaResult with
+            | Error ex -> return Error ex
+            | Ok sourceSchema ->
+              let schemaPlan = buildSchemaCopyPlan sourceSchema targetSchema
+              let tableDifferences = describeSupportedDifferences schemaPlan
+              let nonTableConsistency = analyzeNonTableConsistency targetSchema
+              let supportedDifferences = tableDifferences @ nonTableConsistency.supportedLines
+
+              let plannerResult = buildBulkCopyPlan sourceSchema targetSchema
+
+              let plannedCopyTargets, plannerUnsupported =
+                match plannerResult with
+                | Ok plan -> plan.steps |> List.map _.mapping.targetTable, []
+                | Error message -> [], [ message ]
+
+              let unsupportedDifferences =
+                nonTableConsistency.unsupportedLines @ plannerUnsupported
+
+              let! oldMarkerStatus = readMarkerStatus oldConnection None "_migration_marker"
+              let! oldMigrationLogTablePresent = tableExists oldConnection None "_migration_log"
+              let! oldMigrationLogEntries = countRowsIfTableExists oldConnection None "_migration_log"
+
+              let markerPrerequisite =
+                match oldMarkerStatus with
+                | Some status ->
+                  $"_migration_marker is present with status '{status}' (migrate will set it to recording)."
+                | None -> "_migration_marker is absent (migrate will create it in recording mode)."
+
+              let logPrerequisite =
+                if oldMigrationLogTablePresent then
+                  $"_migration_log is present with {oldMigrationLogEntries} entries (migrate will recreate it)."
+                else
+                  "_migration_log is absent (migrate will create it)."
+
+              let newDatabaseAlreadyExists = File.Exists newDbPath
+
+              let targetPrerequisite =
+                if newDatabaseAlreadyExists then
+                  $"target database already exists: {newDbPath}"
+                else
+                  $"target database path is available: {newDbPath}"
+
+              let driftPrerequisite =
+                if unsupportedDifferences.IsEmpty then
+                  "schema preflight checks pass."
+                else
+                  $"schema preflight has {unsupportedDifferences.Length} blocking issue(s)."
+
+              let replayPrerequisites =
+                [ markerPrerequisite; logPrerequisite; targetPrerequisite; driftPrerequisite ]
+
+              let canRunMigrate = not newDatabaseAlreadyExists && unsupportedDifferences.IsEmpty
+
+              return
+                Ok
+                  { schemaHash = schemaHash
+                    schemaCommit = schemaCommit
+                    supportedDifferences = supportedDifferences
+                    unsupportedDifferences = unsupportedDifferences
+                    plannedCopyTargets = plannedCopyTargets
+                    replayPrerequisites = replayPrerequisites
+                    canRunMigrate = canRunMigrate }
+    with
+    | :? SqliteException as ex -> return Error ex
+    | ex -> return Error(toSqliteError ex.Message)
+  }
 
 let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<MigrationStatusReport, SqliteException>> =
   task {

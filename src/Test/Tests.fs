@@ -1807,6 +1807,7 @@ let ``cli root help shows current command surface`` () =
     [ "--help" ]
     "USAGE: mig [--help] [<subcommand> [<options>]]"
     [ "migrate <options>"
+      "plan <options>"
       "drain <options>"
       "cutover <options>"
       "cleanup-old <options>"
@@ -1816,6 +1817,7 @@ let ``cli root help shows current command surface`` () =
 let ``cli subcommand help shows usage and options`` () =
   let cases: (string list * string * string list) list =
     [ ([ "migrate"; "--help" ], "USAGE: mig migrate [--help] [--dir <path>]", [ "--dir, -d <path>" ])
+      ([ "plan"; "--help" ], "USAGE: mig plan [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "drain"; "--help" ], "USAGE: mig drain [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "cutover"; "--help" ], "USAGE: mig cutover [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "cleanup-old"; "--help" ], "USAGE: mig cleanup-old [--help] [--dir <path>]", [ "--dir, -d <path>" ])
@@ -2190,6 +2192,150 @@ type Student = {{ id: int64; name: string }}
   Assert.Equal(1L, studentCount)
 
   verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli plan prints dry-run migration plan without mutating databases`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_plan_dry_run_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-1a2b3c4d5e6f7788.sqlite")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+
+  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  setupOldConn.Open()
+
+  [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  setupOldConn.Close()
+
+  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "plan" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains("Migration plan.", stdOut)
+  Assert.Contains($"Old database: {oldDbPath}", stdOut)
+  Assert.Contains($"Schema script: {schemaPath}", stdOut)
+  Assert.Contains($"Schema hash: {deriveShortSchemaHashFromScript schemaPath}", stdOut)
+  Assert.Contains($"New database: {expectedNewDbPath}", stdOut)
+  Assert.Contains("Can run migrate now: yes", stdOut)
+  Assert.Contains("Planned copy targets (execution order):", stdOut)
+  Assert.Contains("  - student", stdOut)
+  Assert.False(File.Exists expectedNewDbPath)
+
+  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  verifyOldConn.Open()
+
+  use markerExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_marker' LIMIT 1",
+      verifyOldConn
+    )
+
+  let markerExists = markerExistsCmd.ExecuteScalar()
+  Assert.True(isNull markerExists)
+
+  use logExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_log' LIMIT 1",
+      verifyOldConn
+    )
+
+  let logExists = logExistsCmd.ExecuteScalar()
+  Assert.True(isNull logExists)
+
+  verifyOldConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli plan reports blocking drift and keeps databases unchanged`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_plan_blocking_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-9a8b7c6d5e4f3210.sqlite")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+
+  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  setupOldConn.Open()
+
+  [ "CREATE TABLE student(id INTEGER NOT NULL, name TEXT NOT NULL);"
+    "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  setupOldConn.Close()
+
+  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "plan" ]
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains("Migration plan.", stdOut)
+  Assert.Contains("Can run migrate now: no", stdOut)
+  Assert.Contains("Unsupported differences:", stdOut)
+  Assert.Contains("PK mismatch", stdOut)
+  Assert.False(File.Exists expectedNewDbPath)
+
+  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  verifyOldConn.Open()
+
+  use markerExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_marker' LIMIT 1",
+      verifyOldConn
+    )
+
+  let markerExists = markerExistsCmd.ExecuteScalar()
+  Assert.True(isNull markerExists)
+
+  use logExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_log' LIMIT 1",
+      verifyOldConn
+    )
+
+  let logExists = logExistsCmd.ExecuteScalar()
+  Assert.True(isNull logExists)
+
+  verifyOldConn.Close()
   Directory.Delete(tempDir, true)
 
 [<Fact>]

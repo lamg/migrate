@@ -15,6 +15,11 @@ This runbook describes how to execute and validate a hot migration using the cur
 3. Ensure the new service build is ready to run against the inferred target database path.
 4. Ensure old and new service instances can be monitored during migration.
 5. Ensure disk space is sufficient for a second database file plus migration overhead tables.
+6. Run a dry-run plan and resolve blocking issues before migration:
+
+```sh
+mig plan [--dir|-d /path/to/project]
+```
 
 ## Phase 1: Migrate
 
