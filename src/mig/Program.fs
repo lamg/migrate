@@ -10,13 +10,11 @@ open MigLib.HotMigration
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type MigrateArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
-  | Schema of path: string
 
   interface IArgParserTemplate with
     member this.Usage =
       match this with
       | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
-      | Schema _ -> "path to the .fsx schema file (default: <dir>/schema.fsx)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type DrainArgs =
@@ -180,14 +178,7 @@ let migrate (args: ParseResults<MigrateArgs>) =
   | Ok currentDirectory ->
     let directoryName = DirectoryInfo(currentDirectory).Name
 
-    let schemaPath =
-      args.TryGetResult MigrateArgs.Schema
-      |> Option.map (fun path ->
-        if Path.IsPathRooted path then
-          path
-        else
-          Path.Combine(currentDirectory, path))
-      |> Option.defaultValue (defaultSchemaPathForCurrentDirectory currentDirectory)
+    let schemaPath = defaultSchemaPathForCurrentDirectory currentDirectory
 
     match resolveDeterministicNewDbPath currentDirectory directoryName schemaPath with
     | Error message ->

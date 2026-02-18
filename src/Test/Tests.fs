@@ -1737,9 +1737,7 @@ let ``cli root help shows current command surface`` () =
 [<Fact>]
 let ``cli subcommand help shows usage and options`` () =
   let cases: (string list * string * string list) list =
-    [ ([ "migrate"; "--help" ],
-       "USAGE: mig migrate [--help] [--dir <path>] [--schema <path>]",
-       [ "--dir, -d <path>"; "--schema <path>" ])
+    [ ([ "migrate"; "--help" ], "USAGE: mig migrate [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "drain"; "--help" ], "USAGE: mig drain [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "cutover"; "--help" ], "USAGE: mig cutover [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "cleanup-old"; "--help" ], "USAGE: mig cleanup-old [--help] [--dir <path>]", [ "--dir, -d <path>" ])

@@ -150,7 +150,7 @@ src/
 
 - **Root help coverage added**: integration test now validates `mig --help` output includes the full current subcommand surface.
 - **Subcommand help coverage added**: integration test now validates `--help` output for `migrate`, `drain`, `cutover`, `cleanup-old`, and `status`.
-- **Parser contract locked down**: tests now enforce expected migrate usage shape with optional `--dir`/`--schema` in current auto-discovery mode.
+- **Parser contract locked down**: tests now enforce expected migrate usage shape with optional `--dir` in current auto-discovery mode.
 
 ## Update (2026-02-18, schema identity metadata)
 
@@ -192,9 +192,15 @@ src/
 - **Coverage updated**: CLI help and integration tests now validate the `--dir` contract and implicit old/new resolution flow.
 - **Specs aligned**: command specification and runbook now describe only implicit old/new detection plus `--dir` override.
 
+## Update (2026-02-18, schema argument removal)
+
+- **Schema path override removed**: `mig migrate` no longer accepts `--schema`; schema is always resolved as `<dir>/schema.fsx`.
+- **CLI contract simplified**: migration pathing is now fully implicit from directory context plus optional `--dir` override.
+- **Coverage and docs aligned**: migrate help assertions and command docs were updated to remove `--schema`.
+
 ## What's next
 
-1. Evaluate whether `mig migrate` should also support `--schema` as relative to `--dir` when both are provided (currently it resolves this way; decide if we want to lock it as an explicit compatibility contract in specs/tests).
+1. Evaluate whether commands should validate schema presence up front with a dedicated preflight error before hash/path resolution.
 
 ## Completed next-step items
 
@@ -219,3 +225,4 @@ src/
 18. Deterministic operational command pathing for `cleanup-old`
 19. Status inferred new-only fallback
 20. Old/new CLI flag removal + shared `--dir` override
+21. Schema argument removal (`mig migrate --schema`)

@@ -25,7 +25,7 @@ They communicate through marker tables in the databases:
 When no service is deployed, the entire migration can be performed in a single command:
 
 ```
-mig migrate [--dir|-d /path/to/project] [--schema schema.fsx]
+mig migrate [--dir|-d /path/to/project]
 ```
 
 This command:
@@ -46,13 +46,13 @@ When services are deployed, the administrator uses three required phase commands
 ### `mig migrate`
 
 ```
-mig migrate [--dir|-d /path/to/project] [--schema schema.fsx]
+mig migrate [--dir|-d /path/to/project]
 ```
 
 Default behavior:
 
 - Uses the current directory as project root (override with `--dir` / `-d`)
-- Uses `<dir>/schema.fsx` as schema input (override with `--schema`)
+- Uses `<dir>/schema.fsx` as schema input
 - Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite`
 - Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file excluding the target path
 

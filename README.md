@@ -74,7 +74,7 @@ mig migrate -d /path/to/project
 
 ## Commands
 
-- `mig migrate [--dir|-d <path>] [--schema <path>]` - Create the new DB from schema, copy data, and start recording on old DB.
+- `mig migrate [--dir|-d <path>]` - Create the new DB from schema, copy data, and start recording on old DB.
 - `mig drain [--dir|-d <path>]` - Switch old DB to draining mode and replay pending migration log entries.
 - `mig cutover [--dir|-d <path>]` - Verify drain completion, switch new DB to `ready`, and remove replay-only tables.
 - `mig cleanup-old [--dir|-d <path>]` - Optional cleanup of old DB migration tables (`_migration_marker`, `_migration_log`).

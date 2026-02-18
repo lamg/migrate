@@ -11,7 +11,7 @@ This runbook describes how to execute and validate a hot migration using the cur
 ## Preflight Checks
 
 1. Confirm backups exist for the source SQLite file (`<dir-name>-<old-hash>.sqlite`).
-2. Confirm the new schema script compiles and reflects correctly (same file intended for `mig migrate --schema`).
+2. Confirm the new schema script compiles and reflects correctly (`schema.fsx` in the target directory).
 3. Ensure the new service build is ready to run against the inferred target database path.
 4. Ensure old and new service instances can be monitored during migration.
 5. Ensure disk space is sufficient for a second database file plus migration overhead tables.
@@ -19,7 +19,7 @@ This runbook describes how to execute and validate a hot migration using the cur
 ## Phase 1: Migrate
 
 ```sh
-mig migrate [--dir|-d /path/to/project] [--schema schema.fsx]
+mig migrate [--dir|-d /path/to/project]
 ```
 
 Default no-flag mode (`mig migrate` from project directory):
