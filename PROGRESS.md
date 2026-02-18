@@ -236,10 +236,17 @@ src/
 - **Exit semantics added**: `mig plan` exits `0` when migrate is runnable and `1` when blocking preflight issues exist, while still printing the full plan report.
 - **Coverage and docs aligned**: CLI integration tests now cover `plan` help and success/failure dry-run flows; README/spec/runbook were updated for plan usage.
 
+## Update (2026-02-18, migrate failure recovery guidance)
+
+- **Recovery snapshot added**: `mig migrate` failures now print old/new state snapshot details (marker status, migration-log presence/count, target DB presence, new DB migration metadata when available).
+- **Safe-rerun guidance added**: migrate failure output now includes concrete rerun guidance (`keep old as source of truth`, cleanup/reset preconditions, rerun through `mig plan`).
+- **Old-side status API added**: `MigLib.HotMigration.getOldDatabaseStatus` now reports `_migration_marker` + `_migration_log` presence/count for recovery reporting.
+- **Coverage added**: CLI integration test now validates partial-migrate failure output and resulting artifact state.
+
 ## What's next
 
-1. Improve failure-recovery guidance/output for partial `migrate` failures (what exists, safe cleanup, safe rerun).
-2. Add targeted trigger-behavior validation for drain/replay and post-cutover writes (runtime behavior checks, not schema-identity checks).
+1. Add targeted trigger-behavior validation for drain/replay and post-cutover writes (runtime behavior checks, not schema-identity checks).
+2. Add an explicit migration-reset command for failed/aborted attempts so operators can safely clear old/new migration artifacts without manual SQL.
 
 ## Completed next-step items
 
@@ -271,3 +278,4 @@ src/
 25. Strict preflight drift reporting before migration side effects
 26. Non-table object consistency checks in migrate preflight reporting
 27. Dry-run migration planning command (`mig plan`) with preflight report output
+28. Migrate failure recovery snapshot and rerun guidance output

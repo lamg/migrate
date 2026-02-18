@@ -92,6 +92,8 @@ If the schema-matched target database already exists and no source candidate is 
 5. Bulk-copies data from old to new in FK dependency order, building `_id_mapping`
 6. Exits and reports the result
 
+If migrate fails after partial setup, the CLI prints a recovery snapshot (old/new migration artifacts and status) plus rerun guidance so operators can safely reset before retrying.
+
 After this command the old service continues operating normally while recording writes. The administrator can deploy the new service pointing at the new database at any time — MigLib in the new service reads `_migration_status(status='migrating')` and rejects all requests until cutover. The administrator can use `mig status` to monitor how many writes have accumulated in the migration log before triggering drain.
 
 ### `mig drain`

@@ -149,6 +149,10 @@ After `cleanup-old`:
 
 ## Failure Triage Pointers
 
+- `migrate failed: ...`
+  - read the printed `Recovery snapshot` and `Recovery guidance` blocks
+  - keep old DB/service as source of truth; do not run `drain`/`cutover`
+  - run `mig plan` after cleanup/reset to verify rerun safety
 - `cutover failed: Drain is not complete...`
   - rerun `mig drain`, then recheck `mig status`
 - `cleanup-old failed: Old database is still in recording mode...`

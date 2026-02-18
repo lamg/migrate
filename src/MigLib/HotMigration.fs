@@ -26,6 +26,11 @@ type MigrationStatusReport =
     schemaIdentityHash: string option
     schemaIdentityCommit: string option }
 
+type OldDatabaseStatusReport =
+  { oldMarkerStatus: string option
+    migrationLogEntries: int64
+    migrationLogTablePresent: bool }
+
 type NewDatabaseStatusReport =
   { newMigrationStatus: string option
     idMappingEntries: int64
@@ -1651,6 +1656,31 @@ let getNewDatabaseStatus (newDbPath: string) : Task<Result<NewDatabaseStatusRepo
             migrationProgressTablePresent = migrationProgressTablePresent
             schemaIdentityHash = schemaIdentity |> Option.map _.schemaHash
             schemaIdentityCommit = schemaIdentity |> Option.bind _.schemaCommit }
+    with
+    | :? SqliteException as ex -> return Error ex
+    | ex -> return Error(toSqliteError ex.Message)
+  }
+
+let getOldDatabaseStatus (oldDbPath: string) : Task<Result<OldDatabaseStatusReport, SqliteException>> =
+  task {
+    try
+      use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
+      do! oldConnection.OpenAsync()
+
+      let! oldMarkerStatus = readMarkerStatus oldConnection None "_migration_marker"
+      let! migrationLogTablePresent = tableExists oldConnection None "_migration_log"
+
+      let! migrationLogEntries =
+        if migrationLogTablePresent then
+          countRows oldConnection None "_migration_log"
+        else
+          Task.FromResult 0L
+
+      return
+        Ok
+          { oldMarkerStatus = oldMarkerStatus
+            migrationLogEntries = migrationLogEntries
+            migrationLogTablePresent = migrationLogTablePresent }
     with
     | :? SqliteException as ex -> return Error ex
     | ex -> return Error(toSqliteError ex.Message)

@@ -2339,6 +2339,89 @@ type Student = {{ id: int64; name: string }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
+let ``cli migrate failure prints recovery snapshot and guidance`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_recovery_guidance_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-2233445566778899.sqlite")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+
+  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  setupOldConn.Open()
+
+  [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "INSERT INTO student(id, name) VALUES (1, 'Alice');"
+    "INSERT INTO student(id, name) VALUES (2, 'Alice');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+[<Unique "name">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  setupOldConn.Close()
+
+  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "migrate" ]
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("migrate failed:", stdErr)
+  Assert.Contains("Recovery snapshot:", stdErr)
+  Assert.Contains("Old marker status: recording", stdErr)
+  Assert.Contains("Old _migration_log: present", stdErr)
+  Assert.Contains($"New database file: present ({expectedNewDbPath})", stdErr)
+  Assert.Contains("Recovery guidance:", stdErr)
+  Assert.Contains("Run `mig plan` to confirm inferred paths and preflight status.", stdErr)
+
+  Assert.True(File.Exists expectedNewDbPath)
+
+  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
+  verifyOldConn.Open()
+
+  use markerStatusCmd =
+    new SqliteCommand("SELECT status FROM _migration_marker WHERE id = 0", verifyOldConn)
+
+  let markerStatus = markerStatusCmd.ExecuteScalar() |> string
+  Assert.Equal("recording", markerStatus)
+
+  use logExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_log' LIMIT 1",
+      verifyOldConn
+    )
+
+  let logExists = logExistsCmd.ExecuteScalar()
+  Assert.False(isNull logExists)
+
+  use verifyNewConn = new SqliteConnection($"Data Source={expectedNewDbPath}")
+  verifyNewConn.Open()
+
+  use migrationStatusCmd =
+    new SqliteCommand("SELECT status FROM _migration_status WHERE id = 0", verifyNewConn)
+
+  let newMigrationStatus = migrationStatusCmd.ExecuteScalar() |> string
+  Assert.Equal("migrating", newMigrationStatus)
+
+  verifyOldConn.Close()
+  verifyNewConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
 let ``cli drain cutover status and cleanup-old auto-discover deterministic paths from current directory`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_operational_auto_{Guid.NewGuid()}")

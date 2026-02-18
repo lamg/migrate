@@ -198,6 +198,97 @@ let private resolveDefaultNewDbFromCurrentSchema
   | Error message ->
     Error($"Could not infer new database automatically from schema '{schemaPath}' for `{commandName}`: {message}.")
 
+let private printMigrateRecoveryGuidance (oldDbPath: string) (newDbPath: string) =
+  let oldSnapshot = getOldDatabaseStatus oldDbPath |> fun t -> t.Result
+  let newDbPresent = File.Exists newDbPath
+
+  let newSnapshot =
+    if newDbPresent then
+      Some(getNewDatabaseStatus newDbPath |> fun t -> t.Result)
+    else
+      None
+
+  eprintfn "Recovery snapshot:"
+
+  match oldSnapshot with
+  | Ok report ->
+    let oldMarkerStatus = report.oldMarkerStatus |> Option.defaultValue "no marker"
+
+    let oldMigrationLogState =
+      if report.migrationLogTablePresent then
+        $"present ({report.migrationLogEntries} entries)"
+      else
+        "absent"
+
+    eprintfn $"  Old marker status: {oldMarkerStatus}"
+    eprintfn $"  Old _migration_log: {oldMigrationLogState}"
+  | Error ex -> eprintfn $"  Old database snapshot unavailable: {ex.Message}"
+
+  let newDbState = if newDbPresent then "present" else "absent"
+  eprintfn $"  New database file: {newDbState} ({newDbPath})"
+
+  match newSnapshot with
+  | Some(Ok report) ->
+    let newStatus = report.newMigrationStatus |> Option.defaultValue "no status marker"
+
+    let idMappingState =
+      if report.idMappingTablePresent then
+        $"present ({report.idMappingEntries} entries)"
+      else
+        "absent"
+
+    let migrationProgressState =
+      if report.migrationProgressTablePresent then
+        "present"
+      else
+        "absent"
+
+    eprintfn $"  New migration status: {newStatus}"
+    eprintfn $"  New _id_mapping: {idMappingState}"
+    eprintfn $"  New _migration_progress: {migrationProgressState}"
+  | Some(Error ex) -> eprintfn $"  New database snapshot unavailable: {ex.Message}"
+  | None -> ()
+
+  let hasRecordingMarker =
+    match oldSnapshot with
+    | Ok report ->
+      report.oldMarkerStatus
+      |> Option.exists (fun status -> status.Equals("recording", StringComparison.OrdinalIgnoreCase))
+    | Error _ -> false
+
+  let hasOldMigrationLog =
+    match oldSnapshot with
+    | Ok report -> report.migrationLogTablePresent
+    | Error _ -> false
+
+  let safeImmediateRerun =
+    not newDbPresent && not hasRecordingMarker && not hasOldMigrationLog
+
+  let guidance = ResizeArray<string>()
+  guidance.Add "Keep the old database as source of truth; do not run drain/cutover after a failed migrate."
+
+  if hasRecordingMarker then
+    guidance.Add "Old marker is recording; new writes may be accumulating in _migration_log."
+
+  if hasOldMigrationLog || hasRecordingMarker then
+    guidance.Add "If restarting from scratch: stop writes first, then clear _migration_marker and _migration_log."
+
+  if newDbPresent then
+    guidance.Add $"Delete failed target database before rerun: {newDbPath}."
+  else
+    guidance.Add "No target database file was created."
+
+  guidance.Add "Run `mig plan` to confirm inferred paths and preflight status."
+
+  if safeImmediateRerun then
+    guidance.Add "Current snapshot indicates immediate rerun is safe."
+  else
+    guidance.Add "Rerun `mig migrate` only after cleanup/reset conditions above are satisfied."
+
+  eprintfn "Recovery guidance:"
+
+  guidance |> Seq.iteri (fun index line -> eprintfn $"  {index + 1}. {line}")
+
 let migrate (args: ParseResults<MigrateArgs>) =
   match resolveCommandDirectory "migrate" (args.TryGetResult MigrateArgs.Dir) with
   | Error message ->
@@ -246,6 +337,7 @@ let migrate (args: ParseResults<MigrateArgs>) =
           0
         | Error ex ->
           eprintfn $"migrate failed: {ex.Message}"
+          printMigrateRecoveryGuidance old newDb
           1
 
 let plan (args: ParseResults<PlanArgs>) =
