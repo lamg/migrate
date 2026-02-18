@@ -9,16 +9,16 @@ open MigLib.HotMigration
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type MigrateArgs =
-  | [<Mandatory>] Old of path: string
-  | [<Mandatory>] Schema of path: string
+  | Old of path: string
+  | Schema of path: string
   | New of path: string
 
   interface IArgParserTemplate with
     member this.Usage =
       match this with
-      | Old _ -> "path to the old database"
-      | Schema _ -> "path to the .fsx schema file"
-      | New _ -> "path for the new database (default: <old-name>-<schema-hash><ext> in old DB directory)"
+      | Old _ -> "path to the old database (default: auto-detect <dir>-<old-hash>.sqlite in current directory)"
+      | Schema _ -> "path to the .fsx schema file (default: ./schema.fsx)"
+      | New _ -> "path for the new database (default: ./<dir>-<schema-hash>.sqlite)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type DrainArgs =
@@ -77,15 +77,35 @@ type Command =
       | Status _ -> "show current migration state"
 
 let migrate (args: ParseResults<MigrateArgs>) =
-  let old = args.GetResult MigrateArgs.Old
-  let schema = args.GetResult MigrateArgs.Schema
-
   let normalizeLineEndings (text: string) =
     text.Replace("\r\n", "\n").Replace("\r", "\n")
 
+  let currentDirectory = Directory.GetCurrentDirectory()
+  let directoryName = DirectoryInfo(currentDirectory).Name
+
+  let isHexHashSegment (value: string) =
+    value.Length = 16 && value |> Seq.forall Uri.IsHexDigit
+
+  let isDirectoryHashNamedSqlite (path: string) =
+    if not (Path.GetExtension(path).Equals(".sqlite", StringComparison.OrdinalIgnoreCase)) then
+      false
+    else
+      let fileStem = Path.GetFileNameWithoutExtension path
+      let prefix = $"{directoryName}-"
+
+      if fileStem.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) then
+        let hashSegment = fileStem.Substring(prefix.Length)
+        isHexHashSegment hashSegment
+      else
+        false
+
+  let schemaPath =
+    args.TryGetResult MigrateArgs.Schema
+    |> Option.defaultValue (Path.Combine(currentDirectory, "schema.fsx"))
+
   let schemaHashResult =
     try
-      let normalizedSchema = File.ReadAllText(schema) |> normalizeLineEndings
+      let normalizedSchema = File.ReadAllText(schemaPath) |> normalizeLineEndings
       use sha256 = SHA256.Create()
       let schemaBytes = Encoding.UTF8.GetBytes normalizedSchema
       let hashBytes = sha256.ComputeHash schemaBytes
@@ -93,55 +113,69 @@ let migrate (args: ParseResults<MigrateArgs>) =
     with ex ->
       Error ex.Message
 
-  let newDbResult =
-    match args.TryGetResult MigrateArgs.New with
-    | Some explicitPath -> Ok(explicitPath, None)
-    | None ->
-      match schemaHashResult with
-      | Error message -> Error message
-      | Ok schemaHash ->
-        let oldFileName = Path.GetFileNameWithoutExtension old
-        let oldExtension = Path.GetExtension old
-
-        let extension =
-          if String.IsNullOrWhiteSpace oldExtension then
-            ".sqlite"
-          else
-            oldExtension
-
-        let deterministicName = $"{oldFileName}-{schemaHash}{extension}"
-        let oldDirectory = Path.GetDirectoryName old
-
-        let deterministicPath =
-          if String.IsNullOrWhiteSpace oldDirectory then
-            deterministicName
-          else
-            Path.Combine(oldDirectory, deterministicName)
-
-        Ok(deterministicPath, Some schemaHash)
-
-  match newDbResult with
+  match schemaHashResult with
   | Error message ->
-    eprintfn $"migrate failed: Could not resolve deterministic new database path from schema '{schema}': {message}"
+    eprintfn $"migrate failed: Could not resolve deterministic new database path from schema '{schemaPath}': {message}"
     1
-  | Ok(newDb, schemaHashOpt) ->
-    match runMigrate old schema newDb |> fun t -> t.Result with
-    | Ok result ->
-      printfn "Migrate complete."
-      printfn $"Old database: {old}"
-      printfn $"Schema script: {schema}"
+  | Ok schemaHash ->
+    let autoNewDbPath =
+      Path.Combine(currentDirectory, $"{directoryName}-{schemaHash}.sqlite")
 
-      match schemaHashOpt with
-      | Some schemaHash -> printfn $"Schema hash: {schemaHash}"
-      | None -> ()
+    let newDb, usedDeterministicDefault =
+      match args.TryGetResult MigrateArgs.New with
+      | Some explicitPath -> explicitPath, false
+      | None -> autoNewDbPath, true
 
-      printfn $"New database: {result.newDbPath}"
-      printfn $"Copied tables: {result.copiedTables}"
-      printfn $"Copied rows: {result.copiedRows}"
-      0
-    | Error ex ->
-      eprintfn $"migrate failed: {ex.Message}"
+    let oldResult =
+      match args.TryGetResult MigrateArgs.Old with
+      | Some explicitOld -> Ok(Some explicitOld)
+      | None ->
+        let candidates =
+          Directory.GetFiles(currentDirectory, $"{directoryName}-*.sqlite")
+          |> Array.filter (fun path -> not (path.Equals(newDb, StringComparison.OrdinalIgnoreCase)))
+          |> Array.filter isDirectoryHashNamedSqlite
+          |> Array.sort
+
+        if candidates.Length = 1 then
+          Ok(Some candidates[0])
+        elif candidates.Length > 1 then
+          let candidateList = String.concat ", " candidates
+
+          Error($"Could not infer old database automatically. Found multiple candidates: {candidateList}. Use --old.")
+        elif File.Exists(newDb) then
+          Ok None
+        else
+          Error(
+            $"Could not infer old database automatically. Expected exactly one source matching '{directoryName}-<old-hash>.sqlite' in {currentDirectory}, excluding target '{newDb}'. Use --old."
+          )
+
+    match oldResult with
+    | Error message ->
+      eprintfn $"migrate failed: {message}"
       1
+    | Ok None ->
+      printfn "Migrate skipped."
+      printfn $"Schema script: {schemaPath}"
+      printfn $"Schema hash: {schemaHash}"
+      printfn $"Database already present for current schema: {newDb}"
+      0
+    | Ok(Some old) ->
+      match runMigrate old schemaPath newDb |> fun t -> t.Result with
+      | Ok result ->
+        printfn "Migrate complete."
+        printfn $"Old database: {old}"
+        printfn $"Schema script: {schemaPath}"
+
+        if usedDeterministicDefault then
+          printfn $"Schema hash: {schemaHash}"
+
+        printfn $"New database: {result.newDbPath}"
+        printfn $"Copied tables: {result.copiedTables}"
+        printfn $"Copied rows: {result.copiedRows}"
+        0
+      | Error ex ->
+        eprintfn $"migrate failed: {ex.Message}"
+        1
 
 let drain (args: ParseResults<DrainArgs>) =
   let old = args.GetResult DrainArgs.Old

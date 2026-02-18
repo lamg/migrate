@@ -45,11 +45,16 @@ When services are deployed, the administrator uses three required commands plus 
 ### `mig migrate`
 
 ```
-mig migrate --old old.db --schema schema.fsx [--new new.db]
+mig migrate [--old old.db] [--schema schema.fsx] [--new new.db]
 ```
 
-If `--new` is omitted, `mig` derives a deterministic target path in the old DB directory:
-`<old-file-name>-<schema-hash><ext>`.
+Default behavior when run as `mig migrate` from a project directory:
+
+- Uses `./schema.fsx` as schema input
+- Derives target path as `./<dir-name>-<schema-hash>.sqlite`
+- Auto-detects source DB as exactly one `./<dir-name>-<old-hash>.sqlite` file excluding the target path
+
+If the schema-matched target database already exists and no source candidate is found, migrate is skipped as a no-op.
 
 1. Evaluates `schema.fsx` and derives the new schema via reflection
 2. Creates the new SQLite file with the new schema, `_id_mapping`, and `_migration_status(status='migrating')`

@@ -140,10 +140,11 @@ src/
 
 ## Update (2026-02-18, deterministic migrate pathing)
 
-- **Deterministic default new DB path added**: when `mig migrate` is called without `--new`, the CLI now derives `<old-file-name>-<schema-hash><ext>` in the old DB directory.
-- **Schema hash output added**: migrate now prints the derived schema hash whenever deterministic pathing is used.
-- **Coverage added**: CLI integration test now validates deterministic path derivation + successful migrate execution without `--new`.
-- **Docs aligned**: README/specs/runbook now describe deterministic default path behavior for `mig migrate`.
+- **Current-directory deterministic pathing added**: `mig migrate` now defaults target naming to `./<dir-name>-<schema-hash>.sqlite`.
+- **No-arg auto-discovery added**: `mig migrate` now defaults `schema` to `./schema.fsx` and auto-detects source DB as exactly one `./<dir-name>-<old-hash>.sqlite` file excluding the target.
+- **Schema-hash match handling added**: when the schema-matched target database already exists and no source candidate is found, migrate exits as a no-op (`Migrate skipped.`).
+- **Coverage added**: CLI integration tests now validate deterministic current-directory pathing, no-arg auto-discovery flow, and schema-matched no-op behavior.
+- **Docs aligned**: README/specs/runbook now describe current-directory deterministic behavior for `mig migrate`.
 
 ## What's next
 

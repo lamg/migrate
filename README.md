@@ -39,13 +39,18 @@ Assuming:
 - a target schema script at `schema.fsx`
 
 ```sh
-mig migrate --old old.db --schema schema.fsx
-# if --new is omitted, mig derives: <old-name>-<schema-hash><ext>
-mig status --old old.db --new new.db
-mig drain --old old.db --new new.db
-mig cutover --new new.db
+# from your project directory:
+# - expects ./schema.fsx
+# - expects exactly one source db matching <dir>-<old-hash>.sqlite
+# - derives target db as <dir>-<schema-hash>.sqlite
+mig migrate
+
+# then continue with explicit paths printed by migrate output
+mig status --old old.sqlite --new project-<schema-hash>.sqlite
+mig drain --old old.sqlite --new project-<schema-hash>.sqlite
+mig cutover --new project-<schema-hash>.sqlite
 # optional, after traffic has fully moved to the new service:
-mig cleanup-old --old old.db
+mig cleanup-old --old old.sqlite
 ```
 
 ## Features
@@ -65,7 +70,7 @@ mig cleanup-old --old old.db
 
 ## Commands
 
-- `mig migrate --old <path> --schema <path> [--new <path>]` - Create the new DB from schema, copy data, and start recording on old DB (`--new` defaults to deterministic `<old-name>-<schema-hash><ext>`).
+- `mig migrate [--old <path>] [--schema <path>] [--new <path>]` - Create the new DB from schema, copy data, and start recording on old DB (`mig migrate` defaults to current-directory auto-discovery and `./<dir>-<schema-hash>.sqlite` target naming).
 - `mig drain --old <path> --new <path>` - Switch old DB to draining mode and replay pending migration log entries.
 - `mig cutover --new <path>` - Verify drain completion, switch new DB to `ready`, and remove replay-only tables.
 - `mig cleanup-old --old <path>` - Optional cleanup of old DB migration tables (`_migration_marker`, `_migration_log`).
