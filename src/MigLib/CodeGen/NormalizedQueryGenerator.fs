@@ -1206,7 +1206,7 @@ let private generateNormalizedQueryByOrCreate
       $"SELECT {allSelects} FROM {normalized.baseTable.name} b\n      {joins}\n      WHERE {whereClause} LIMIT 1"
 
   // 5. Build async parameter bindings
-  let generateAsyncParamBindings (cmdVarName: string) =
+  let generateAsyncParamBindings (cmdVarName: string) (lineIndent: string) =
     annotation.columns
     |> List.map (fun col ->
       let _, columnDef = findNormalizedColumn normalized col |> Option.get
@@ -1216,10 +1216,10 @@ let private generateNormalizedQueryByOrCreate
         $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
       else
         $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
-    |> String.concat "\n        "
+    |> String.concat $"\n{lineIndent}"
 
-  let asyncParamBindings = generateAsyncParamBindings "cmd"
-  let asyncRequeryParamBindings = generateAsyncParamBindings "cmd2"
+  let asyncParamBindings = generateAsyncParamBindings "cmd" "        "
+  let asyncRequeryParamBindings = generateAsyncParamBindings "cmd2" "            "
 
   // 6. Generate mapping logic (async needs 12-space indent)
   let caseSelection =

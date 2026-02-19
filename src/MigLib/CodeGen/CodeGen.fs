@@ -6,6 +6,8 @@ open FsToolkit.ErrorHandling
 open MigLib.SchemaScript
 open MigLib.SchemaReflection
 open MigLib.DeclarativeMigrations.Types
+open MigLib.CodeGen.FabulousAstHelpers
+open Fantomas.Core
 
 /// Statistics about code generation
 type CodeGenStats =
@@ -107,7 +109,13 @@ let internal generateCodeFromModel
       if not (Directory.Exists outputDirectory) then
         Directory.CreateDirectory outputDirectory |> ignore
 
-    File.WriteAllText(outputFilePath, moduleContent)
+    let formattedContent =
+      try
+        formatCode moduleContent
+      with :? ParseException ->
+        moduleContent
+
+    File.WriteAllText(outputFilePath, formattedContent)
 
     return
       { NormalizedTables = normalizedTables.Length
@@ -133,7 +141,7 @@ let internal generateCodeFromTypes
   }
 
 /// Generate F# code by executing a .fsx schema script.
-let internal generateCodeFromScript
+let generateCodeFromScript
   (moduleName: string)
   (scriptPath: string)
   (outputFilePath: string)

@@ -5,6 +5,7 @@ open System
 open System.IO
 open System.Security.Cryptography
 open System.Text
+open MigLib.CodeGen.CodeGen
 open MigLib.HotMigration
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
@@ -81,8 +82,23 @@ type StatusArgs =
       match this with
       | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
 
+[<CliPrefix(CliPrefix.DoubleDash)>]
+type CodegenArgs =
+  | [<AltCommandLine("-d")>] Dir of path: string
+  | [<AltCommandLine("-m")>] Module of name: string
+  | [<AltCommandLine("-o")>] Output of path: string
+
+  interface IArgParserTemplate with
+    member this.Usage =
+      match this with
+      | Dir _ -> "directory that contains schema.fsx and generated source files (default: current directory)"
+      | Module _ -> "module name for generated F# code (default: Schema)"
+      | Output _ -> "output file name in the schema directory (default: Schema.fs)"
+
 type Command =
+  | [<AltCommandLine("-v")>] Version
   | [<CliPrefix(CliPrefix.None)>] Init of ParseResults<InitArgs>
+  | [<CliPrefix(CliPrefix.None)>] Codegen of ParseResults<CodegenArgs>
   | [<CliPrefix(CliPrefix.None)>] Migrate of ParseResults<MigrateArgs>
   | [<CliPrefix(CliPrefix.None)>] Plan of ParseResults<PlanArgs>
   | [<CliPrefix(CliPrefix.None)>] Drain of ParseResults<DrainArgs>
@@ -94,7 +110,9 @@ type Command =
   interface IArgParserTemplate with
     member this.Usage =
       match this with
+      | Version -> "print mig version"
       | Init _ -> "initialize a schema-matched database from schema.fsx without requiring a source database"
+      | Codegen _ -> "generate F# query helpers from schema.fsx"
       | Migrate _ -> "create new database and copy data from old"
       | Plan _ -> "show dry-run migration plan without mutating databases"
       | Drain _ -> "stop writes on old database and replay accumulated changes"
@@ -102,6 +120,14 @@ type Command =
       | CleanupOld _ -> "drop old-database migration tables after cutover"
       | Reset _ -> "reset failed migration artifacts on old/new databases"
       | Status _ -> "show current migration state"
+
+let private getVersionText () =
+  let version = typeof<Command>.Assembly.GetName().Version
+
+  if isNull version then
+    "unknown"
+  else
+    $"{version.Major}.{version.Minor}.{version.Build}"
 
 type private DeterministicNewDbPath =
   { schemaPath: string
@@ -312,6 +338,59 @@ let private printMigrateRecoveryGuidance (oldDbPath: string) (newDbPath: string)
   eprintfn "Recovery guidance:"
 
   guidance |> Seq.iteri (fun index line -> eprintfn $"  {index + 1}. {line}")
+
+let private resolveCodegenOutputPath (currentDirectory: string) (candidate: string option) : Result<string, string> =
+  let outputFileName = candidate |> Option.defaultValue "Schema.fs"
+
+  if String.IsNullOrWhiteSpace outputFileName then
+    Error "Output file name for `codegen` cannot be empty."
+  elif Path.IsPathRooted outputFileName then
+    Error "Output file for `codegen` must be a file name, not an absolute path."
+  elif not (outputFileName.Equals(Path.GetFileName outputFileName, StringComparison.Ordinal)) then
+    Error "Output file for `codegen` must be in the same directory as schema.fsx (no subdirectories)."
+  else
+    Ok(Path.Combine(currentDirectory, outputFileName))
+
+let codegen (args: ParseResults<CodegenArgs>) =
+  match resolveCommandDirectory "codegen" (args.TryGetResult CodegenArgs.Dir) with
+  | Error message ->
+    eprintfn $"codegen failed: {message}"
+    1
+  | Ok currentDirectory ->
+    let schemaPath = defaultSchemaPathForCurrentDirectory currentDirectory
+
+    match ensureSchemaScriptExists schemaPath with
+    | Error message ->
+      eprintfn $"codegen failed: {message}"
+      1
+    | Ok() ->
+      let moduleName =
+        args.TryGetResult CodegenArgs.Module |> Option.defaultValue "Schema"
+
+      if String.IsNullOrWhiteSpace moduleName then
+        eprintfn "codegen failed: module name cannot be empty."
+        1
+      else
+        match resolveCodegenOutputPath currentDirectory (args.TryGetResult CodegenArgs.Output) with
+        | Error message ->
+          eprintfn $"codegen failed: {message}"
+          1
+        | Ok outputPath ->
+          match generateCodeFromScript moduleName schemaPath outputPath with
+          | Error message ->
+            eprintfn $"codegen failed: {message}"
+            1
+          | Ok stats ->
+            printfn "Code generation complete."
+            printfn $"Schema script: {schemaPath}"
+            printfn $"Module: {moduleName}"
+            printfn $"Output file: {outputPath}"
+            printfn $"Normalized tables (DU): {stats.NormalizedTables}"
+            printfn $"Regular tables (records): {stats.RegularTables}"
+            printfn $"Views: {stats.Views}"
+            printfn "Generated files:"
+            stats.GeneratedFiles |> List.iter (fun file -> printfn $"  {file}")
+            0
 
 let migrate (args: ParseResults<MigrateArgs>) =
   match resolveCommandDirectory "migrate" (args.TryGetResult MigrateArgs.Dir) with
@@ -806,15 +885,23 @@ let main argv =
   try
     let results = parser.ParseCommandLine(inputs = argv, raiseOnUsage = true)
 
-    match results.GetSubCommand() with
-    | Init args -> init args
-    | Migrate args -> migrate args
-    | Plan args -> plan args
-    | Drain args -> drain args
-    | Cutover args -> cutover args
-    | CleanupOld args -> cleanupOld args
-    | Reset args -> reset args
-    | Status args -> status args
+    if results.Contains Version then
+      printfn $"{getVersionText ()}"
+      0
+    else
+      match results.GetSubCommand() with
+      | Init args -> init args
+      | Codegen args -> codegen args
+      | Migrate args -> migrate args
+      | Plan args -> plan args
+      | Drain args -> drain args
+      | Cutover args -> cutover args
+      | CleanupOld args -> cleanupOld args
+      | Reset args -> reset args
+      | Status args -> status args
+      | Version ->
+        printfn $"{getVersionText ()}"
+        0
   with :? ArguParseException as ex ->
     printfn $"%s{ex.Message}"
     1

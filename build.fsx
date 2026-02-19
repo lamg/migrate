@@ -18,13 +18,7 @@ let srcDir = Path.Combine(rootDir, "src")
 let migProjectPath = Path.Combine(srcDir, "mig", "mig.fsproj")
 let artifactsDir = Path.Combine(rootDir, "artifacts")
 let nupkgDir = Path.Combine(artifactsDir, "nupkg")
-let toolInstallDir = Path.Combine(rootDir, ".tools", "mig")
 let packageId = "migtool"
-
-let localToolVersion =
-    Environment.GetEnvironmentVariable "MIG_LOCAL_VERSION"
-    |> Option.ofObj
-    |> Option.defaultValue "0.0.0-local"
 
 let cliArgs =
     let commandLineArgs = Environment.GetCommandLineArgs() |> Array.toList
@@ -40,7 +34,7 @@ let requestedTarget =
         | "-t" :: target :: _ -> target
         | arg :: _ when arg.StartsWith "--target=" -> arg.Substring "--target=".Length
         | _ :: rest -> loop rest
-        | [] -> "InstallLocal"
+        | [] -> "InstallGlobal"
 
     loop cliArgs
 
@@ -57,9 +51,8 @@ let private runDotNetCommand command args =
         failwithf "dotnet %s failed with args: %s" command args
 
 Target.create "Clean" (fun _ ->
-    Shell.cleanDirs [ nupkgDir; toolInstallDir ]
-    Directory.CreateDirectory nupkgDir |> ignore
-    Directory.CreateDirectory toolInstallDir |> ignore)
+    Shell.cleanDirs [ nupkgDir ]
+    Directory.CreateDirectory nupkgDir |> ignore)
 
 Target.create "Restore" (fun _ -> runDotNetCommand "restore" $"\"{srcDir}\"")
 
@@ -67,27 +60,27 @@ Target.create "Build" (fun _ -> runDotNetCommand "build" $"\"{migProjectPath}\" 
 
 Target.create "PackTool" (fun _ ->
     let packArgs =
-        $"\"{migProjectPath}\" -c Release -o \"{nupkgDir}\" --no-restore /p:PackAsTool=true /p:ToolCommandName=mig /p:PackageId={packageId} /p:Version={localToolVersion}"
+        $"\"{migProjectPath}\" -c Release -o \"{nupkgDir}\" --no-restore /p:PackAsTool=true /p:ToolCommandName=mig /p:PackageId={packageId}"
 
     runDotNetCommand "pack" packArgs
 
-    Trace.log $"Packed %s{packageId} %s{localToolVersion} to %s{nupkgDir}")
+    Trace.log $"Packed %s{packageId} to %s{nupkgDir}")
 
-Target.create "InstallLocal" (fun _ ->
-    let uninstallArgs = $"uninstall --tool-path \"{toolInstallDir}\" {packageId}"
-    let uninstallResult = DotNet.exec id "tool" uninstallArgs
+Target.create "InstallGlobal" (fun _ ->
+    let updateArgs =
+        $"update --global {packageId} --add-source \"{nupkgDir}\" --ignore-failed-sources"
 
-    if uninstallResult.OK then
-        Trace.log $"Uninstalled previous local %s{packageId} from %s{toolInstallDir}."
+    let updateResult = DotNet.exec id "tool" updateArgs
+
+    if updateResult.OK then
+        Trace.log $"Updated global %s{packageId}."
     else
-        Trace.log $"No previous local %s{packageId} installation found in %s{toolInstallDir}."
+        let installArgs =
+            $"install --global {packageId} --add-source \"{nupkgDir}\" --ignore-failed-sources"
 
-    let installArgs =
-        $"install --tool-path \"{toolInstallDir}\" {packageId} --version {localToolVersion} --add-source \"{nupkgDir}\" --ignore-failed-sources"
+        runDotNetToolCommand installArgs
+        Trace.log $"Installed global %s{packageId}.")
 
-    runDotNetToolCommand installArgs
-    Trace.log $"Installed tool command `mig` to %s{toolInstallDir}.")
-
-"Clean" ==> "Restore" ==> "Build" ==> "PackTool" ==> "InstallLocal"
+"Clean" ==> "Restore" ==> "Build" ==> "PackTool" ==> "InstallGlobal"
 
 Target.runOrDefault requestedTarget

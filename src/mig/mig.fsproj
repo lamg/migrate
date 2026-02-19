@@ -2,9 +2,28 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
+    <RollForward>major</RollForward>
+
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>mig</ToolCommandName>
+    <PackageId>migtool</PackageId>
+    <RootNamespace>migrate</RootNamespace>
+    <AssemblyName>migrate</AssemblyName>
+    <Version>3.0.0</Version>
+    <PackageOutputPath>./nupkg</PackageOutputPath>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <Authors>Luis Ángel Méndez Gort</Authors>
+    <PackageProjectUrl>https://github.com/lamg/migrate</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/lamg/migrate</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageIcon>logo.png</PackageIcon>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.fs" />
+    <Content Include="../../README.md" Pack="true" PackagePath="\" />
+    <Content Include="../../images/logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Argu" />

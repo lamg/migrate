@@ -118,6 +118,7 @@ mig init
 ## Commands
 
 - `mig init [--dir|-d <path>]` - Create a schema-matched database from `schema.fsx` and apply seed inserts (no source DB required).
+- `mig codegen [--dir|-d <path>] [--module|-m <name>] [--output|-o <file>]` - Generate F# query helpers from `schema.fsx` into a file in the same directory as the schema.
 - `mig migrate [--dir|-d <path>]` - Create the new DB from schema, copy data, and start recording on old DB.
 - `mig plan [--dir|-d <path>]` - Print dry-run inferred paths, schema diff summary, and replay prerequisites without mutating DBs.
 - `mig drain [--dir|-d <path>]` - Switch old DB to draining mode and replay pending migration log entries.

@@ -1898,20 +1898,40 @@ type Student = {{ id: int64; name: string }}
 let ``cli root help shows current command surface`` () =
   assertCliHelpOutput
     [ "--help" ]
-    "USAGE: mig [--help] [<subcommand> [<options>]]"
+    "USAGE: mig [--help] [--version] [<subcommand> [<options>]]"
     [ "init <options>"
+      "codegen <options>"
       "migrate <options>"
       "plan <options>"
       "drain <options>"
       "cutover <options>"
       "cleanup-old <options>"
       "reset <options>"
-      "status <options>" ]
+      "status <options>"
+      "--version, -v" ]
+
+[<Fact>]
+let ``cli version flag prints version`` () =
+  let expectedVersion =
+    let version = typeof<Mig.Program.Command>.Assembly.GetName().Version
+
+    if isNull version then
+      "unknown"
+    else
+      $"{version.Major}.{version.Minor}.{version.Build}"
+
+  let exitCode, stdOut, stdErr = runMigCli [ "--version" ]
+  Assert.Equal(0, exitCode)
+  Assert.Contains(expectedVersion, stdOut)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
 
 [<Fact>]
 let ``cli subcommand help shows usage and options`` () =
   let cases: (string list * string * string list) list =
     [ ([ "init"; "--help" ], "USAGE: mig init [--help] [--dir <path>]", [ "--dir, -d <path>" ])
+      ([ "codegen"; "--help" ],
+       "USAGE: mig codegen [--help] [--dir <path>] [--module <name>] [--output <path>]",
+       [ "--dir, -d <path>"; "--module, -m <name>"; "--output, -o <path>" ])
       ([ "migrate"; "--help" ], "USAGE: mig migrate [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "plan"; "--help" ], "USAGE: mig plan [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "drain"; "--help" ], "USAGE: mig drain [--help] [--dir <path>]", [ "--dir, -d <path>" ])
@@ -1924,6 +1944,84 @@ let ``cli subcommand help shows usage and options`` () =
 
   for args, expectedUsage, expectedFragments in cases do
     assertCliHelpOutput args expectedUsage expectedFragments
+
+[<Fact>]
+let ``cli codegen generates query module from schema fsx`` () =
+  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let outputPath = Path.Combine(tempDir, "StudentQueries.fs")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+[<SelectBy "name">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "codegen"
+        "-d"
+        tempDir
+        "--module"
+        "StudentQueries"
+        "--output"
+        "StudentQueries.fs" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains("Code generation complete.", stdOut)
+  Assert.True(File.Exists outputPath, $"Expected generated file at: {outputPath}")
+
+  let generated = File.ReadAllText outputPath
+  Assert.Contains("module StudentQueries", generated)
+  Assert.Contains("static member SelectByName (name: string) (tx: SqliteTransaction)", generated)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli codegen rejects output paths outside schema directory`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_output_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+
+  let exitCode, stdOut, stdErr =
+    runMigCli [ "codegen"; "-d"; tempDir; "--output"; "nested/Generated.fs" ]
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("same directory as schema.fsx", stdErr)
+
+  let disallowedOutput = Path.Combine(tempDir, "nested", "Generated.fs")
+  Assert.False(File.Exists disallowedOutput, $"Unexpected generated file at: {disallowedOutput}")
+
+  Directory.Delete(tempDir, true)
 
 [<Fact>]
 let ``cli cutover returns error when drain not complete`` () =
@@ -3856,8 +3954,10 @@ let ``codegen generates module and query methods from schema model`` () =
     Assert.Contains("module Students", generated)
     Assert.Contains("open MigLib.Db", generated)
     Assert.Contains("static member Insert (item: Student) (tx: SqliteTransaction)", generated)
-    Assert.Contains("static member SelectAll (tx: SqliteTransaction)", generated)
-    Assert.Contains("static member SelectByNameAge (name: string, age: int64) (tx: SqliteTransaction)", generated)
+    Assert.Contains("static member SelectAll", generated)
+    Assert.Contains("static member SelectByNameAge", generated)
+    Assert.Contains("(name: string, age: int64)", generated)
+    Assert.Contains("(tx: SqliteTransaction)", generated)
     Assert.Contains("MigrationLog.ensureWriteAllowed tx", generated)
     Assert.Contains("MigrationLog.recordInsert tx \"student\"", generated)
     Assert.Contains("MigrationLog.recordUpdate tx \"student\"", generated)
@@ -4028,7 +4128,9 @@ let ``codegen can run directly from reflected types`` () =
   | Ok _ ->
     let generated = File.ReadAllText outputPath
     Assert.Contains("module ReflectionStudent", generated)
-    Assert.Contains("static member SelectByNameAge (name: string, age: int64) (tx: SqliteTransaction)", generated)
+    Assert.Contains("static member SelectByNameAge", generated)
+    Assert.Contains("(name: string, age: int64)", generated)
+    Assert.Contains("(tx: SqliteTransaction)", generated)
 
   Directory.Delete(tempDir, true)
 

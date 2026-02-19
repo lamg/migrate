@@ -9,6 +9,9 @@ open System.Threading
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 
+[<Literal>]
+let Rfc3339UtcNow = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'utc')"
+
 // Primary key attributes
 [<AttributeUsage(AttributeTargets.Class)>]
 type AutoIncPKAttribute(column: string) =

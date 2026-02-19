@@ -62,6 +62,7 @@ This applies to all single-module files in the project and follows modern F# con
 ### Code Formatting
 
 All F# code must be formatted using [Fantomas](https://fsprojects.github.io/fantomas/) before committing.
+Running `fantomas <DIR>` or `fantomas <FILE>` does not require asking for permission.
 
 **Format all files in the project:**
 ```bash
@@ -83,6 +84,20 @@ cd src && dotnet test
 ```
 
 Consider that print debugging with `dotnet test` is not longer possible in Dotnet 10 because a the test output is captured.
+
+## Build And Install Workflow
+
+Use `build.fsx` as the canonical way to build and install this project. Do not run ad-hoc install flows for the `mig` tool when `build.fsx` can be used.
+
+**Build, pack, and install the global mig tool:**
+```bash
+dotnet fsi build.fsx -- --target InstallGlobal
+```
+
+**Build only (Release):**
+```bash
+dotnet fsi build.fsx -- --target Build
+```
 
 ## Code Generation Conventions
 

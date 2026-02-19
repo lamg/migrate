@@ -691,7 +691,7 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
       $"let {col} = newItem.{fieldName}")
     |> String.concat "\n        "
 
-  let generateAsyncParamBindings (cmdVarName: string) =
+  let generateAsyncParamBindings (cmdVarName: string) (lineIndent: string) =
     annotation.columns
     |> List.map (fun col ->
       let columnDef = findColumn table col |> Option.get
@@ -701,23 +701,10 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
         $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
       else
         $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
-    |> String.concat "\n        "
+    |> String.concat $"\n{lineIndent}"
 
-  let asyncParamBindings = generateAsyncParamBindings "cmd"
-  let asyncRequeryParamBindings = generateAsyncParamBindings "cmd2"
-
-  let asyncFieldMappings =
-    table.columns
-    |> List.mapi (fun i col ->
-      let fieldName = capitalize col.name
-      let isNullable = TypeGenerator.isColumnNullable col
-      let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
-
-      if isNullable then
-        $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
-      else
-        $"{fieldName} = reader.Get{method} {i}")
-    |> String.concat "\n            "
+  let asyncParamBindings = generateAsyncParamBindings "cmd" "        "
+  let asyncRequeryParamBindings = generateAsyncParamBindings "cmd2" "            "
 
   let requeryAfterInsertAsync =
     $"""
@@ -727,9 +714,7 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
             use! reader = cmd2.ExecuteReaderAsync()
             let! hasInsertedRow = reader.ReadAsync()
             if hasInsertedRow then
-              return Ok {{
-                {asyncFieldMappings}
-              }}
+              return Ok {{ {fieldMappings} }}
             else
               return Error (SqliteException("Failed to retrieve inserted record", 0))"""
 
@@ -746,9 +731,7 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
         let! hasRow = reader.ReadAsync()
         if hasRow then
           // Found existing record - return it
-          return Ok {{
-            {asyncFieldMappings}
-          }}
+          return Ok {{ {fieldMappings} }}
         else
           // Not found - insert and fetch
           reader.Close()

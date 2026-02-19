@@ -344,71 +344,84 @@ let private executeInsert
         return Error ex
   }
 
+let private executeUpdateCommand
+  (tx: SqliteTransaction)
+  (targetTable: string)
+  (setColumns: string list)
+  (setValues: Expr list)
+  (targetKeyColumns: string list)
+  (targetIdentity: Expr list)
+  (idMappings: IdMappingStore)
+  : Task<Result<IdMappingStore, SqliteException>> =
+  task {
+    try
+      let setClause =
+        setColumns
+        |> List.mapi (fun i columnName -> $"{columnName} = @s{i}")
+        |> String.concat ", "
+
+      let whereClause =
+        targetKeyColumns
+        |> List.mapi (fun i columnName -> $"{columnName} = @w{i}")
+        |> String.concat " AND "
+
+      use cmd =
+        new SqliteCommand($"UPDATE {targetTable} SET {setClause} WHERE {whereClause}", tx.Connection, tx)
+
+      setValues
+      |> List.iteri (fun i value -> cmd.Parameters.AddWithValue($"@s{i}", exprToDbValue value) |> ignore)
+
+      targetIdentity
+      |> List.iteri (fun i value -> cmd.Parameters.AddWithValue($"@w{i}", exprToDbValue value) |> ignore)
+
+      let! _ = cmd.ExecuteNonQueryAsync()
+      return Ok idMappings
+    with :? SqliteException as ex ->
+      return Error ex
+  }
+
 let private executeUpdate
   (entry: MigrationLogEntry)
   (tx: SqliteTransaction)
   (step: TableCopyStep)
   (idMappings: IdMappingStore)
   : Task<Result<IdMappingStore, SqliteException>> =
-  task {
-    match step.identity with
-    | None ->
-      return
-        Error(
-          replayOperationError entry $"Table '{step.mapping.targetTable}' has no identity mapping for update replay."
-        )
-    | Some identity ->
-      match projectRowForInsert step entry.rowData idMappings with
-      | Error message -> return Error(replayOperationError entry message)
-      | Ok(targetRow, _, _) ->
-        match extractValues entry.rowData identity.sourceKeyColumns with
-        | Error message -> return Error(replayOperationError entry message)
-        | Ok sourceIdentity ->
-          match lookupMappedIdentity step.mapping.targetTable sourceIdentity idMappings with
-          | Error message -> return Error(replayOperationError entry message)
-          | Ok targetIdentity ->
-            let pkSet = identity.targetKeyColumns |> Set.ofList
+  match step.identity with
+  | None ->
+    Task.FromResult(
+      Error(replayOperationError entry $"Table '{step.mapping.targetTable}' has no identity mapping for update replay.")
+    )
+  | Some identity ->
+    match projectRowForInsert step entry.rowData idMappings with
+    | Error message -> Task.FromResult(Error(replayOperationError entry message))
+    | Ok(targetRow, _, _) ->
+      match extractValues entry.rowData identity.sourceKeyColumns with
+      | Error message -> Task.FromResult(Error(replayOperationError entry message))
+      | Ok sourceIdentity ->
+        match lookupMappedIdentity step.mapping.targetTable sourceIdentity idMappings with
+        | Error message -> Task.FromResult(Error(replayOperationError entry message))
+        | Ok targetIdentity ->
+          let pkSet = identity.targetKeyColumns |> Set.ofList
 
-            let setColumns =
-              step.targetTableDef.columns
-              |> List.map _.name
-              |> List.filter (fun name -> not (pkSet.Contains name))
+          let setColumns =
+            step.targetTableDef.columns
+            |> List.map _.name
+            |> List.filter (fun name -> not (pkSet.Contains name))
 
-            match extractValues targetRow setColumns with
-            | Error message -> return Error(replayOperationError entry message)
-            | Ok setValues ->
-              try
-                if setColumns.IsEmpty then
-                  return Ok idMappings
-                else
-                  let setClause =
-                    setColumns
-                    |> List.mapi (fun i columnName -> $"{columnName} = @s{i}")
-                    |> String.concat ", "
-
-                  let whereClause =
-                    identity.targetKeyColumns
-                    |> List.mapi (fun i columnName -> $"{columnName} = @w{i}")
-                    |> String.concat " AND "
-
-                  use cmd =
-                    new SqliteCommand(
-                      $"UPDATE {step.mapping.targetTable} SET {setClause} WHERE {whereClause}",
-                      tx.Connection,
-                      tx
-                    )
-
-                  setValues
-                  |> List.iteri (fun i value -> cmd.Parameters.AddWithValue($"@s{i}", exprToDbValue value) |> ignore)
-
-                  targetIdentity
-                  |> List.iteri (fun i value -> cmd.Parameters.AddWithValue($"@w{i}", exprToDbValue value) |> ignore)
-
-                  let! _ = cmd.ExecuteNonQueryAsync()
-                  return Ok idMappings
-              with :? SqliteException as ex ->
-                return Error ex
-  }
+          match extractValues targetRow setColumns with
+          | Error message -> Task.FromResult(Error(replayOperationError entry message))
+          | Ok setValues ->
+            if setColumns.IsEmpty then
+              Task.FromResult(Ok idMappings)
+            else
+              executeUpdateCommand
+                tx
+                step.mapping.targetTable
+                setColumns
+                setValues
+                identity.targetKeyColumns
+                targetIdentity
+                idMappings
 
 let private executeDelete
   (entry: MigrationLogEntry)
