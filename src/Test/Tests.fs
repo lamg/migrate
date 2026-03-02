@@ -6,6 +6,7 @@ open System.IO
 open System.Security.Cryptography
 open System.Text
 open System.Text.Json.Nodes
+open System.Threading.Tasks
 open MigLib.Db
 open MigLib.CodeGen.CodeGen
 open MigLib.DeclarativeMigrations.Types
@@ -812,6 +813,128 @@ let ``taskTxn does not record writes when marker is absent`` () =
   Assert.Equal(0L, count)
 
   verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``taskTxn binds plain task values without transaction parameter`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_tasktxn_bind_task_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "bind-task.db")
+
+  let result =
+    taskTxn dbPath {
+      let! prefix = Task.FromResult "Al"
+      let! suffix = Task.FromResult "ice"
+      return $"{prefix}{suffix}"
+    }
+    |> fun t -> t.Result
+
+  match result with
+  | Error ex -> failwith $"Expected successful bind for Task<_>, got error: {ex.Message}"
+  | Ok value -> Assert.Equal("Alice", value)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``taskTxn binds Task Result with sqlite exception and unwraps Ok`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_tasktxn_bind_task_result_ok_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "bind-task-result-ok.db")
+
+  let result =
+    taskTxn dbPath {
+      let! value = Task.FromResult(Ok 41L: Result<int64, SqliteException>)
+
+      return value + 1L
+    }
+    |> fun t -> t.Result
+
+  match result with
+  | Error ex -> failwith $"Expected successful bind for Task<Result<_, SqliteException>>, got error: {ex.Message}"
+  | Ok value -> Assert.Equal(42L, value)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``taskTxn short-circuits Task Result sqlite exception errors`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_tasktxn_bind_task_result_error_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "bind-task-result-error.db")
+  let mutable continuationRan = false
+
+  let result =
+    taskTxn dbPath {
+      let! (_: int64) = Task.FromResult(Error(SqliteException("bind failure", 0)): Result<int64, SqliteException>)
+
+      continuationRan <- true
+      return 1L
+    }
+    |> fun t -> t.Result
+
+  match result with
+  | Ok value -> failwith $"Expected Error from Task<Result<_, SqliteException>> bind, got Ok {value}"
+  | Error ex ->
+    Assert.Contains("bind failure", ex.Message)
+    Assert.False continuationRan
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``taskTxn binds generic Task Result values and unwraps Ok`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_tasktxn_bind_task_result_generic_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "bind-task-result-generic.db")
+
+  let result =
+    taskTxn dbPath {
+      let! value = Task.FromResult(Ok 13L: Result<int64, string>)
+      return value + 1L
+    }
+    |> fun t -> t.Result
+
+  match result with
+  | Error ex -> failwith $"Expected successful bind for Task<Result<_, _>>, got error: {ex.Message}"
+  | Ok value -> Assert.Equal(14L, value)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``taskTxn short-circuits generic Task Result errors by mapping to sqlite exception`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_tasktxn_bind_task_result_generic_error_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "bind-task-result-generic-error.db")
+  let mutable continuationRan = false
+
+  let result =
+    taskTxn dbPath {
+      let! (_: int64) = Task.FromResult(Error "external-error": Result<int64, string>)
+
+      continuationRan <- true
+      return 1L
+    }
+    |> fun t -> t.Result
+
+  match result with
+  | Ok value -> failwith $"Expected Error from Task<Result<_, _>> bind, got Ok {value}"
+  | Error ex ->
+    Assert.Contains("external-error", ex.Message)
+    Assert.False continuationRan
+
   Directory.Delete(tempDir, true)
 
 [<Fact>]

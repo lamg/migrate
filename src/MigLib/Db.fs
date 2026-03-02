@@ -143,7 +143,7 @@ let private isHashSegment (value: string) =
 
 let private tryReadMigrationStatus (dbPath: string) : string option =
   try
-    use connection = new SqliteConnection($"Data Source={dbPath};Mode=ReadOnly")
+    use connection = new SqliteConnection $"Data Source={dbPath};Mode=ReadOnly"
     connection.Open()
 
     use cmd =
@@ -217,9 +217,8 @@ let tryResolveDatabasePath (configuredPath: string) : Result<string, string> =
           else
             let discovered = String.concat ", " candidates
 
-            Error(
+            Error
               $"Multiple database files matched template '{configuredPath}' and the selection is ambiguous: {discovered}. Set DATABASE_PATH to an explicit file path."
-            )
 
 let resolveDatabasePathOrFail (configuredPath: string) : string =
   match tryResolveDatabasePath configuredPath with
@@ -434,6 +433,35 @@ type TaskTxnBuilder(dbPath: string) =
         match result with
         | Ok a -> return! f a txn
         | Error e -> return Error e
+      }
+
+  member _.Bind
+    (m: Task<'a>, f: 'a -> SqliteTransaction -> Task<Result<'b, SqliteException>>)
+    : SqliteTransaction -> Task<Result<'b, SqliteException>> =
+    fun txn ->
+      task {
+        let! value = m
+        return! f value txn
+      }
+
+  member _.Bind
+    (m: Task<Result<'a, 'e>>, f: 'a -> SqliteTransaction -> Task<Result<'b, SqliteException>>)
+    : SqliteTransaction -> Task<Result<'b, SqliteException>> =
+    fun txn ->
+      task {
+        let! result = m
+
+        match result with
+        | Ok value -> return! f value txn
+        | Error error ->
+          let exn =
+            match box error with
+            | null -> SqliteException("Task<Result<_, _>> returned null error.", 0)
+            | :? SqliteException as sqliteError -> sqliteError
+            | :? exn as exceptionError -> SqliteException(exceptionError.Message, 0)
+            | _ -> SqliteException(string error, 0)
+
+          return Error exn
       }
 
   member this.Combine
