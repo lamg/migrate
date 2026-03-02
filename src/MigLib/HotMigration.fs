@@ -1056,7 +1056,8 @@ let private buildTableDefinition
     queryByAnnotations = []
     queryLikeAnnotations = []
     queryByOrCreateAnnotations = []
-    insertOrIgnoreAnnotations = [] }
+    insertOrIgnoreAnnotations = []
+    upsertAnnotations = [] }
 
 let private loadSchemaFromDatabase
   (connection: SqliteConnection)

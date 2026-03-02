@@ -31,7 +31,8 @@ let private mkTable name columns constraints =
     queryByAnnotations = []
     queryLikeAnnotations = []
     queryByOrCreateAnnotations = []
-    insertOrIgnoreAnnotations = [] }
+    insertOrIgnoreAnnotations = []
+    upsertAnnotations = [] }
 
 let private mkForeignKey refTable refColumns =
   ForeignKey
@@ -248,6 +249,7 @@ let ``tryResolveDatabasePath fails when multiple hash matches are ambiguous`` ()
 [<SelectLike "name">]
 [<SelectByOrInsert("name", "age")>]
 [<InsertOrIgnore>]
+[<Upsert>]
 type ReflectionStudent = { id: int64; name: string; age: int64 }
 
 [<AutoIncPK "id">]
@@ -363,6 +365,7 @@ let ``schema reflection maps records, foreign keys, and query annotations`` () =
     )
 
     Assert.True(not student.insertOrIgnoreAnnotations.IsEmpty)
+    Assert.True(not student.upsertAnnotations.IsEmpty)
 
     Assert.True(
       schema.indexes
@@ -583,7 +586,8 @@ let ``non-table consistency report passes for valid target schema objects`` () =
               queryByAnnotations = []
               queryLikeAnnotations = []
               queryByOrCreateAnnotations = []
-              insertOrIgnoreAnnotations = [] } ]
+              insertOrIgnoreAnnotations = []
+              upsertAnnotations = [] } ]
         triggers =
           [ { name = "trg_student_insert"
               sqlTokens = [ "CREATE TRIGGER trg_student_insert AFTER INSERT ON student BEGIN SELECT 1; END;" ]
@@ -610,14 +614,16 @@ let ``non-table consistency report flags invalid target schema objects`` () =
               queryByAnnotations = []
               queryLikeAnnotations = []
               queryByOrCreateAnnotations = []
-              insertOrIgnoreAnnotations = [] }
+              insertOrIgnoreAnnotations = []
+              upsertAnnotations = [] }
             { name = "student_view"
               sqlTokens = [ "CREATE VIEW student_view AS SELECT id FROM student;" ]
               dependencies = [ "student" ]
               queryByAnnotations = []
               queryLikeAnnotations = []
               queryByOrCreateAnnotations = []
-              insertOrIgnoreAnnotations = [] } ]
+              insertOrIgnoreAnnotations = []
+              upsertAnnotations = [] } ]
         triggers =
           [ { name = "trg_student_insert"
               sqlTokens = []
@@ -4123,7 +4129,8 @@ let ``codegen generates module and query methods from schema model`` () =
       queryByAnnotations = [ { columns = [ "name"; "age" ] } ]
       queryLikeAnnotations = [ { columns = [ "name" ] } ]
       queryByOrCreateAnnotations = [ { columns = [ "name"; "age" ] } ]
-      insertOrIgnoreAnnotations = [ InsertOrIgnoreAnnotation ] }
+      insertOrIgnoreAnnotations = [ InsertOrIgnoreAnnotation ]
+      upsertAnnotations = [ UpsertAnnotation ] }
 
   let schema =
     { emptyFile with
@@ -4136,6 +4143,7 @@ let ``codegen generates module and query methods from schema model`` () =
     Assert.Contains("module Students", generated)
     Assert.Contains("open MigLib.Db", generated)
     Assert.Contains("static member Insert (item: Student) (tx: SqliteTransaction)", generated)
+    Assert.Contains("static member Upsert (item: Student) (tx: SqliteTransaction)", generated)
     Assert.Contains("static member SelectAll", generated)
     Assert.Contains("static member SelectByNameAge", generated)
     Assert.Contains("(name: string, age: int64)", generated)
@@ -4161,7 +4169,9 @@ let ``querybyorcreate for regular tables re-queries by annotation columns`` () =
   | Error e -> failwith $"codegen-from-types failed: {e}"
   | Ok _ ->
     let generated = File.ReadAllText outputPath
-    Assert.Contains("static member SelectBySlugOrInsert (newItem: SlugArticle) (tx: SqliteTransaction)", generated)
+    Assert.Contains("static member SelectBySlugOrInsert", generated)
+    Assert.Contains("(newItem: SlugArticle)", generated)
+    Assert.Contains("(tx: SqliteTransaction)", generated)
     Assert.Contains("SELECT slug, title FROM slug_article WHERE slug = @slug LIMIT 1", generated)
     Assert.DoesNotContain("let! getResult = SlugArticle.SelectById", generated)
     Assert.Contains("| Ok _ ->", generated)
@@ -4261,7 +4271,8 @@ let ``querybyorinsert works for composite primary keys without SelectById fallba
       queryByAnnotations = []
       queryLikeAnnotations = []
       queryByOrCreateAnnotations = [ { columns = [ "description" ] } ]
-      insertOrIgnoreAnnotations = [] }
+      insertOrIgnoreAnnotations = []
+      upsertAnnotations = [] }
 
   let schema =
     { emptyFile with
@@ -4271,7 +4282,9 @@ let ``querybyorinsert works for composite primary keys without SelectById fallba
   | Error error -> failwith $"codegen failed: {error}"
   | Ok _ ->
     let generated = File.ReadAllText outputPath
-    Assert.Contains("static member SelectByDescriptionOrInsert (newItem: OrderItem) (tx: SqliteTransaction)", generated)
+    Assert.Contains("static member SelectByDescriptionOrInsert", generated)
+    Assert.Contains("(newItem: OrderItem)", generated)
+    Assert.Contains("(tx: SqliteTransaction)", generated)
 
     Assert.Contains(
       "SELECT order_id, sku, description FROM order_item WHERE description = @description LIMIT 1",
@@ -4279,6 +4292,88 @@ let ``querybyorinsert works for composite primary keys without SelectById fallba
     )
 
     Assert.DoesNotContain("let! getResult = OrderItem.SelectById", generated)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``codegen rejects upsert annotation when table has no primary key`` () =
+  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_codegen_upsert_nopk_{Guid.NewGuid()}")
+  Directory.CreateDirectory tempDir |> ignore
+
+  let outputPath = Path.Combine(tempDir, "NoPk.fs")
+
+  let table =
+    { name = "no_pk"
+      columns =
+        [ { name = "name"
+            columnType = SqlText
+            constraints = [ NotNull ] } ]
+      constraints = []
+      queryByAnnotations = []
+      queryLikeAnnotations = []
+      queryByOrCreateAnnotations = []
+      insertOrIgnoreAnnotations = []
+      upsertAnnotations = [ UpsertAnnotation ] }
+
+  let schema =
+    { emptyFile with
+        tables = [ table ] }
+
+  match generateCodeFromModel "NoPkQueries" schema outputPath with
+  | Ok _ -> failwith "Expected codegen failure when Upsert is used on a table without primary key"
+  | Error error ->
+    Assert.Contains("Upsert annotation requires a primary key", error)
+    Assert.Contains("no_pk", error)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``codegen rejects upsert annotation on views`` () =
+  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_codegen_upsert_view_{Guid.NewGuid()}")
+  Directory.CreateDirectory tempDir |> ignore
+
+  let outputPath = Path.Combine(tempDir, "ViewWithUpsert.fs")
+
+  let studentTable =
+    { name = "student"
+      columns =
+        [ { name = "id"
+            columnType = SqlInteger
+            constraints =
+              [ PrimaryKey
+                  { constraintName = None
+                    columns = []
+                    isAutoincrement = true } ] }
+          { name = "name"
+            columnType = SqlText
+            constraints = [ NotNull ] } ]
+      constraints = []
+      queryByAnnotations = []
+      queryLikeAnnotations = []
+      queryByOrCreateAnnotations = []
+      insertOrIgnoreAnnotations = []
+      upsertAnnotations = [] }
+
+  let view =
+    { name = "student_view"
+      sqlTokens = [ "CREATE VIEW student_view AS SELECT id, name FROM student;" ]
+      dependencies = [ "student" ]
+      queryByAnnotations = []
+      queryLikeAnnotations = []
+      queryByOrCreateAnnotations = []
+      insertOrIgnoreAnnotations = []
+      upsertAnnotations = [ UpsertAnnotation ] }
+
+  let schema =
+    { emptyFile with
+        tables = [ studentTable ]
+        views = [ view ] }
+
+  match generateCodeFromModel "ViewWithUpsertQueries" schema outputPath with
+  | Ok _ -> failwith "Expected codegen failure when Upsert is used on a view"
+  | Error error ->
+    Assert.Contains("Upsert annotation is not supported on views", error)
+    Assert.Contains("student_view", error)
 
   Directory.Delete(tempDir, true)
 

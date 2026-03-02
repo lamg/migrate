@@ -62,6 +62,8 @@ type internal QueryByOrCreateAnnotation = { columns: string list }
 
 type internal InsertOrIgnoreAnnotation = InsertOrIgnoreAnnotation
 
+type internal UpsertAnnotation = UpsertAnnotation
+
 type internal CreateView =
   { name: string
     sqlTokens: string seq
@@ -69,7 +71,8 @@ type internal CreateView =
     queryByAnnotations: QueryByAnnotation list
     queryLikeAnnotations: QueryLikeAnnotation list
     queryByOrCreateAnnotations: QueryByOrCreateAnnotation list
-    insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list }
+    insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list
+    upsertAnnotations: UpsertAnnotation list }
 
 type internal CreateTable =
   { name: string
@@ -78,7 +81,8 @@ type internal CreateTable =
     queryByAnnotations: QueryByAnnotation list
     queryLikeAnnotations: QueryLikeAnnotation list
     queryByOrCreateAnnotations: QueryByOrCreateAnnotation list
-    insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list }
+    insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list
+    upsertAnnotations: UpsertAnnotation list }
 
 type internal CreateIndex =
   { name: string

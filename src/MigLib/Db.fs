@@ -88,6 +88,10 @@ type DeleteByAttribute(column: string) =
 type InsertOrIgnoreAttribute() =
   inherit Attribute()
 
+[<AttributeUsage(AttributeTargets.Class)>]
+type UpsertAttribute() =
+  inherit Attribute()
+
 // Foreign key action attributes
 [<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
 type OnDeleteCascadeAttribute(column: string) =

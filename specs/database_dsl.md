@@ -207,6 +207,7 @@ An `Insert` method is always generated for every type. Additional query methods 
 [<SelectOneBy ("name", "age", OrderBy = "name DESC")>]
 [<SelectByOrInsert ("name", "age")>]
 [<InsertOrIgnore>]
+[<Upsert>]
 type Student = {id: int64; name: string; age: int64}
 ```
 
@@ -251,6 +252,9 @@ type Student with
   static member InsertOrIgnore (student: Student) (txn: SqliteTransaction): Task<Result<int64 option, SqliteException>> =
     // INSERT OR IGNORE INTO student (name, age) VALUES (@name, @age)
     // returns Some last_insert_rowid() if inserted, None if ignored
+
+  static member Upsert (student: Student) (txn: SqliteTransaction): Task<Result<unit, SqliteException>> =
+    // checks by primary key; updates when found, inserts when missing
 ```
 
 ### dbTxn CE

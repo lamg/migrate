@@ -459,6 +459,43 @@ let generateDelete (table: CreateTable) : string option =
 
     Some(generateStaticMemberCode typeName memberName returnType body)
 
+/// Generate async UPSERT method by primary key using existing SelectById/Update/Insert methods
+let generateUpsert (table: CreateTable) : string option =
+  let typeName = capitalize table.name
+  let pkCols = getPrimaryKey table
+
+  match pkCols with
+  | [] -> None
+  | pks ->
+    let selectByIdArgs =
+      pks
+      |> List.map (fun pk -> $"item.{capitalize pk.name}")
+      |> String.concat " "
+
+    Some
+      $"""  static member Upsert (item: {typeName}) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
+    task {{
+      let! existing = {typeName}.SelectById {selectByIdArgs} tx
+
+      match existing with
+      | Error ex -> return Error ex
+      | Ok(Some _) -> return! {typeName}.Update item tx
+      | Ok None ->
+        let! inserted = {typeName}.Insert item tx
+
+        match inserted with
+        | Ok _ -> return Ok()
+        | Error ex -> return Error ex
+    }}"""
+
+let validateUpsertAnnotation (table: CreateTable) : Result<unit, string> =
+  if table.upsertAnnotations.IsEmpty then
+    Ok()
+  else
+    match getPrimaryKey table with
+    | [] -> Error $"Upsert annotation requires a primary key on table '{table.name}'."
+    | _ -> Ok()
+
 /// Validate QueryBy annotation references existing columns (case-insensitive)
 let validateQueryByAnnotation (table: CreateTable) (annotation: QueryByAnnotation) : Result<unit, string> =
   let columnNames =
@@ -747,6 +784,9 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
 let generateTableCode (table: CreateTable) : Result<string, string> =
   let typeName = capitalize table.name
 
+  // Validate Upsert annotation
+  let upsertValidationResult = validateUpsertAnnotation table
+
   // Validate all QueryBy annotations
   let queryByValidationResults =
     table.queryByAnnotations |> List.map (validateQueryByAnnotation table)
@@ -761,7 +801,8 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
     |> List.map (validateQueryByOrCreateAnnotation table)
 
   let firstError =
-    (queryByValidationResults
+    ([ upsertValidationResult ]
+     @ queryByValidationResults
      @ queryLikeValidationResults
      @ queryByOrCreateValidationResults)
     |> List.tryFind (fun r ->
@@ -780,6 +821,12 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
         None
       else
         Some(generateInsertOrIgnore table)
+
+    let upsertMethod =
+      if table.upsertAnnotations.IsEmpty then
+        None
+      else
+        generateUpsert table
 
     let getMethod = generateGet table
     let getAllMethod = generateGetAll table
@@ -801,6 +848,7 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
     let allMethods =
       [ Some insertMethod
         insertOrIgnoreMethod
+        upsertMethod
         getMethod
         Some getAllMethod
         Some getOneMethod
@@ -1031,9 +1079,9 @@ let generateViewQueryLike (viewName: string) (columns: ViewColumn list) (annotat
 let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<string, string> =
   let typeName = capitalize view.name
 
-  // Reject QueryByOrCreate and InsertOrIgnore annotations on views (views are read-only)
-  match view.queryByOrCreateAnnotations, view.insertOrIgnoreAnnotations with
-  | [], [] ->
+  // Reject QueryByOrCreate, InsertOrIgnore, and Upsert annotations on views (views are read-only)
+  match view.queryByOrCreateAnnotations, view.insertOrIgnoreAnnotations, view.upsertAnnotations with
+  | [], [], [] ->
     // Validate all QueryBy annotations
     let queryByValidationResults =
       view.queryByAnnotations
@@ -1074,7 +1122,8 @@ let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<stri
       Ok
         $"""type {typeName} with
 {allMethods}"""
-  | _ :: _, _ ->
+  | _ :: _, _, _ ->
     Error
       $"QueryByOrCreate annotation is not supported on views (view '{view.name}' is read-only). Use QueryBy instead."
-  | [], _ :: _ -> Error $"InsertOrIgnore annotation is not supported on views (view '{view.name}' is read-only)."
+  | [], _ :: _, _ -> Error $"InsertOrIgnore annotation is not supported on views (view '{view.name}' is read-only)."
+  | [], [], _ :: _ -> Error $"Upsert annotation is not supported on views (view '{view.name}' is read-only)."

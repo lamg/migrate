@@ -1271,6 +1271,14 @@ let private generateNormalizedQueryByOrCreate
 let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, string> =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
 
+  // Reject Upsert annotation on normalized tables
+  let upsertValidationResult =
+    if normalized.baseTable.upsertAnnotations.IsEmpty then
+      Ok()
+    else
+      Error
+        $"Upsert annotation is not supported on normalized table '{normalized.baseTable.name}'."
+
   // Validate all QueryBy annotations
   let queryByValidationResults =
     normalized.baseTable.queryByAnnotations
@@ -1287,7 +1295,8 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
     |> List.map (validateNormalizedQueryByOrCreateAnnotation normalized)
 
   let firstError =
-    (queryByValidationResults
+    ([ upsertValidationResult ]
+     @ queryByValidationResults
      @ queryLikeValidationResults
      @ queryByOrCreateValidationResults)
     |> List.tryFind (fun r ->

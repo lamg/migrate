@@ -347,7 +347,11 @@ let private readQueryAnnotations
   (recordType: Type)
   (resolver: Map<string, string>)
   : Result<
-      QueryByAnnotation list * QueryLikeAnnotation list * QueryByOrCreateAnnotation list * InsertOrIgnoreAnnotation list,
+      QueryByAnnotation list
+      * QueryLikeAnnotation list
+      * QueryByOrCreateAnnotation list
+      * InsertOrIgnoreAnnotation list
+      * UpsertAnnotation list,
       string
      >
   =
@@ -359,6 +363,7 @@ let private readQueryAnnotations
       getTypeAttributes<SelectByOrInsertAttribute> recordType
 
     let insertOrIgnoreAttributes = getTypeAttributes<InsertOrIgnoreAttribute> recordType
+    let upsertAttributes = getTypeAttributes<UpsertAttribute> recordType
 
     let! queryBy =
       selectByAttributes
@@ -416,7 +421,13 @@ let private readQueryAnnotations
       else
         [ InsertOrIgnoreAnnotation ]
 
-    return queryBy, queryLike, queryByOrCreate, insertOrIgnore
+    let upsert =
+      if upsertAttributes.IsEmpty then
+        []
+      else
+        [ UpsertAnnotation ]
+
+    return queryBy, queryLike, queryByOrCreate, insertOrIgnore, upsert
   }
 
 let private buildTable
@@ -502,7 +513,13 @@ let private buildTable
 
     let! indexes = readIndexDefinitions tableName recordType resolver
 
-    let! queryByAnnotations, queryLikeAnnotations, queryByOrCreateAnnotations, insertOrIgnoreAnnotations =
+    let!
+      (queryByAnnotations,
+       queryLikeAnnotations,
+       queryByOrCreateAnnotations,
+       insertOrIgnoreAnnotations,
+       upsertAnnotations)
+      =
       readQueryAnnotations recordType resolver
 
     return
@@ -512,7 +529,8 @@ let private buildTable
         queryByAnnotations = queryByAnnotations
         queryLikeAnnotations = queryLikeAnnotations
         queryByOrCreateAnnotations = queryByOrCreateAnnotations
-        insertOrIgnoreAnnotations = insertOrIgnoreAnnotations },
+        insertOrIgnoreAnnotations = insertOrIgnoreAnnotations
+        upsertAnnotations = upsertAnnotations },
       indexes
   }
 
@@ -900,7 +918,13 @@ let private buildView
       | [] -> Error $"""View type "{viewType.Name}" must define [<ViewSql>] or [<View>] with Join attributes."""
       | _ -> Error $"""View type "{viewType.Name}" defines multiple [<ViewSql>] attributes."""
 
-    let! queryByAnnotations, queryLikeAnnotations, queryByOrCreateAnnotations, insertOrIgnoreAnnotations =
+    let!
+      (queryByAnnotations,
+       queryLikeAnnotations,
+       queryByOrCreateAnnotations,
+       insertOrIgnoreAnnotations,
+       upsertAnnotations)
+      =
       readQueryAnnotations viewType resolver
 
     return
@@ -910,7 +934,8 @@ let private buildView
         queryByAnnotations = queryByAnnotations
         queryLikeAnnotations = queryLikeAnnotations
         queryByOrCreateAnnotations = queryByOrCreateAnnotations
-        insertOrIgnoreAnnotations = insertOrIgnoreAnnotations }
+        insertOrIgnoreAnnotations = insertOrIgnoreAnnotations
+        upsertAnnotations = upsertAnnotations }
   }
 
 let private buildUnionExtensionTables
@@ -1002,7 +1027,8 @@ let private buildUnionExtensionTables
                 queryByAnnotations = []
                 queryLikeAnnotations = []
                 queryByOrCreateAnnotations = []
-                insertOrIgnoreAnnotations = [] }
+                insertOrIgnoreAnnotations = []
+                upsertAnnotations = [] }
 
             return tables @ [ extensionTable ]
           })
