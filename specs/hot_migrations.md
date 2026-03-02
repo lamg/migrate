@@ -203,3 +203,8 @@ Cons:
 | Handles all schema changes | Yes | Limited by ALTER TABLE | Yes | Yes | Depends on translator |
 | Old service modifications | Records writes | None (schema-level only) | Dual-write logic | None | None |
 | Data size sensitivity | Copy time grows | Lock time grows for recreation | Copy time grows | Downtime grows | None |
+
+
+## To Explore
+
+https://planetscale.com/blog/zero-downtime-migrations-at-petabyte-scale
