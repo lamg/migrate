@@ -253,32 +253,58 @@ type Student with
     // returns Some last_insert_rowid() if inserted, None if ignored
 ```
 
-### taskTxn CE
+### dbTxn CE
 
-The `taskTxn` Computuation expression allows to execute asynchronous queries inside a transaction given a database path:
+The `dbTxn` computation expression allows you to execute asynchronous queries inside a transaction given a database path:
 
 ```fsharp
-taskTxn "path_to_db.sqlite" {
+dbTxn "path_to_db.sqlite" {
   let! students = Student.SelectAll()
   let! phil = Student.SelectByName "Phil"
   return students, phil
 }
 ```
 
-When using `taskTxn` it is a good idea to make it part of the environment passed to functions so they have access to the database:
+When using `dbTxn` it is a good idea to make it part of the environment passed to functions so they have access to the database:
 
 ```fsharp
-type Env = { taskTxn: TaskTxnBuilder }
-let env = { taskTxn = taskTxn "path_to_db.sqlite" }
+type Env = { dbTxn: DbTxnBuilder }
+let env = { dbTxn = dbTxn "path_to_db.sqlite" }
 
 let printStudents (env: Env) =
-  env.taskTxn {
+  env.dbTxn {
     let! students = Student.SelectAll
     for student in students do
       printfn $"student: {student}"
   }
 ```
 
+### txn CE
+
+The `txn` computation expression builds reusable transaction-scoped operations. It does not open a connection or start/commit/rollback a transaction by itself. Its purpose is to compose helper functions that can be executed inside a parent `dbTxn` transaction.
+
+```fsharp
+let insertStudent (name: string) =
+  txn {
+    let! _ =
+      fun tx ->
+        task {
+          use cmd = new SqliteCommand("INSERT INTO student(name) VALUES (@name)", tx.Connection, tx)
+          cmd.Parameters.AddWithValue("@name", name) |> ignore
+          let! _ = cmd.ExecuteNonQueryAsync()
+          return Ok ()
+        }
+
+    return ()
+  }
+
+dbTxn "path_to_db.sqlite" {
+  do! insertStudent "Alice"
+  do! insertStudent "Bob"
+}
+```
+
+Use `dbTxn` when you need the transaction boundary. Use `txn` when you need a composable operation that runs inside an existing transaction.
 
 ### Foreign keys
 

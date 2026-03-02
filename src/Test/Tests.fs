@@ -635,7 +635,7 @@ let ``non-table consistency report flags invalid target schema objects`` () =
   Assert.Contains("Trigger 'trg_student_insert' has no SQL tokens.", unsupportedSummary)
 
 [<Fact>]
-let ``taskTxn records writes into migration log when marker is recording`` () =
+let ``dbTxn records writes into migration log when marker is recording`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_tasktxn_recording_{Guid.NewGuid()}")
 
@@ -657,7 +657,7 @@ let ``taskTxn records writes into migration log when marker is recording`` () =
   setupConn.Close()
 
   let result =
-    taskTxn dbPath {
+    dbTxn dbPath {
       let! newId =
         fun tx ->
           task {
@@ -713,7 +713,7 @@ let ``taskTxn records writes into migration log when marker is recording`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``taskTxn rejects writes when marker is draining`` () =
+let ``dbTxn rejects writes when marker is draining`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_tasktxn_draining_{Guid.NewGuid()}")
 
@@ -734,7 +734,7 @@ let ``taskTxn rejects writes when marker is draining`` () =
   setupConn.Close()
 
   let result =
-    taskTxn dbPath {
+    dbTxn dbPath {
       let! _ =
         fun tx ->
           task {
@@ -765,7 +765,7 @@ let ``taskTxn rejects writes when marker is draining`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``taskTxn does not record writes when marker is absent`` () =
+let ``dbTxn does not record writes when marker is absent`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_tasktxn_nomarker_{Guid.NewGuid()}")
 
@@ -785,7 +785,7 @@ let ``taskTxn does not record writes when marker is absent`` () =
   setupConn.Close()
 
   let result =
-    taskTxn dbPath {
+    dbTxn dbPath {
       let! _ =
         fun tx ->
           task {
@@ -816,7 +816,7 @@ let ``taskTxn does not record writes when marker is absent`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``taskTxn binds plain task values without transaction parameter`` () =
+let ``dbTxn binds plain task values without transaction parameter`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_tasktxn_bind_task_{Guid.NewGuid()}")
 
@@ -825,7 +825,7 @@ let ``taskTxn binds plain task values without transaction parameter`` () =
   let dbPath = Path.Combine(tempDir, "bind-task.db")
 
   let result =
-    taskTxn dbPath {
+    dbTxn dbPath {
       let! prefix = Task.FromResult "Al"
       let! suffix = Task.FromResult "ice"
       return $"{prefix}{suffix}"
@@ -839,7 +839,7 @@ let ``taskTxn binds plain task values without transaction parameter`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``taskTxn binds Task Result with sqlite exception and unwraps Ok`` () =
+let ``dbTxn binds Task Result with sqlite exception and unwraps Ok`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_tasktxn_bind_task_result_ok_{Guid.NewGuid()}")
 
@@ -848,7 +848,7 @@ let ``taskTxn binds Task Result with sqlite exception and unwraps Ok`` () =
   let dbPath = Path.Combine(tempDir, "bind-task-result-ok.db")
 
   let result =
-    taskTxn dbPath {
+    dbTxn dbPath {
       let! value = Task.FromResult(Ok 41L: Result<int64, SqliteException>)
 
       return value + 1L
@@ -862,7 +862,7 @@ let ``taskTxn binds Task Result with sqlite exception and unwraps Ok`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``taskTxn short-circuits Task Result sqlite exception errors`` () =
+let ``dbTxn short-circuits Task Result sqlite exception errors`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_tasktxn_bind_task_result_error_{Guid.NewGuid()}")
 
@@ -872,7 +872,7 @@ let ``taskTxn short-circuits Task Result sqlite exception errors`` () =
   let mutable continuationRan = false
 
   let result =
-    taskTxn dbPath {
+    dbTxn dbPath {
       let! (_: int64) = Task.FromResult(Error(SqliteException("bind failure", 0)): Result<int64, SqliteException>)
 
       continuationRan <- true
@@ -889,7 +889,7 @@ let ``taskTxn short-circuits Task Result sqlite exception errors`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``taskTxn binds generic Task Result values and unwraps Ok`` () =
+let ``dbTxn binds generic Task Result values and unwraps Ok`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_tasktxn_bind_task_result_generic_{Guid.NewGuid()}")
 
@@ -898,7 +898,7 @@ let ``taskTxn binds generic Task Result values and unwraps Ok`` () =
   let dbPath = Path.Combine(tempDir, "bind-task-result-generic.db")
 
   let result =
-    taskTxn dbPath {
+    dbTxn dbPath {
       let! value = Task.FromResult(Ok 13L: Result<int64, string>)
       return value + 1L
     }
@@ -911,7 +911,7 @@ let ``taskTxn binds generic Task Result values and unwraps Ok`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``taskTxn short-circuits generic Task Result errors by mapping to sqlite exception`` () =
+let ``dbTxn short-circuits generic Task Result errors by mapping to sqlite exception`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_tasktxn_bind_task_result_generic_error_{Guid.NewGuid()}")
 
@@ -921,7 +921,7 @@ let ``taskTxn short-circuits generic Task Result errors by mapping to sqlite exc
   let mutable continuationRan = false
 
   let result =
-    taskTxn dbPath {
+    dbTxn dbPath {
       let! (_: int64) = Task.FromResult(Error "external-error": Result<int64, string>)
 
       continuationRan <- true
@@ -935,6 +935,65 @@ let ``taskTxn short-circuits generic Task Result errors by mapping to sqlite exc
     Assert.Contains("external-error", ex.Message)
     Assert.False continuationRan
 
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``txn composes reusable transaction-scoped operations inside dbTxn`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_txn_compose_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "compose.db")
+
+  use setupConn = new SqliteConnection($"Data Source={dbPath}")
+  setupConn.Open()
+
+  use createCmd =
+    new SqliteCommand("CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);", setupConn)
+
+  createCmd.ExecuteNonQuery() |> ignore
+  setupConn.Close()
+
+  let insertStudent (name: string) =
+    txn {
+      let! id =
+        fun tx ->
+          task {
+            use cmd =
+              new SqliteCommand("INSERT INTO student(name) VALUES (@name)", tx.Connection, tx)
+
+            cmd.Parameters.AddWithValue("@name", name) |> ignore
+            let! _ = cmd.ExecuteNonQueryAsync()
+            use idCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+            let! idObj = idCmd.ExecuteScalarAsync()
+            return Ok(idObj |> unbox<int64>)
+          }
+
+      return id
+    }
+
+  let result =
+    dbTxn dbPath {
+      let! firstId = insertStudent "Alice"
+      let! secondId = insertStudent "Bob"
+      return firstId, secondId
+    }
+    |> fun t -> t.Result
+
+  match result with
+  | Error ex -> failwith $"Expected successful composition using txn, got error: {ex.Message}"
+  | Ok(firstId, secondId) ->
+    Assert.Equal(1L, firstId)
+    Assert.Equal(2L, secondId)
+
+  use verifyConn = new SqliteConnection($"Data Source={dbPath}")
+  verifyConn.Open()
+  use countCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
+  let count = countCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(2L, count)
+
+  verifyConn.Close()
   Directory.Delete(tempDir, true)
 
 [<Fact>]
@@ -3923,7 +3982,7 @@ type Student = {{ id: int64; name: string }}
   | Ok result -> Assert.Equal("migrating", result.previousStatus)
 
   let writeResult =
-    taskTxn newDbPath {
+    dbTxn newDbPath {
       let! _ =
         fun tx ->
           task {

@@ -368,11 +368,93 @@ module MigrationLog =
   let recordDelete (tx: SqliteTransaction) (tableName: string) (rowData: (string * obj) list) : unit =
     recordWrite tx "delete" tableName rowData
 
-// TaskTxnBuilder computation expression
-type TaskTxnBuilder(dbPath: string) =
+type TxnStep<'a> = SqliteTransaction -> Task<Result<'a, SqliteException>>
+
+module private TxnStep =
+  let private toSqliteException (error: 'e) : SqliteException =
+    match box error with
+    | null -> SqliteException("Task<Result<_, _>> returned null error.", 0)
+    | :? SqliteException as sqliteError -> sqliteError
+    | :? exn as exceptionError -> SqliteException(exceptionError.Message, 0)
+    | _ -> SqliteException(string error, 0)
+
+  let zero () : TxnStep<unit> = fun _ -> Task.FromResult(Ok())
+
+  let result (x: 'a) : TxnStep<'a> = fun _ -> Task.FromResult(Ok x)
+
+  let returnFrom (m: TxnStep<'a>) : TxnStep<'a> = m
+
+  let bind
+    (m: TxnStep<'a>)
+    (f: 'a -> TxnStep<'b>)
+    : TxnStep<'b> =
+    fun txn ->
+      task {
+        let! result = m txn
+
+        match result with
+        | Ok value -> return! f value txn
+        | Error ex -> return Error ex
+      }
+
+  let bindTask
+    (m: Task<'a>)
+    (f: 'a -> TxnStep<'b>)
+    : TxnStep<'b> =
+    fun txn ->
+      task {
+        let! value = m
+        return! f value txn
+      }
+
+  let bindTaskResult
+    (m: Task<Result<'a, 'e>>)
+    (f: 'a -> TxnStep<'b>)
+    : TxnStep<'b> =
+    fun txn ->
+      task {
+        let! result = m
+
+        match result with
+        | Ok value -> return! f value txn
+        | Error error -> return Error(toSqliteException error)
+      }
+
+  let combine
+    (m: TxnStep<unit>)
+    (f: TxnStep<'a>)
+    : TxnStep<'a> =
+    bind m (fun () -> f)
+
+  let delay (f: unit -> TxnStep<'a>) : TxnStep<'a> = fun txn -> f () txn
+
+  let forEach
+    (items: 'a seq)
+    (body: 'a -> TxnStep<unit>)
+    : TxnStep<unit> =
+    fun txn ->
+      task {
+        let mutable error = None
+
+        use enumerator = items.GetEnumerator()
+
+        while error.IsNone && enumerator.MoveNext() do
+          let! result = body enumerator.Current txn
+
+          match result with
+          | Ok() -> ()
+          | Error ex -> error <- Some ex
+
+        match error with
+        | Some ex -> return Error ex
+        | None -> return Ok()
+      }
+
+// DbTxnBuilder computation expression
+type DbTxnBuilder(dbPath: string) =
   member _.DbPath = dbPath
 
-  member _.Run(f: SqliteTransaction -> Task<Result<'a, SqliteException>>) : Task<Result<'a, SqliteException>> =
+  member _.Run(f: TxnStep<'a>) : Task<Result<'a, SqliteException>> =
     task {
       use connection = new SqliteConnection $"Data Source={dbPath}"
       do! connection.OpenAsync()
@@ -412,86 +494,44 @@ type TaskTxnBuilder(dbPath: string) =
         txnContext.Value <- previousContext
     }
 
-  member _.Zero() : SqliteTransaction -> Task<Result<unit, SqliteException>> = fun _ -> Task.FromResult(Ok())
+  member _.Zero() : TxnStep<unit> = TxnStep.zero ()
 
-  member _.Return(x: 'a) : SqliteTransaction -> Task<Result<'a, SqliteException>> = fun _ -> Task.FromResult(Ok x)
+  member _.Return(x: 'a) : TxnStep<'a> = TxnStep.result x
 
-  member _.ReturnFrom
-    (m: SqliteTransaction -> Task<Result<'a, SqliteException>>)
-    : SqliteTransaction -> Task<Result<'a, SqliteException>> =
-    m
+  member _.ReturnFrom(m: TxnStep<'a>) : TxnStep<'a> = TxnStep.returnFrom m
 
-  member _.Bind
-    (
-      m: SqliteTransaction -> Task<Result<'a, SqliteException>>,
-      f: 'a -> SqliteTransaction -> Task<Result<'b, SqliteException>>
-    ) : SqliteTransaction -> Task<Result<'b, SqliteException>> =
-    fun txn ->
-      task {
-        let! result = m txn
+  member _.Bind(m: TxnStep<'a>, f: 'a -> TxnStep<'b>) : TxnStep<'b> = TxnStep.bind m f
 
-        match result with
-        | Ok a -> return! f a txn
-        | Error e -> return Error e
-      }
+  member _.Bind(m: Task<'a>, f: 'a -> TxnStep<'b>) : TxnStep<'b> = TxnStep.bindTask m f
 
-  member _.Bind
-    (m: Task<'a>, f: 'a -> SqliteTransaction -> Task<Result<'b, SqliteException>>)
-    : SqliteTransaction -> Task<Result<'b, SqliteException>> =
-    fun txn ->
-      task {
-        let! value = m
-        return! f value txn
-      }
+  member _.Bind(m: Task<Result<'a, 'e>>, f: 'a -> TxnStep<'b>) : TxnStep<'b> = TxnStep.bindTaskResult m f
 
-  member _.Bind
-    (m: Task<Result<'a, 'e>>, f: 'a -> SqliteTransaction -> Task<Result<'b, SqliteException>>)
-    : SqliteTransaction -> Task<Result<'b, SqliteException>> =
-    fun txn ->
-      task {
-        let! result = m
+  member _.Combine(m: TxnStep<unit>, f: TxnStep<'a>) : TxnStep<'a> = TxnStep.combine m f
 
-        match result with
-        | Ok value -> return! f value txn
-        | Error error ->
-          let exn =
-            match box error with
-            | null -> SqliteException("Task<Result<_, _>> returned null error.", 0)
-            | :? SqliteException as sqliteError -> sqliteError
-            | :? exn as exceptionError -> SqliteException(exceptionError.Message, 0)
-            | _ -> SqliteException(string error, 0)
+  member _.Delay(f: unit -> TxnStep<'a>) : TxnStep<'a> = TxnStep.delay f
 
-          return Error exn
-      }
+  member _.For(items: 'a seq, body: 'a -> TxnStep<unit>) : TxnStep<unit> = TxnStep.forEach items body
 
-  member this.Combine
-    (
-      m: SqliteTransaction -> Task<Result<unit, SqliteException>>,
-      f: SqliteTransaction -> Task<Result<'a, SqliteException>>
-    ) : SqliteTransaction -> Task<Result<'a, SqliteException>> =
-    this.Bind(m, fun () -> f)
+type TxnBuilder() =
+  member _.Run(f: TxnStep<'a>) : TxnStep<'a> = f
 
-  member _.Delay(f: unit -> SqliteTransaction -> Task<Result<'a, SqliteException>>) = fun txn -> f () txn
+  member _.Zero() : TxnStep<unit> = TxnStep.zero ()
 
-  member _.For
-    (items: 'a seq, body: 'a -> SqliteTransaction -> Task<Result<unit, SqliteException>>)
-    : SqliteTransaction -> Task<Result<unit, SqliteException>> =
-    fun txn ->
-      task {
-        let mutable error = None
+  member _.Return(x: 'a) : TxnStep<'a> = TxnStep.result x
 
-        use enumerator = items.GetEnumerator()
+  member _.ReturnFrom(m: TxnStep<'a>) : TxnStep<'a> = TxnStep.returnFrom m
 
-        while error.IsNone && enumerator.MoveNext() do
-          let! result = body enumerator.Current txn
+  member _.Bind(m: TxnStep<'a>, f: 'a -> TxnStep<'b>) : TxnStep<'b> = TxnStep.bind m f
 
-          match result with
-          | Ok() -> ()
-          | Error e -> error <- Some e
+  member _.Bind(m: Task<'a>, f: 'a -> TxnStep<'b>) : TxnStep<'b> = TxnStep.bindTask m f
 
-        match error with
-        | Some e -> return Error e
-        | None -> return Ok()
-      }
+  member _.Bind(m: Task<Result<'a, 'e>>, f: 'a -> TxnStep<'b>) : TxnStep<'b> = TxnStep.bindTaskResult m f
 
-let taskTxn dbPath = TaskTxnBuilder dbPath
+  member _.Combine(m: TxnStep<unit>, f: TxnStep<'a>) : TxnStep<'a> = TxnStep.combine m f
+
+  member _.Delay(f: unit -> TxnStep<'a>) : TxnStep<'a> = TxnStep.delay f
+
+  member _.For(items: 'a seq, body: 'a -> TxnStep<unit>) : TxnStep<unit> = TxnStep.forEach items body
+
+let dbTxn dbPath = DbTxnBuilder dbPath
+let txn = TxnBuilder()
