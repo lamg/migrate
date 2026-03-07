@@ -7,7 +7,7 @@ Every migration creates a fresh database from the .fsx specification and copies 
 Two components coordinate during migration:
 
 - **mig** (CLI tool): run by the administrator to drive migration phases
-- **MigLib** (library): embedded in both old and new services via the `taskTxn` CE, reacts to markers in the database
+- **MigLib** (library): embedded in old and new services via the `dbTxn` CE; reusable transaction-scoped helpers can be composed with `txn`
 
 They communicate through marker tables in the databases:
 
@@ -20,24 +20,18 @@ They communicate through marker tables in the databases:
 - `_migration_progress` in the **new database**: replay checkpoint state for drain safety and status reporting
 - `_schema_identity` in the **new database**: persisted schema metadata (`schema_hash`, optional `schema_commit`, creation timestamp)
 
-## Offline mode
+## Service DB path resolution
 
-When no service is deployed, the entire migration can be performed in a single command:
+MigLib accepts either an explicit SQLite file path or a hash-template path containing `<HASH>`.
+When a template is used, MigLib applies these rules:
 
-```
-mig migrate [--dir|-d /path/to/project]
-```
+1. If exactly one matching file exists (`<prefix><16-hex><suffix>`), use it.
+2. If multiple matching files exist and exactly one has `_migration_status='ready'`, use that file.
+3. Otherwise resolution fails and the service must be configured with an explicit path.
 
-This command:
+In practice, hash-template paths are useful for steady-state deployments after cutover. During `migrate` and `drain`, when both old and new databases may coexist and neither is uniquely `ready`, the blocked new service should use the explicit inferred target path instead of a template.
 
-1. Evaluates `schema.fsx` and derives the new schema via reflection
-2. Creates a new SQLite file with deterministic name `<dir-name>-<schema-hash>.sqlite`
-3. Diffs the old and new schemas to derive column mapping
-4. Copies all data from the old database to the new one in FK dependency order, building the `_id_mapping` table
-5. Drops `_id_mapping` from the new database
-6. Reports the result
-
-No recording, replay, or drain phases are needed since no service is writing to the old database. After completion the administrator swaps the database files.
+## Schema bootstrap and code generation
 
 ### `mig init`
 
@@ -62,6 +56,27 @@ Behavior:
 
 This command does not create migration coordination tables (`_migration_status`, `_migration_progress`, `_id_mapping`, `_migration_marker`, `_migration_log`) because it is not a hot-migration phase.
 
+### `mig codegen`
+
+```sh
+mig codegen [--dir|-d /path/to/project] [--module|-m Schema] [--output|-o Schema.fs]
+```
+
+Schema/code generation mode (no database mutations):
+
+- Uses the current directory as project root (override with `--dir` / `-d`)
+- Uses `<dir>/schema.fsx` as schema input
+- Uses `Schema` as the default generated module name (override with `--module` / `-m`)
+- Uses `Schema.fs` as the default output file name (override with `--output` / `-o`)
+- Requires the output to be a file name in the same directory as `schema.fsx` (no absolute paths or subdirectories)
+
+Behavior:
+
+1. Evaluates `schema.fsx` and reflects tables, normalized DU tables, views, and query annotations
+2. Generates formatted F# source for the reflected types and query helpers
+3. Writes the generated module to the requested output file
+4. Reports counts for normalized tables, regular tables, and views
+
 ## Online mode
 
 When services are deployed, the administrator can run one optional planning command, then three required phase commands plus optional cleanup/reset commands:
@@ -78,6 +93,8 @@ Dry-run planning mode (no database mutations):
 - Uses `<dir>/schema.fsx` as schema input
 - Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite`
 - Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file excluding the target path
+
+If the schema-matched target database already exists and no source candidate is found, plan is skipped as a no-op.
 
 Outputs:
 
@@ -111,7 +128,7 @@ If the schema-matched target database already exists and no source candidate is 
 1. Evaluates `schema.fsx` and derives the new schema via reflection
 2. Creates the new SQLite file with the new schema, `_id_mapping`, `_migration_status(status='migrating')`, and `_schema_identity`
 3. Writes `_migration_marker(status='recording')` and `_migration_log` to the old database
-4. MigLib in the old service detects the marker and begins recording all writes to `_migration_log` at the `taskTxn` CE level
+4. MigLib in the old service detects the marker and begins recording all writes executed inside `dbTxn` transactions into `_migration_log`
 5. Bulk-copies data from old to new in FK dependency order, building `_id_mapping`
 6. Exits and reports the result
 
@@ -133,7 +150,7 @@ Default behavior:
 
 1. Updates `_migration_marker` status to 'draining' in the old database
 2. MigLib in the old service detects the status change and stops accepting writes. Read queries continue to be served from the old database.
-3. Replays all `_migration_log` entries accumulated since the bulk copy, translating IDs through `_id_mapping`
+3. Replays `_migration_log` entries beyond the current `_migration_progress.last_replayed_log_id` checkpoint (initialized to `0` during `mig migrate`), translating IDs through `_id_mapping`
 4. Waits until the log is fully consumed
 5. Reports "Drain complete. Run `mig cutover` when ready." and exits
 
@@ -150,7 +167,7 @@ Run after `mig drain` has exited:
 - Uses the current directory as project root (override with `--dir` / `-d`)
 - Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite` from `<dir>/schema.fsx`
 
-- Verifies that drain is complete and old-db replay state is safe (`_migration_marker='draining'`, `_migration_log` present, no log entries beyond the replay checkpoint)
+- Verifies that drain is complete from `_migration_progress`; when the old DB can also be inferred, re-checks old-db replay safety (`_migration_marker='draining'`, `_migration_log` present, no log entries beyond the replay checkpoint)
 - Drops replay-only tables (`_id_mapping`, `_migration_progress`) from the new database
 - Updates `_migration_status` to 'ready' in the new database
 - MigLib in the new service detects the status change and starts serving
@@ -226,8 +243,8 @@ Shows the current migration state:
 MigLib in the old service periodically checks for the `_migration_marker` table:
 
 - **No marker**: normal operation
-- **`status = 'recording'`**: the `taskTxn` CE wraps every write operation to also insert an entry into `_migration_log` with `txn_id`, `ordering`, operation type, table name, and row data (including assigned autoincrement IDs). Read operations are unaffected.
-- **`status = 'draining'`**: the `taskTxn` CE rejects write operations and returns unavailable. Read operations continue normally.
+- **`status = 'recording'`**: `dbTxn` records every committed write operation into `_migration_log` with `txn_id`, `ordering`, operation type, table name, and row data (including assigned autoincrement IDs). Read operations are unaffected.
+- **`status = 'draining'`**: `dbTxn` rejects write operations and returns unavailable. Read operations continue normally.
 
 ### New service
 
@@ -241,6 +258,7 @@ MigLib in the new service checks the `_migration_status` table on startup and pe
 | Command | What it does | Who reacts |
 |---|---|---|
 | `mig init` | Creates a schema-matched database from `schema.fsx` + seed data (no source DB) | — |
+| `mig codegen` | Generates F# query helpers from `schema.fsx` into a source file | — |
 | `mig plan` | Prints dry-run migration plan and prerequisites without mutating DBs | — |
 | `mig migrate` | Creates new DB, copies data, exits | Old service starts recording writes |
 | `mig drain` | Sets drain marker, replays all accumulated writes, exits | Old service stops writes |

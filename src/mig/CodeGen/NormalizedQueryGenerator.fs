@@ -1,9 +1,9 @@
 /// Module for generating CRUD query methods for normalized schemas with discriminated unions.
 /// Generates async methods with pattern matching for DU cases.
-module internal MigLib.CodeGen.NormalizedQueryGenerator
+module internal Mig.CodeGen.NormalizedQueryGenerator
 
-open MigLib.DeclarativeMigrations.Types
-open MigLib.CodeGen.AstExprBuilders
+open Mig.DeclarativeMigrations.Types
+open Mig.CodeGen.AstExprBuilders
 open Fabulous.AST
 open type Fabulous.AST.Ast
 
@@ -1276,8 +1276,7 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
     if normalized.baseTable.upsertAnnotations.IsEmpty then
       Ok()
     else
-      Error
-        $"Upsert annotation is not supported on normalized table '{normalized.baseTable.name}'."
+      Error $"Upsert annotation is not supported on normalized table '{normalized.baseTable.name}'."
 
   // Validate all QueryBy annotations
   let queryByValidationResults =

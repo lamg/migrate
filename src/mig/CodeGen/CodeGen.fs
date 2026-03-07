@@ -1,12 +1,12 @@
-module MigLib.CodeGen.CodeGen
+module Mig.CodeGen.CodeGen
 
 open System
 open System.IO
 open FsToolkit.ErrorHandling
-open MigLib.SchemaScript
-open MigLib.SchemaReflection
-open MigLib.DeclarativeMigrations.Types
-open MigLib.CodeGen.FabulousAstHelpers
+open Mig.SchemaScript
+open Mig.SchemaReflection
+open Mig.DeclarativeMigrations.Types
+open Mig.CodeGen.FabulousAstHelpers
 open Fantomas.Core
 
 /// Statistics about code generation
@@ -15,6 +15,19 @@ type CodeGenStats =
     RegularTables: int
     Views: int
     GeneratedFiles: string list }
+
+let private isValidModuleSegment (segment: string) =
+  not (String.IsNullOrWhiteSpace segment)
+  && (Char.IsLetter segment[0] || segment[0] = '_')
+  && (segment |> Seq.forall (fun c -> Char.IsLetterOrDigit c || c = '_' || c = '\''))
+
+let private validateModuleName (moduleName: string) =
+  let segments = moduleName.Split('.')
+
+  if segments.Length = 0 || segments |> Array.exists (isValidModuleSegment >> not) then
+    Error $"Module name '{moduleName}' is not a valid F# module identifier."
+  else
+    Ok()
 
 /// Generate F# code from an in-memory schema model.
 /// The schema model is intentionally decoupled from input parsing so we can
@@ -25,6 +38,8 @@ let internal generateCodeFromModel
   (outputFilePath: string)
   : Result<CodeGenStats, string> =
   result {
+    do! validateModuleName moduleName
+
     // Extract view columns using SQLite introspection
     let! viewsWithColumns =
       schema.views
@@ -109,11 +124,11 @@ let internal generateCodeFromModel
       if not (Directory.Exists outputDirectory) then
         Directory.CreateDirectory outputDirectory |> ignore
 
-    let formattedContent =
+    let! formattedContent =
       try
-        formatCode moduleContent
-      with :? ParseException ->
-        moduleContent
+        Ok(formatCode moduleContent)
+      with :? ParseException as ex ->
+        Error $"Generated F# code could not be parsed for module '{moduleName}': {ex.Message}"
 
     File.WriteAllText(outputFilePath, formattedContent)
 

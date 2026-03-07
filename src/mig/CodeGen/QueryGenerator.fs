@@ -1,8 +1,8 @@
-module internal MigLib.CodeGen.QueryGenerator
+module internal Mig.CodeGen.QueryGenerator
 
-open MigLib.DeclarativeMigrations.Types
-open MigLib.CodeGen.ViewIntrospection
-open MigLib.CodeGen.AstExprBuilders
+open Mig.DeclarativeMigrations.Types
+open Mig.CodeGen.ViewIntrospection
+open Mig.CodeGen.AstExprBuilders
 open Fabulous.AST
 open type Fabulous.AST.Ast
 open Microsoft.Data.Sqlite
@@ -468,9 +468,7 @@ let generateUpsert (table: CreateTable) : string option =
   | [] -> None
   | pks ->
     let selectByIdArgs =
-      pks
-      |> List.map (fun pk -> $"item.{capitalize pk.name}")
-      |> String.concat " "
+      pks |> List.map (fun pk -> $"item.{capitalize pk.name}") |> String.concat " "
 
     Some
       $"""  static member Upsert (item: {typeName}) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =

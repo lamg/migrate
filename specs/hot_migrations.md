@@ -2,7 +2,7 @@
 
 Every migration creates a fresh database from the .fsx specification and copies data from the old one. There are no incremental schema changes applied in place, so there is no need to track migration history — the .fsx file is always the complete source of truth.
 
-The migration has three phases, each triggered by a `mig` CLI command (see `mig_command.md`). MigLib, embedded in both old and new services, reacts to marker tables in the databases.
+The migration has three phases, each triggered by a `mig` CLI command (see `mig_command.md`). MigLib, embedded in both old and new services, reacts to marker tables in the databases while application code executes through `dbTxn`/`txn`.
 
 ### Migration tables
 
@@ -57,15 +57,14 @@ CREATE TABLE _migration_log(
 
 1. `mig` creates the new SQLite file with the new schema, `_id_mapping`, `_migration_status(status='migrating')`, and `_schema_identity`
 2. `mig` writes `_migration_marker(status='recording')` and `_migration_log` to the old database
-3. MigLib in the old service detects the marker and enters recording mode. The `taskTxn` CE transparently records every write operation into `_migration_log` with:
+3. MigLib in the old service detects the marker and enters recording mode. `dbTxn` transparently records every committed write operation into `_migration_log` with:
    - `txn_id`: groups operations that belong to the same transaction
    - `ordering`: preserves ordering of operations within a transaction
    - `operation`: insert, update, or delete
    - `table_name`: the target table
    - `row_data`: JSON with column-value pairs, including the assigned autoincrement ID for inserts
-4. `mig` notes the current `_migration_log.id` as the cutoff point
-5. `mig` bulk-copies data from old to new in FK dependency order. For each row copied, the mapping from old ID to new ID is recorded in `_id_mapping`. Foreign key columns are translated using `_id_mapping` for already-copied parent tables. Column mapping for schema changes (renames, additions with defaults, removals) is derived automatically from the DSL diff between the old and new .fsx specifications.
-6. `mig` exits
+4. `mig` bulk-copies data from old to new in FK dependency order. For each row copied, the mapping from old ID to new ID is recorded in `_id_mapping`. Foreign key columns are translated using `_id_mapping` for already-copied parent tables. Column mapping for schema changes (renames, additions with defaults, removals) is derived automatically from the DSL diff between the old and new .fsx specifications.
+5. `mig` exits
 
 The old service continues operating normally while recording writes. The new service can be deployed at any time — MigLib reads `_migration_status(status='migrating')` and rejects all requests until cutover.
 
@@ -73,18 +72,18 @@ The old service continues operating normally while recording writes. The new ser
 
 1. `mig` updates `_migration_marker` status to 'draining' in the old database
 2. MigLib in the old service detects the status change and stops accepting writes, returning unavailable to write requests. Read queries continue to be served from the old database.
-3. `mig` replays all `_migration_log` entries accumulated since the bulk copy cutoff point, grouped by `txn_id` and ordered by `ordering`. For each operation:
+3. `mig` replays `_migration_log` entries beyond `_migration_progress.last_replayed_log_id` (initialized to `0` during `mig migrate`), grouped by `txn_id` and ordered by `ordering`. For each operation:
    - **Insert**: insert the row into the new database. The old autoincrement ID from `row_data` is recorded in `_id_mapping` alongside the new ID assigned by the new database. Foreign key columns are translated through `_id_mapping`.
    - **Update**: translate the primary key and any foreign key columns through `_id_mapping`, then apply the update.
    - **Delete**: translate the primary key through `_id_mapping`, then apply the delete.
-   - Each `txn_id` group is applied as a single transaction to preserve atomicity. `mig` knows which columns are foreign keys from the DSL type definitions, so it knows exactly which values need translation.
-4. `mig` waits until `_migration_log` is fully consumed, then exits
+   - Each `txn_id` group is applied as a single transaction to preserve atomicity. `mig` knows which columns are foreign keys from the DSL type definitions, so it knows exactly which values need translation. `_migration_progress` is updated as replay advances.
+4. `mig` waits until `_migration_log` is fully consumed, marks `drain_completed=1`, then exits
 
 Only writes are unavailable between drain and cutover. This window depends on how many writes accumulated since `mig migrate` finished.
 
 ### Phase 3: Cutover (`mig cutover`)
 
-1. `mig` verifies that drain is complete (new checkpoint reports `drain_completed=1`) and re-checks old-db replay safety (`_migration_marker='draining'`, `_migration_log` present, no entries beyond checkpoint)
+1. `mig` verifies that drain is complete (new checkpoint reports `drain_completed=1`) and, when the old DB is still available, re-checks old-db replay safety (`_migration_marker='draining'`, `_migration_log` present, no entries beyond checkpoint)
 2. `mig` drops replay-only tables (`_id_mapping`, `_migration_progress`) from the new database
 3. `mig` updates `_migration_status` to 'ready' in the new database
 4. MigLib in the new service detects the status change and starts serving

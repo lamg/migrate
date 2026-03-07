@@ -1,9 +1,9 @@
 /// Module for detecting normalized database schemas with extension tables.
 /// Extension tables are detected by naming convention and FK/PK relationships
 /// to generate F# discriminated unions instead of option types.
-module internal MigLib.CodeGen.NormalizedSchema
+module internal Mig.CodeGen.NormalizedSchema
 
-open MigLib.DeclarativeMigrations.Types
+open Mig.DeclarativeMigrations.Types
 
 /// Check if a table has any nullable columns (columns without NOT NULL constraint)
 let hasNullableColumns (table: CreateTable) : bool =

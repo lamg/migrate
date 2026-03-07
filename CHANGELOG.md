@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-03-07
+
+Changed:
+
+- **Schema Source Of Truth**: Replaced the previous SQL-first workflow with reflection over `schema.fsx`
+  - schema hashing now drives deterministic database naming
+  - schema metadata is persisted in `_schema_identity`
+- **Hot Migration Workflow**: Introduced online migration orchestration with `mig plan`, `migrate`, `drain`, `cutover`, `cleanup-old`, `reset`, and `status`
+  - bulk copy is FK-aware and records `_id_mapping`
+  - drain replay uses `_migration_log` and `_migration_progress`
+  - cutover validates replay safety before marking the target database `ready`
+- **Library Transaction API**: Split the transaction surface into `dbTxn` and reusable `txn`
+  - `dbTxn` now resolves hash-template database paths such as `<HASH>` before opening SQLite
+  - migration write recording/drain gating is integrated into the runtime transaction flow
+- **Code Generation**: `mig codegen` now generates F# query helpers directly from `schema.fsx`
+  - invalid module names or unparsable generated code now fail the command instead of writing broken output
+- **Package Surface**: Slimmed `MigLib` down to runtime dependencies only
+  - schema reflection, migration orchestration, and code generation now ship with the `mig` tool instead of the `MigLib` NuGet package
+
 ## [2.13.0] - 2026-02-11
 
 Added:

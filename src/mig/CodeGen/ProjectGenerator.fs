@@ -1,4 +1,4 @@
-module internal MigLib.CodeGen.ProjectGenerator
+module internal Mig.CodeGen.ProjectGenerator
 
 open System.IO
 

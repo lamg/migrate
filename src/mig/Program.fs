@@ -5,8 +5,8 @@ open System
 open System.IO
 open System.Security.Cryptography
 open System.Text
-open MigLib.CodeGen.CodeGen
-open MigLib.HotMigration
+open CodeGen.CodeGen
+open HotMigration
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type MigrateArgs =

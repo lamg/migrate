@@ -1,4 +1,4 @@
-module MigLib.SchemaReflection
+module Mig.SchemaReflection
 
 open System
 open System.Collections.Generic
@@ -7,7 +7,7 @@ open System.Reflection
 open FsToolkit.ErrorHandling
 open Microsoft.FSharp.Reflection
 open MigLib.Db
-open MigLib.DeclarativeMigrations.Types
+open DeclarativeMigrations.Types
 
 type private PrimaryKeyInfo =
   { columnName: string
@@ -347,11 +347,11 @@ let private readQueryAnnotations
   (recordType: Type)
   (resolver: Map<string, string>)
   : Result<
-      QueryByAnnotation list
-      * QueryLikeAnnotation list
-      * QueryByOrCreateAnnotation list
-      * InsertOrIgnoreAnnotation list
-      * UpsertAnnotation list,
+      QueryByAnnotation list *
+      QueryLikeAnnotation list *
+      QueryByOrCreateAnnotation list *
+      InsertOrIgnoreAnnotation list *
+      UpsertAnnotation list,
       string
      >
   =
@@ -513,14 +513,11 @@ let private buildTable
 
     let! indexes = readIndexDefinitions tableName recordType resolver
 
-    let!
-      (queryByAnnotations,
-       queryLikeAnnotations,
-       queryByOrCreateAnnotations,
-       insertOrIgnoreAnnotations,
-       upsertAnnotations)
-      =
-      readQueryAnnotations recordType resolver
+    let! (queryByAnnotations,
+          queryLikeAnnotations,
+          queryByOrCreateAnnotations,
+          insertOrIgnoreAnnotations,
+          upsertAnnotations) = readQueryAnnotations recordType resolver
 
     return
       { name = tableName
@@ -918,14 +915,11 @@ let private buildView
       | [] -> Error $"""View type "{viewType.Name}" must define [<ViewSql>] or [<View>] with Join attributes."""
       | _ -> Error $"""View type "{viewType.Name}" defines multiple [<ViewSql>] attributes."""
 
-    let!
-      (queryByAnnotations,
-       queryLikeAnnotations,
-       queryByOrCreateAnnotations,
-       insertOrIgnoreAnnotations,
-       upsertAnnotations)
-      =
-      readQueryAnnotations viewType resolver
+    let! (queryByAnnotations,
+          queryLikeAnnotations,
+          queryByOrCreateAnnotations,
+          insertOrIgnoreAnnotations,
+          upsertAnnotations) = readQueryAnnotations viewType resolver
 
     return
       { name = tableName

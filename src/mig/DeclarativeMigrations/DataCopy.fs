@@ -1,11 +1,11 @@
-module MigLib.DeclarativeMigrations.DataCopy
+module Mig.DeclarativeMigrations.DataCopy
 
 open System
 open System.Collections.Generic
 open System.Globalization
 open FsToolkit.ErrorHandling
-open MigLib.DeclarativeMigrations.SchemaDiff
-open MigLib.DeclarativeMigrations.Types
+open Mig.DeclarativeMigrations.SchemaDiff
+open Mig.DeclarativeMigrations.Types
 
 type internal ForeignKeyMapping =
   { fkColumns: string list

@@ -1,8 +1,8 @@
 /// Module for generating F# discriminated union types from normalized database schemas.
 /// Generates two DUs per normalized table: New{Type} for inserts and {Type} for queries.
-module internal MigLib.CodeGen.NormalizedTypeGenerator
+module internal Mig.CodeGen.NormalizedTypeGenerator
 
-open MigLib.DeclarativeMigrations.Types
+open Mig.DeclarativeMigrations.Types
 open Fabulous.AST
 open type Fabulous.AST.Ast
 

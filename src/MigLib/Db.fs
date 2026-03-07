@@ -142,13 +142,26 @@ type private TxnContext =
 let private txnContext = AsyncLocal<TxnContext option>()
 let private hashPlaceholder = "<HASH>"
 
+let private sqliteConnectionString (dbPath: string) = $"Data Source={dbPath}"
+
+let openSqliteConnection (dbPath: string) =
+  let connection = new SqliteConnection(sqliteConnectionString dbPath)
+  connection.Open()
+  connection
+
+let private openReadOnlySqliteConnection (dbPath: string) =
+  let connection =
+    new SqliteConnection($"{sqliteConnectionString dbPath};Mode=ReadOnly")
+
+  connection.Open()
+  connection
+
 let private isHashSegment (value: string) =
   value.Length = 16 && value |> Seq.forall Uri.IsHexDigit
 
 let private tryReadMigrationStatus (dbPath: string) : string option =
   try
-    use connection = new SqliteConnection $"Data Source={dbPath};Mode=ReadOnly"
-    connection.Open()
+    use connection = openReadOnlySqliteConnection dbPath
 
     use cmd =
       new SqliteCommand("SELECT status FROM _migration_status WHERE id = 0 LIMIT 1", connection)
@@ -388,10 +401,7 @@ module private TxnStep =
 
   let returnFrom (m: TxnStep<'a>) : TxnStep<'a> = m
 
-  let bind
-    (m: TxnStep<'a>)
-    (f: 'a -> TxnStep<'b>)
-    : TxnStep<'b> =
+  let bind (m: TxnStep<'a>) (f: 'a -> TxnStep<'b>) : TxnStep<'b> =
     fun txn ->
       task {
         let! result = m txn
@@ -401,20 +411,14 @@ module private TxnStep =
         | Error ex -> return Error ex
       }
 
-  let bindTask
-    (m: Task<'a>)
-    (f: 'a -> TxnStep<'b>)
-    : TxnStep<'b> =
+  let bindTask (m: Task<'a>) (f: 'a -> TxnStep<'b>) : TxnStep<'b> =
     fun txn ->
       task {
         let! value = m
         return! f value txn
       }
 
-  let bindTaskResult
-    (m: Task<Result<'a, 'e>>)
-    (f: 'a -> TxnStep<'b>)
-    : TxnStep<'b> =
+  let bindTaskResult (m: Task<Result<'a, 'e>>) (f: 'a -> TxnStep<'b>) : TxnStep<'b> =
     fun txn ->
       task {
         let! result = m
@@ -424,18 +428,11 @@ module private TxnStep =
         | Error error -> return Error(toSqliteException error)
       }
 
-  let combine
-    (m: TxnStep<unit>)
-    (f: TxnStep<'a>)
-    : TxnStep<'a> =
-    bind m (fun () -> f)
+  let combine (m: TxnStep<unit>) (f: TxnStep<'a>) : TxnStep<'a> = bind m (fun () -> f)
 
   let delay (f: unit -> TxnStep<'a>) : TxnStep<'a> = fun txn -> f () txn
 
-  let forEach
-    (items: 'a seq)
-    (body: 'a -> TxnStep<unit>)
-    : TxnStep<unit> =
+  let forEach (items: 'a seq) (body: 'a -> TxnStep<unit>) : TxnStep<unit> =
     fun txn ->
       task {
         let mutable error = None
@@ -460,42 +457,44 @@ type DbTxnBuilder(dbPath: string) =
 
   member _.Run(f: TxnStep<'a>) : Task<Result<'a, SqliteException>> =
     task {
-      use connection = new SqliteConnection $"Data Source={dbPath}"
-      do! connection.OpenAsync()
-      use transaction = connection.BeginTransaction()
-      let! mode = detectMigrationMode transaction
+      match tryResolveDatabasePath dbPath with
+      | Error message -> return Error(SqliteException(message, 0))
+      | Ok resolvedDbPath ->
+        use connection = openSqliteConnection resolvedDbPath
+        use transaction = connection.BeginTransaction()
+        let! mode = detectMigrationMode transaction
 
-      let context =
-        { tx = transaction
-          mode = mode
-          writes = ResizeArray() }
+        let context =
+          { tx = transaction
+            mode = mode
+            writes = ResizeArray() }
 
-      let previousContext = txnContext.Value
-      txnContext.Value <- Some context
+        let previousContext = txnContext.Value
+        txnContext.Value <- Some context
 
-      try
         try
-          let! result = f transaction
+          try
+            let! result = f transaction
 
-          match result with
-          | Ok value ->
-            let! flushResult = flushRecordedWrites context
+            match result with
+            | Ok value ->
+              let! flushResult = flushRecordedWrites context
 
-            match flushResult with
-            | Ok() ->
-              transaction.Commit()
-              return Ok value
-            | Error ex ->
+              match flushResult with
+              | Ok() ->
+                transaction.Commit()
+                return Ok value
+              | Error ex ->
+                transaction.Rollback()
+                return Error ex
+            | Error _ ->
               transaction.Rollback()
-              return Error ex
-          | Error _ ->
+              return result
+          with :? SqliteException as ex ->
             transaction.Rollback()
-            return result
-        with :? SqliteException as ex ->
-          transaction.Rollback()
-          return Error ex
-      finally
-        txnContext.Value <- previousContext
+            return Error ex
+        finally
+          txnContext.Value <- previousContext
     }
 
   member _.Zero() : TxnStep<unit> = TxnStep.zero ()

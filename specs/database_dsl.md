@@ -257,6 +257,8 @@ type Student with
     // checks by primary key; updates when found, inserts when missing
 ```
 
+`Upsert` is only valid on tables that have a primary key. Code generation fails when `Upsert` is used on a table without a primary key or on a view.
+
 ### dbTxn CE
 
 The `dbTxn` computation expression allows you to execute asynchronous queries inside a transaction given a database path:
@@ -268,6 +270,8 @@ dbTxn "path_to_db.sqlite" {
   return students, phil
 }
 ```
+
+The database path can be either an explicit SQLite file or a hash-template path containing `<HASH>`, such as `"/srv/app/marketdesk-<HASH>.sqlite"`. Template resolution matches files with a 16-character hex hash segment; when multiple matches exist, MigLib prefers a unique database whose `_migration_status` is `ready`, otherwise resolution fails and you must supply an explicit path.
 
 When using `dbTxn` it is a good idea to make it part of the environment passed to functions so they have access to the database:
 
@@ -282,6 +286,8 @@ let printStudents (env: Env) =
       printfn $"student: {student}"
   }
 ```
+
+Within `dbTxn` and `txn`, `let!` can bind generated query steps, plain `Task<'a>` values, and `Task<Result<'a, _>>` values. Non-`SqliteException` errors from `Task<Result<_, _>>` bindings are converted into `SqliteException`.
 
 ### txn CE
 
@@ -435,3 +441,11 @@ INSERT OR REPLACE INTO student(id, name, age) VALUES (1, 'System', 0);
 ## SQL generation
 
 The database schema is defined in .fsx files. The tool evaluates the script and uses reflection on the resulting types to generate SQL and run the migration.
+
+Use `mig codegen` to materialize the reflected schema as F# query helpers next to the schema script:
+
+```sh
+mig codegen [--dir|-d /path/to/project] [--module|-m Schema] [--output|-o Schema.fs]
+```
+
+The CLI evaluates `schema.fsx`, generates formatted F# source for reflected tables/views/query helpers, and writes the output file into the same directory as `schema.fsx`. The output file must be a plain file name, not an absolute path or subdirectory path.

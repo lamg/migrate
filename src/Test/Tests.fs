@@ -8,14 +8,14 @@ open System.Text
 open System.Text.Json.Nodes
 open System.Threading.Tasks
 open MigLib.Db
-open MigLib.CodeGen.CodeGen
-open MigLib.DeclarativeMigrations.Types
-open MigLib.DeclarativeMigrations.DataCopy
-open MigLib.DeclarativeMigrations.DrainReplay
-open MigLib.DeclarativeMigrations.SchemaDiff
-open MigLib.HotMigration
-open MigLib.SchemaReflection
-open MigLib.SchemaScript
+open Mig.CodeGen.CodeGen
+open Mig.DeclarativeMigrations.Types
+open Mig.DeclarativeMigrations.DataCopy
+open Mig.DeclarativeMigrations.DrainReplay
+open Mig.DeclarativeMigrations.SchemaDiff
+open Mig.HotMigration
+open Mig.SchemaReflection
+open Mig.SchemaScript
 open Microsoft.Data.Sqlite
 open Xunit
 
@@ -150,8 +150,33 @@ let private assertCliHelpOutput (args: string list) (expectedUsage: string) (exp
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
 
 let private createDatabaseWithMigrationStatus (dbPath: string) (status: string option) =
-  use connection = new SqliteConnection($"Data Source={dbPath}")
-  connection.Open()
+  use connection = openSqliteConnection dbPath
+
+  match status with
+  | None -> ()
+  | Some value ->
+    [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+      $"INSERT INTO _migration_status(id, status) VALUES (0, '{value}');" ]
+    |> List.iter (fun sql ->
+      use cmd = new SqliteCommand(sql, connection)
+      cmd.ExecuteNonQuery() |> ignore)
+
+  connection.Close()
+
+let private createStudentDatabase (dbPath: string) (studentNames: string list) (status: string option) =
+  use connection = openSqliteConnection dbPath
+
+  [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, connection)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  for studentName in studentNames do
+    use insertCmd =
+      new SqliteCommand("INSERT INTO student(name) VALUES (@name)", connection)
+
+    insertCmd.Parameters.AddWithValue("@name", studentName) |> ignore
+    insertCmd.ExecuteNonQuery() |> ignore
 
   match status with
   | None -> ()
@@ -239,6 +264,71 @@ let ``tryResolveDatabasePath fails when multiple hash matches are ambiguous`` ()
   | Error error ->
     Assert.Contains("selection is ambiguous", error)
     Assert.Contains("Set DATABASE_PATH to an explicit file path", error)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``dbTxn resolves single hash-template match at execution time`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_dbtxn_resolve_single_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "marketdesk-1111222233334444.sqlite")
+  let templatePath = Path.Combine(tempDir, "marketdesk-<HASH>.sqlite")
+  createStudentDatabase dbPath [ "Alice"; "Bob" ] None
+
+  let result =
+    dbTxn templatePath {
+      let! count =
+        fun tx ->
+          task {
+            use cmd = new SqliteCommand("SELECT COUNT(*) FROM student", tx.Connection, tx)
+            let! countObj = cmd.ExecuteScalarAsync()
+            return Ok(Convert.ToInt64 countObj)
+          }
+
+      return count
+    }
+    |> fun t -> t.Result
+
+  match result with
+  | Error ex -> failwith $"Expected dbTxn to resolve hash-template path, got error: {ex.Message}"
+  | Ok count -> Assert.Equal(2L, count)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``dbTxn prefers unique ready database when resolving hash-template path`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_dbtxn_resolve_ready_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "marketdesk-1111222233334444.sqlite")
+  let readyDbPath = Path.Combine(tempDir, "marketdesk-aaaabbbbccccdddd.sqlite")
+  let templatePath = Path.Combine(tempDir, "marketdesk-<HASH>.sqlite")
+
+  createStudentDatabase oldDbPath [ "OldOnly" ] None
+  createStudentDatabase readyDbPath [ "Alice"; "Bob"; "Carol" ] (Some "ready")
+
+  let result =
+    dbTxn templatePath {
+      let! count =
+        fun tx ->
+          task {
+            use cmd = new SqliteCommand("SELECT COUNT(*) FROM student", tx.Connection, tx)
+            let! countObj = cmd.ExecuteScalarAsync()
+            return Ok(Convert.ToInt64 countObj)
+          }
+
+      return count
+    }
+    |> fun t -> t.Result
+
+  match result with
+  | Error ex -> failwith $"Expected dbTxn to select ready database, got error: {ex.Message}"
+  | Ok count -> Assert.Equal(3L, count)
 
   Directory.Delete(tempDir, true)
 
@@ -649,8 +739,7 @@ let ``dbTxn records writes into migration log when marker is recording`` () =
 
   let dbPath = Path.Combine(tempDir, "recording.db")
 
-  use setupConn = new SqliteConnection($"Data Source={dbPath}")
-  setupConn.Open()
+  use setupConn = openSqliteConnection dbPath
 
   [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
     "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
@@ -688,8 +777,7 @@ let ``dbTxn records writes into migration log when marker is recording`` () =
   | Error ex -> failwith $"Expected successful transaction, got error: {ex.Message}"
   | Ok id -> Assert.Equal(1L, id)
 
-  use verifyConn = new SqliteConnection($"Data Source={dbPath}")
-  verifyConn.Open()
+  use verifyConn = openSqliteConnection dbPath
 
   use logCmd =
     new SqliteCommand(
@@ -727,8 +815,7 @@ let ``dbTxn rejects writes when marker is draining`` () =
 
   let dbPath = Path.Combine(tempDir, "draining.db")
 
-  use setupConn = new SqliteConnection($"Data Source={dbPath}")
-  setupConn.Open()
+  use setupConn = openSqliteConnection dbPath
 
   [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
     "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
@@ -761,8 +848,7 @@ let ``dbTxn rejects writes when marker is draining`` () =
   | Ok _ -> failwith "Expected draining mode to reject writes"
   | Error ex -> Assert.Contains("drain", ex.Message.ToLowerInvariant())
 
-  use verifyConn = new SqliteConnection($"Data Source={dbPath}")
-  verifyConn.Open()
+  use verifyConn = openSqliteConnection dbPath
   use countCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
   let count = countCmd.ExecuteScalar() |> unbox<int64>
   Assert.Equal(0L, count)
@@ -779,8 +865,7 @@ let ``dbTxn does not record writes when marker is absent`` () =
 
   let dbPath = Path.Combine(tempDir, "nomarker.db")
 
-  use setupConn = new SqliteConnection($"Data Source={dbPath}")
-  setupConn.Open()
+  use setupConn = openSqliteConnection dbPath
 
   [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
     "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);" ]
@@ -812,8 +897,7 @@ let ``dbTxn does not record writes when marker is absent`` () =
   | Error ex -> failwith $"Expected success without marker, got {ex.Message}"
   | Ok() -> ()
 
-  use verifyConn = new SqliteConnection($"Data Source={dbPath}")
-  verifyConn.Open()
+  use verifyConn = openSqliteConnection dbPath
   use countCmd = new SqliteCommand("SELECT COUNT(*) FROM _migration_log", verifyConn)
   let count = countCmd.ExecuteScalar() |> unbox<int64>
   Assert.Equal(0L, count)
@@ -945,15 +1029,13 @@ let ``dbTxn short-circuits generic Task Result errors by mapping to sqlite excep
 
 [<Fact>]
 let ``txn composes reusable transaction-scoped operations inside dbTxn`` () =
-  let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_txn_compose_{Guid.NewGuid()}")
+  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_txn_compose_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
   let dbPath = Path.Combine(tempDir, "compose.db")
 
-  use setupConn = new SqliteConnection($"Data Source={dbPath}")
-  setupConn.Open()
+  use setupConn = openSqliteConnection dbPath
 
   use createCmd =
     new SqliteCommand("CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);", setupConn)
@@ -993,8 +1075,7 @@ let ``txn composes reusable transaction-scoped operations inside dbTxn`` () =
     Assert.Equal(1L, firstId)
     Assert.Equal(2L, secondId)
 
-  use verifyConn = new SqliteConnection($"Data Source={dbPath}")
-  verifyConn.Open()
+  use verifyConn = openSqliteConnection dbPath
   use countCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
   let count = countCmd.ExecuteScalar() |> unbox<int64>
   Assert.Equal(2L, count)
@@ -1271,8 +1352,7 @@ let ``drain replay reads migration log entries and existing id mappings`` () =
   Directory.CreateDirectory tempDir |> ignore
   let dbPath = Path.Combine(tempDir, "read.db")
 
-  use setupConn = new SqliteConnection($"Data Source={dbPath}")
-  setupConn.Open()
+  use setupConn = openSqliteConnection dbPath
 
   [ "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);"
     "CREATE TABLE _id_mapping(table_name TEXT NOT NULL, old_id INTEGER NOT NULL, new_id INTEGER NOT NULL, PRIMARY KEY(table_name, old_id));"
@@ -1378,8 +1458,7 @@ let ``drain replay replays insert update and delete with id translation`` () =
     Directory.CreateDirectory tempDir |> ignore
     let dbPath = Path.Combine(tempDir, "apply.db")
 
-    use conn = new SqliteConnection($"Data Source={dbPath}")
-    conn.Open()
+    use conn = openSqliteConnection dbPath
 
     [ "PRAGMA foreign_keys = ON;"
       "CREATE TABLE account(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
@@ -1529,8 +1608,7 @@ let ``drain replay rolls back a transaction group when one operation fails`` () 
     Directory.CreateDirectory tempDir |> ignore
     let dbPath = Path.Combine(tempDir, "rollback.db")
 
-    use conn = new SqliteConnection($"Data Source={dbPath}")
-    conn.Open()
+    use conn = openSqliteConnection dbPath
 
     [ "PRAGMA foreign_keys = ON;"
       "CREATE TABLE account(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
@@ -1584,8 +1662,7 @@ let ``migration status reports old and new database markers and counts`` () =
   let oldDbPath = Path.Combine(tempDir, "old.db")
   let newDbPath = Path.Combine(tempDir, "new.db")
 
-  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
@@ -1596,8 +1673,7 @@ let ``migration status reports old and new database markers and counts`` () =
     use cmd = new SqliteCommand(sql, oldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  use newConn = new SqliteConnection($"Data Source={newDbPath}")
-  newConn.Open()
+  use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');"
@@ -1640,8 +1716,7 @@ let ``migration status handles databases without migration tables`` () =
 
   let oldDbPath = Path.Combine(tempDir, "old.db")
 
-  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection oldDbPath
 
   use initCmd =
     new SqliteCommand("CREATE TABLE student(id INTEGER PRIMARY KEY, name TEXT NOT NULL);", oldConn)
@@ -1676,8 +1751,7 @@ let ``migration status reports cleanup state after cutover`` () =
   let oldDbPath = Path.Combine(tempDir, "old.db")
   let newDbPath = Path.Combine(tempDir, "new.db")
 
-  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_marker(id, status) VALUES (0, 'draining');"
@@ -1687,8 +1761,7 @@ let ``migration status reports cleanup state after cutover`` () =
     use cmd = new SqliteCommand(sql, oldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  use newConn = new SqliteConnection($"Data Source={newDbPath}")
-  newConn.Open()
+  use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');"
@@ -1726,8 +1799,7 @@ let ``cutover sets ready status and drops id mapping and progress tables`` () =
 
   let newDbPath = Path.Combine(tempDir, "new.db")
 
-  use newConn = new SqliteConnection($"Data Source={newDbPath}")
-  newConn.Open()
+  use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');"
@@ -1781,8 +1853,7 @@ let ``cutover is idempotent when migration status is already ready`` () =
 
   let newDbPath = Path.Combine(tempDir, "new.db")
 
-  use newConn = new SqliteConnection($"Data Source={newDbPath}")
-  newConn.Open()
+  use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');"
@@ -1813,8 +1884,7 @@ let ``cutover fails when migration status table is missing`` () =
 
   let newDbPath = Path.Combine(tempDir, "new.db")
 
-  use newConn = new SqliteConnection($"Data Source={newDbPath}")
-  newConn.Open()
+  use newConn = openSqliteConnection newDbPath
 
   use initCmd =
     new SqliteCommand(
@@ -1842,8 +1912,7 @@ let ``cutover fails when drain has not completed`` () =
 
   let newDbPath = Path.Combine(tempDir, "new.db")
 
-  use newConn = new SqliteConnection($"Data Source={newDbPath}")
-  newConn.Open()
+  use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');"
@@ -1871,8 +1940,7 @@ let ``cleanup old drops migration marker and log tables`` () =
 
   let oldDbPath = Path.Combine(tempDir, "old.db")
 
-  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_marker(id, status) VALUES (0, 'draining');"
@@ -1918,8 +1986,7 @@ let ``cleanup old is idempotent when migration tables are missing`` () =
 
   let oldDbPath = Path.Combine(tempDir, "old.db")
 
-  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection oldDbPath
 
   use initCmd =
     new SqliteCommand("CREATE TABLE student(id INTEGER PRIMARY KEY, name TEXT NOT NULL);", oldConn)
@@ -1947,8 +2014,7 @@ let ``cleanup old fails while marker status is recording`` () =
 
   let oldDbPath = Path.Combine(tempDir, "old.db")
 
-  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
@@ -1991,8 +2057,7 @@ type Student = {{ id: int64; name: string }}
   File.WriteAllText(schemaPath, script.Trim())
   let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
 
-  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_marker(id, status) VALUES (0, 'draining');"
@@ -2002,8 +2067,7 @@ type Student = {{ id: int64; name: string }}
     use cmd = new SqliteCommand(sql, oldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  use newConn = new SqliteConnection($"Data Source={newDbPath}")
-  newConn.Open()
+  use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');"
@@ -2053,8 +2117,7 @@ type Student = {{ id: int64; name: string }}
   File.WriteAllText(schemaPath, script.Trim())
   let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
 
-  use newConn = new SqliteConnection($"Data Source={newDbPath}")
-  newConn.Open()
+  use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');"
@@ -2212,6 +2275,39 @@ type Student = {{ id: int64; name: string }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
+let ``cli codegen rejects invalid module names without writing output`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_module_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let outputPath = Path.Combine(tempDir, "Generated.fs")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+
+  let exitCode, stdOut, stdErr =
+    runMigCli [ "codegen"; "-d"; tempDir; "--module"; "bad-name"; "--output"; "Generated.fs" ]
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("valid F# module identifier", stdErr)
+  Assert.False(File.Exists outputPath, $"Unexpected generated file at: {outputPath}")
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
 let ``cli cutover returns error when drain not complete`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_cutover_not_drained_{Guid.NewGuid()}")
@@ -2234,8 +2330,7 @@ type Student = {{ id: int64; name: string }}
   File.WriteAllText(schemaPath, script.Trim())
   let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
 
-  use newConn = new SqliteConnection($"Data Source={newDbPath}")
-  newConn.Open()
+  use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');"
@@ -2279,8 +2374,7 @@ type Student = {{ id: int64; name: string }}
   File.WriteAllText(schemaPath, script.Trim())
   let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
 
-  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
@@ -2289,8 +2383,7 @@ type Student = {{ id: int64; name: string }}
     use cmd = new SqliteCommand(sql, oldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  use newConn = new SqliteConnection($"Data Source={newDbPath}")
-  newConn.Open()
+  use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');"
@@ -2336,8 +2429,7 @@ type Student = {{ id: int64; name: string }}
   File.WriteAllText(schemaPath, script.Trim())
   let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
 
-  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_marker(id, status) VALUES (0, 'draining');"
@@ -2347,8 +2439,7 @@ type Student = {{ id: int64; name: string }}
     use cmd = new SqliteCommand(sql, oldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  use newConn = new SqliteConnection($"Data Source={newDbPath}")
-  newConn.Open()
+  use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');"
@@ -2408,8 +2499,7 @@ type Student = {{ id: int64; name: string }}
 """
 
   File.WriteAllText(schemaPath, script.Trim())
-  use oldConn = new SqliteConnection($"Data Source={nonDeterministicOldPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection nonDeterministicOldPath
   oldConn.Close()
 
   let exitCode, stdOut, stdErr = runMigCli [ "drain"; "-d"; tempDir ]
@@ -2434,8 +2524,7 @@ let ``cli cleanup-old prints dropped table summary`` () =
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-99990000aaaabbbb.sqlite")
 
-  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_marker(id, status) VALUES (0, 'draining');"
@@ -2456,8 +2545,7 @@ let ``cli cleanup-old prints dropped table summary`` () =
   Assert.Contains("Dropped _migration_log: yes", stdOut)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
 
-  use verifyConn = new SqliteConnection($"Data Source={oldDbPath}")
-  verifyConn.Open()
+  use verifyConn = openSqliteConnection oldDbPath
 
   use markerExistsCmd =
     new SqliteCommand(
@@ -2490,8 +2578,7 @@ let ``cli cleanup-old returns error while recording`` () =
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-ccccddddeeeeffff.sqlite")
 
-  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
@@ -2508,8 +2595,7 @@ let ``cli cleanup-old returns error while recording`` () =
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
   Assert.Contains("cleanup-old failed: Old database is still in recording mode.", stdErr)
 
-  use verifyConn = new SqliteConnection($"Data Source={oldDbPath}")
-  verifyConn.Open()
+  use verifyConn = openSqliteConnection oldDbPath
 
   use markerExistsCmd =
     new SqliteCommand(
@@ -2534,8 +2620,7 @@ let ``cli reset clears old migration artifacts and deletes non-ready new databas
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-1122334455667788.sqlite")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
@@ -2562,8 +2647,7 @@ type Student = {{ id: int64; name: string }}
   File.WriteAllText(schemaPath, script.Trim())
   let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
 
-  use newConn = new SqliteConnection($"Data Source={newDbPath}")
-  newConn.Open()
+  use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');" ]
@@ -2587,8 +2671,7 @@ type Student = {{ id: int64; name: string }}
   Assert.Contains("Previous new migration status: migrating", stdOut)
   Assert.Contains("Deleted new database: yes", stdOut)
 
-  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  verifyOldConn.Open()
+  use verifyOldConn = openSqliteConnection oldDbPath
 
   use markerExistsCmd =
     new SqliteCommand(
@@ -2624,8 +2707,7 @@ let ``cli reset dry-run reports planned actions without mutating old or new data
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-0011223344556677.sqlite")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
@@ -2652,8 +2734,7 @@ type Student = {{ id: int64; name: string }}
   File.WriteAllText(schemaPath, script.Trim())
   let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
 
-  use newConn = new SqliteConnection($"Data Source={newDbPath}")
-  newConn.Open()
+  use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');" ]
@@ -2678,8 +2759,7 @@ type Student = {{ id: int64; name: string }}
   Assert.Contains("Would delete new database: yes", stdOut)
   Assert.Contains("Reset can be applied: yes", stdOut)
 
-  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  verifyOldConn.Open()
+  use verifyOldConn = openSqliteConnection oldDbPath
 
   use markerExistsCmd =
     new SqliteCommand(
@@ -2715,8 +2795,7 @@ let ``cli reset dry-run reports blocked ready target without mutating databases`
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-8899aabbccddeeff.sqlite")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
@@ -2742,8 +2821,7 @@ type Student = {{ id: int64; name: string }}
   File.WriteAllText(schemaPath, script.Trim())
   let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
 
-  use newConn = new SqliteConnection($"Data Source={newDbPath}")
-  newConn.Open()
+  use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');" ]
@@ -2762,8 +2840,7 @@ type Student = {{ id: int64; name: string }}
   Assert.Contains("Would delete new database: no", stdOut)
   Assert.Contains("Blocked reason: Refusing reset because new database status is ready", stdOut)
 
-  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  verifyOldConn.Open()
+  use verifyOldConn = openSqliteConnection oldDbPath
 
   use markerExistsCmd =
     new SqliteCommand(
@@ -2799,8 +2876,7 @@ let ``cli reset refuses to delete ready new database and leaves old artifacts in
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-8899aabbccddeeff.sqlite")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use oldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  oldConn.Open()
+  use oldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
@@ -2826,8 +2902,7 @@ type Student = {{ id: int64; name: string }}
   File.WriteAllText(schemaPath, script.Trim())
   let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
 
-  use newConn = new SqliteConnection($"Data Source={newDbPath}")
-  newConn.Open()
+  use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');" ]
@@ -2843,8 +2918,7 @@ type Student = {{ id: int64; name: string }}
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
   Assert.Contains("reset failed: Refusing reset because new database status is ready", stdErr)
 
-  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  verifyOldConn.Open()
+  use verifyOldConn = openSqliteConnection oldDbPath
 
   use markerExistsCmd =
     new SqliteCommand(
@@ -2880,8 +2954,7 @@ let ``cli migrate derives deterministic new path from current directory schema h
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-0123456789abcdef.sqlite")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  setupOldConn.Open()
+  use setupOldConn = openSqliteConnection oldDbPath
 
   [ "PRAGMA foreign_keys = ON;"
     "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
@@ -2915,8 +2988,7 @@ type Student = {{ id: int64; name: string }}
   Assert.Contains($"New database: {expectedNewDbPath}", stdOut)
   Assert.True(File.Exists expectedNewDbPath)
 
-  use verifyConn = new SqliteConnection($"Data Source={expectedNewDbPath}")
-  verifyConn.Open()
+  use verifyConn = openSqliteConnection expectedNewDbPath
   use studentCountCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
   let studentCount = studentCountCmd.ExecuteScalar() |> unbox<int64>
   Assert.Equal(1L, studentCount)
@@ -2968,8 +3040,7 @@ let defaultStudent = {{ id = 10L; role = {{ id = 1L; name = "admin" }}; name = "
   Assert.Contains("Seeded rows: 3", stdOut)
   Assert.True(File.Exists expectedDbPath)
 
-  use verifyConn = new SqliteConnection($"Data Source={expectedDbPath}")
-  verifyConn.Open()
+  use verifyConn = openSqliteConnection expectedDbPath
 
   use roleCountCmd = new SqliteCommand("SELECT COUNT(*) FROM role", verifyConn)
   let roleCount = roleCountCmd.ExecuteScalar() |> unbox<int64>
@@ -3014,8 +3085,7 @@ type Student = {{ id: int64; name: string }}
   File.WriteAllText(schemaPath, script.Trim())
   let expectedDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
 
-  use existingConn = new SqliteConnection($"Data Source={expectedDbPath}")
-  existingConn.Open()
+  use existingConn = openSqliteConnection expectedDbPath
 
   use initCmd =
     new SqliteCommand("CREATE TABLE sentinel(id INTEGER PRIMARY KEY, value TEXT NOT NULL);", existingConn)
@@ -3030,8 +3100,7 @@ type Student = {{ id: int64; name: string }}
   Assert.Contains("Init skipped.", stdOut)
   Assert.Contains($"Database already present for current schema: {expectedDbPath}", stdOut)
 
-  use verifyConn = new SqliteConnection($"Data Source={expectedDbPath}")
-  verifyConn.Open()
+  use verifyConn = openSqliteConnection expectedDbPath
 
   use sentinelCountCmd =
     new SqliteCommand("SELECT COUNT(*) FROM sentinel", verifyConn)
@@ -3059,8 +3128,7 @@ let ``cli migrate stores schema commit metadata automatically`` () =
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-1111222233334444.sqlite")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  setupOldConn.Open()
+  use setupOldConn = openSqliteConnection oldDbPath
 
   [ "PRAGMA foreign_keys = ON;"
     "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
@@ -3091,8 +3159,7 @@ type Student = {{ id: int64; name: string }}
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
   Assert.Contains($"New database: {expectedNewDbPath}", stdOut)
 
-  use verifyConn = new SqliteConnection($"Data Source={expectedNewDbPath}")
-  verifyConn.Open()
+  use verifyConn = openSqliteConnection expectedNewDbPath
 
   use schemaIdentityCmd =
     new SqliteCommand("SELECT schema_commit FROM _schema_identity WHERE id = 0", verifyConn)
@@ -3114,8 +3181,7 @@ let ``cli migrate auto-discovers schema and old db from current directory`` () =
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-fedcba9876543210.sqlite")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  setupOldConn.Open()
+  use setupOldConn = openSqliteConnection oldDbPath
 
   [ "PRAGMA foreign_keys = ON;"
     "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
@@ -3149,8 +3215,7 @@ type Student = {{ id: int64; name: string }}
   Assert.Contains($"New database: {expectedNewDbPath}", stdOut)
   Assert.True(File.Exists expectedNewDbPath)
 
-  use verifyConn = new SqliteConnection($"Data Source={expectedNewDbPath}")
-  verifyConn.Open()
+  use verifyConn = openSqliteConnection expectedNewDbPath
   use studentCountCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
   let studentCount = studentCountCmd.ExecuteScalar() |> unbox<int64>
   Assert.Equal(1L, studentCount)
@@ -3169,8 +3234,7 @@ let ``cli plan prints dry-run migration plan without mutating databases`` () =
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-1a2b3c4d5e6f7788.sqlite")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  setupOldConn.Open()
+  use setupOldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
     "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
@@ -3208,8 +3272,7 @@ type Student = {{ id: int64; name: string }}
   Assert.Contains("  - student", stdOut)
   Assert.False(File.Exists expectedNewDbPath)
 
-  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  verifyOldConn.Open()
+  use verifyOldConn = openSqliteConnection oldDbPath
 
   use markerExistsCmd =
     new SqliteCommand(
@@ -3243,8 +3306,7 @@ let ``cli plan reports blocking drift and keeps databases unchanged`` () =
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-9a8b7c6d5e4f3210.sqlite")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  setupOldConn.Open()
+  use setupOldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE student(id INTEGER NOT NULL, name TEXT NOT NULL);"
     "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
@@ -3278,8 +3340,7 @@ type Student = {{ id: int64; name: string }}
   Assert.Contains("PK mismatch", stdOut)
   Assert.False(File.Exists expectedNewDbPath)
 
-  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  verifyOldConn.Open()
+  use verifyOldConn = openSqliteConnection oldDbPath
 
   use markerExistsCmd =
     new SqliteCommand(
@@ -3313,8 +3374,7 @@ let ``cli migrate failure prints recovery snapshot and guidance`` () =
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-2233445566778899.sqlite")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  setupOldConn.Open()
+  use setupOldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
     "INSERT INTO student(id, name) VALUES (1, 'Alice');"
@@ -3354,8 +3414,7 @@ type Student = {{ id: int64; name: string }}
 
   Assert.True(File.Exists expectedNewDbPath)
 
-  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  verifyOldConn.Open()
+  use verifyOldConn = openSqliteConnection oldDbPath
 
   use markerStatusCmd =
     new SqliteCommand("SELECT status FROM _migration_marker WHERE id = 0", verifyOldConn)
@@ -3372,8 +3431,7 @@ type Student = {{ id: int64; name: string }}
   let logExists = logExistsCmd.ExecuteScalar()
   Assert.False(isNull logExists)
 
-  use verifyNewConn = new SqliteConnection($"Data Source={expectedNewDbPath}")
-  verifyNewConn.Open()
+  use verifyNewConn = openSqliteConnection expectedNewDbPath
 
   use migrationStatusCmd =
     new SqliteCommand("SELECT status FROM _migration_status WHERE id = 0", verifyNewConn)
@@ -3396,8 +3454,7 @@ let ``cli drain cutover status and cleanup-old auto-discover deterministic paths
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  setupOldConn.Open()
+  use setupOldConn = openSqliteConnection oldDbPath
 
   [ "PRAGMA foreign_keys = ON;"
     "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
@@ -3490,8 +3547,7 @@ type Student = {{ id: int64; name: string }}
 
   let expectedDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
 
-  use existingConn = new SqliteConnection($"Data Source={expectedDbPath}")
-  existingConn.Open()
+  use existingConn = openSqliteConnection expectedDbPath
 
   use initCmd =
     new SqliteCommand("CREATE TABLE sentinel(id INTEGER PRIMARY KEY, value TEXT NOT NULL);", existingConn)
@@ -3506,8 +3562,7 @@ type Student = {{ id: int64; name: string }}
   Assert.Contains("Migrate skipped.", stdOut)
   Assert.Contains($"Database already present for current schema: {expectedDbPath}", stdOut)
 
-  use verifyConn = new SqliteConnection($"Data Source={expectedDbPath}")
-  verifyConn.Open()
+  use verifyConn = openSqliteConnection expectedDbPath
 
   use sentinelCountCmd =
     new SqliteCommand("SELECT COUNT(*) FROM sentinel", verifyConn)
@@ -3528,8 +3583,7 @@ let ``migrate creates new database, copies rows, and sets recording markers`` ()
   let newDbPath = Path.Combine(tempDir, "new.db")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  setupOldConn.Open()
+  use setupOldConn = openSqliteConnection oldDbPath
 
   [ "PRAGMA foreign_keys = ON;"
     "CREATE TABLE account(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
@@ -3567,8 +3621,7 @@ type Invoice = {{ id: int64; account: Account; total: float }}
     Assert.Equal(2, result.copiedTables)
     Assert.Equal(2L, result.copiedRows)
 
-  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  verifyOldConn.Open()
+  use verifyOldConn = openSqliteConnection oldDbPath
 
   use markerCmd =
     new SqliteCommand("SELECT status FROM _migration_marker WHERE id = 0", verifyOldConn)
@@ -3582,8 +3635,7 @@ type Invoice = {{ id: int64; account: Account; total: float }}
   let oldLogCount = oldLogCountCmd.ExecuteScalar() |> unbox<int64>
   Assert.Equal(0L, oldLogCount)
 
-  use verifyNewConn = new SqliteConnection($"Data Source={newDbPath}")
-  verifyNewConn.Open()
+  use verifyNewConn = openSqliteConnection newDbPath
 
   use statusCmd =
     new SqliteCommand("SELECT status FROM _migration_status WHERE id = 0", verifyNewConn)
@@ -3643,8 +3695,7 @@ let ``migrate preflight reports unsupported drift before creating migration side
   let newDbPath = Path.Combine(tempDir, "new.db")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  setupOldConn.Open()
+  use setupOldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE student(id INTEGER NOT NULL, name TEXT NOT NULL);"
     "INSERT INTO student(id, name) VALUES (10, 'Alice');" ]
@@ -3679,8 +3730,7 @@ type Student = {{ id: int64; name: string }}
 
   Assert.False(File.Exists newDbPath)
 
-  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  verifyOldConn.Open()
+  use verifyOldConn = openSqliteConnection oldDbPath
 
   use markerExistsCmd =
     new SqliteCommand(
@@ -3713,8 +3763,7 @@ let ``drain replays accumulated log entries and records replay checkpoint`` () =
   let newDbPath = Path.Combine(tempDir, "new.db")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  setupOldConn.Open()
+  use setupOldConn = openSqliteConnection oldDbPath
 
   [ "PRAGMA foreign_keys = ON;"
     "CREATE TABLE account(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
@@ -3766,8 +3815,7 @@ type Invoice = {{ id: int64; account: Account; total: float }}
     Assert.Equal(3, result.replayedEntries)
     Assert.Equal(0L, result.remainingEntries)
 
-  use verifyOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  verifyOldConn.Open()
+  use verifyOldConn = openSqliteConnection oldDbPath
 
   use markerCmd =
     new SqliteCommand("SELECT status FROM _migration_marker WHERE id = 0", verifyOldConn)
@@ -3781,8 +3829,7 @@ type Invoice = {{ id: int64; account: Account; total: float }}
   let oldLogCount = oldLogCountCmd.ExecuteScalar() |> unbox<int64>
   Assert.Equal(3L, oldLogCount)
 
-  use verifyNewConn = new SqliteConnection($"Data Source={newDbPath}")
-  verifyNewConn.Open()
+  use verifyNewConn = openSqliteConnection newDbPath
 
   use accountCountCmd =
     new SqliteCommand("SELECT COUNT(*) FROM account", verifyNewConn)
@@ -3840,8 +3887,7 @@ let ``drain replay applies target triggers for replayed writes`` () =
   let newDbPath = Path.Combine(tempDir, "new.db")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  setupOldConn.Open()
+  use setupOldConn = openSqliteConnection oldDbPath
 
   [ "PRAGMA foreign_keys = ON;"
     "CREATE TABLE account(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
@@ -3875,8 +3921,7 @@ type Invoice = {{ id: int64; account: Account; total: float }}
   | Error ex -> failwith $"Expected migrate to succeed before trigger replay test, got {ex.Message}"
   | Ok _ -> ()
 
-  use triggerSetupConn = new SqliteConnection($"Data Source={newDbPath}")
-  triggerSetupConn.Open()
+  use triggerSetupConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE invoice_replay_audit(id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_id INTEGER NOT NULL, operation TEXT NOT NULL);"
     "CREATE TRIGGER trg_invoice_replay_audit AFTER INSERT ON invoice BEGIN INSERT INTO invoice_replay_audit(invoice_id, operation) VALUES (NEW.id, 'insert'); END;" ]
@@ -3902,8 +3947,7 @@ type Invoice = {{ id: int64; account: Account; total: float }}
     Assert.Equal(2, result.replayedEntries)
     Assert.Equal(0L, result.remainingEntries)
 
-  use verifyNewConn = new SqliteConnection($"Data Source={newDbPath}")
-  verifyNewConn.Open()
+  use verifyNewConn = openSqliteConnection newDbPath
 
   use auditCountCmd =
     new SqliteCommand("SELECT COUNT(*) FROM invoice_replay_audit", verifyNewConn)
@@ -3935,8 +3979,7 @@ let ``post-cutover writes keep target triggers active`` () =
   let newDbPath = Path.Combine(tempDir, "new.db")
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
-  use setupOldConn = new SqliteConnection($"Data Source={oldDbPath}")
-  setupOldConn.Open()
+  use setupOldConn = openSqliteConnection oldDbPath
 
   [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
     "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
@@ -3964,8 +4007,7 @@ type Student = {{ id: int64; name: string }}
   | Error ex -> failwith $"Expected migrate to succeed before cutover trigger test, got {ex.Message}"
   | Ok _ -> ()
 
-  use triggerSetupConn = new SqliteConnection($"Data Source={newDbPath}")
-  triggerSetupConn.Open()
+  use triggerSetupConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE student_write_audit(id INTEGER PRIMARY KEY AUTOINCREMENT, student_id INTEGER NOT NULL);"
     "CREATE TRIGGER trg_student_write_audit AFTER INSERT ON student BEGIN INSERT INTO student_write_audit(student_id) VALUES (NEW.id); END;" ]
@@ -4010,8 +4052,7 @@ type Student = {{ id: int64; name: string }}
   | Error ex -> failwith $"Expected write after cutover to succeed, got {ex.Message}"
   | Ok _ -> ()
 
-  use verifyNewConn = new SqliteConnection($"Data Source={newDbPath}")
-  verifyNewConn.Open()
+  use verifyNewConn = openSqliteConnection newDbPath
 
   use auditCountCmd =
     new SqliteCommand("SELECT COUNT(*) FROM student_write_audit", verifyNewConn)
@@ -4297,7 +4338,9 @@ let ``querybyorinsert works for composite primary keys without SelectById fallba
 
 [<Fact>]
 let ``codegen rejects upsert annotation when table has no primary key`` () =
-  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_codegen_upsert_nopk_{Guid.NewGuid()}")
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_upsert_nopk_{Guid.NewGuid()}")
+
   Directory.CreateDirectory tempDir |> ignore
 
   let outputPath = Path.Combine(tempDir, "NoPk.fs")
@@ -4315,9 +4358,7 @@ let ``codegen rejects upsert annotation when table has no primary key`` () =
       insertOrIgnoreAnnotations = []
       upsertAnnotations = [ UpsertAnnotation ] }
 
-  let schema =
-    { emptyFile with
-        tables = [ table ] }
+  let schema = { emptyFile with tables = [ table ] }
 
   match generateCodeFromModel "NoPkQueries" schema outputPath with
   | Ok _ -> failwith "Expected codegen failure when Upsert is used on a table without primary key"
@@ -4329,7 +4370,9 @@ let ``codegen rejects upsert annotation when table has no primary key`` () =
 
 [<Fact>]
 let ``codegen rejects upsert annotation on views`` () =
-  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_codegen_upsert_view_{Guid.NewGuid()}")
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_upsert_view_{Guid.NewGuid()}")
+
   Directory.CreateDirectory tempDir |> ignore
 
   let outputPath = Path.Combine(tempDir, "ViewWithUpsert.fs")

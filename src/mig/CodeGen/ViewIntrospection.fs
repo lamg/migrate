@@ -1,10 +1,10 @@
 /// SQLite introspection for view columns
-module internal MigLib.CodeGen.ViewIntrospection
+module internal Mig.CodeGen.ViewIntrospection
 
 open System
 open Microsoft.Data.Sqlite
 open FsToolkit.ErrorHandling
-open MigLib.DeclarativeMigrations.Types
+open Mig.DeclarativeMigrations.Types
 
 /// Column information extracted from a view
 type ViewColumn = { name: string; columnType: SqlType }

@@ -1,8 +1,8 @@
-module internal MigLib.CodeGen.TypeGenerator
+module internal Mig.CodeGen.TypeGenerator
 
 open System
-open MigLib.DeclarativeMigrations.Types
-open MigLib.CodeGen.ViewIntrospection
+open Mig.DeclarativeMigrations.Types
+open Mig.CodeGen.ViewIntrospection
 open Fabulous.AST
 open type Fabulous.AST.Ast
 

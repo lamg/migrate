@@ -1,4 +1,4 @@
-module MigLib.HotMigration
+module Mig.HotMigration
 
 open System
 open System.Collections.Generic
@@ -9,11 +9,12 @@ open System.Security.Cryptography
 open System.Text
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
-open MigLib.DeclarativeMigrations.DataCopy
-open MigLib.DeclarativeMigrations.DrainReplay
-open MigLib.DeclarativeMigrations.SchemaDiff
-open MigLib.DeclarativeMigrations.Types
-open MigLib.SchemaScript
+open MigLib.Db
+open DeclarativeMigrations.DataCopy
+open DeclarativeMigrations.DrainReplay
+open DeclarativeMigrations.SchemaDiff
+open DeclarativeMigrations.Types
+open SchemaScript
 
 type MigrationStatusReport =
   { oldMarkerStatus: string option
@@ -230,23 +231,23 @@ let private dbValueToExpr (value: obj) : Expr =
       if number >= int64 Int32.MinValue && number <= int64 Int32.MaxValue then
         Integer(int number)
       else
-        Value(number.ToString(CultureInfo.InvariantCulture))
+        Value(number.ToString CultureInfo.InvariantCulture)
     | :? uint8 as number -> Integer(int number)
     | :? uint16 as number ->
       if number <= uint16 Int32.MaxValue then
         Integer(int number)
       else
-        Value(number.ToString(CultureInfo.InvariantCulture))
+        Value(number.ToString CultureInfo.InvariantCulture)
     | :? uint32 as number ->
       if number <= uint32 Int32.MaxValue then
         Integer(int number)
       else
-        Value(number.ToString(CultureInfo.InvariantCulture))
+        Value(number.ToString CultureInfo.InvariantCulture)
     | :? uint64 as number ->
       if number <= uint64 Int32.MaxValue then
         Integer(int number)
       else
-        Value(number.ToString(CultureInfo.InvariantCulture))
+        Value(number.ToString CultureInfo.InvariantCulture)
     | :? float32 as number -> Real(float number)
     | :? float as number -> Real number
     | :? decimal as number -> Real(float number)
@@ -470,7 +471,7 @@ let private readMigrationProgress
         return
           Some
             { lastReplayedLogId = reader.GetInt64 0
-              drainCompleted = reader.GetInt64(1) = 1L }
+              drainCompleted = reader.GetInt64 1 = 1L }
   }
 
 let private readSchemaIdentity
@@ -1183,7 +1184,7 @@ let private getGeneratedIdentity (tx: SqliteTransaction) (identity: TableIdentit
         if idValue >= int64 Int32.MinValue && idValue <= int64 Int32.MaxValue then
           Integer(int idValue)
         else
-          Value(idValue.ToString(CultureInfo.InvariantCulture))
+          Value(idValue.ToString CultureInfo.InvariantCulture)
 
       return Some [ idExpr ]
     | _ -> return None
@@ -1599,8 +1600,7 @@ let getMigratePlan
           match targetSchemaResult with
           | Error ex -> return Error ex
           | Ok targetSchema ->
-            use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
-            do! oldConnection.OpenAsync()
+            use oldConnection = openSqliteConnection oldDbPath
 
             let! sourceSchemaResult = loadSchemaFromDatabase oldConnection migrationTables
 
@@ -1674,8 +1674,7 @@ let getMigratePlan
 let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<MigrationStatusReport, SqliteException>> =
   task {
     try
-      use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
-      do! oldConnection.OpenAsync()
+      use oldConnection = openSqliteConnection oldDbPath
 
       let! oldMarkerStatus = readMarkerStatus oldConnection None "_migration_marker"
       let! migrationLogEntries = countRowsIfTableExists oldConnection None "_migration_log"
@@ -1694,8 +1693,7 @@ let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<Migra
               schemaIdentityHash = None
               schemaIdentityCommit = None }
       | Some newPath ->
-        use newConnection = new SqliteConnection($"Data Source={newPath}")
-        do! newConnection.OpenAsync()
+        use newConnection = openSqliteConnection newPath
 
         let! idMappingTablePresent = tableExists newConnection None "_id_mapping"
 
@@ -1741,8 +1739,7 @@ let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<Migra
 let getNewDatabaseStatus (newDbPath: string) : Task<Result<NewDatabaseStatusReport, SqliteException>> =
   task {
     try
-      use newConnection = new SqliteConnection($"Data Source={newDbPath}")
-      do! newConnection.OpenAsync()
+      use newConnection = openSqliteConnection newDbPath
 
       let! idMappingTablePresent = tableExists newConnection None "_id_mapping"
 
@@ -1772,8 +1769,7 @@ let getNewDatabaseStatus (newDbPath: string) : Task<Result<NewDatabaseStatusRepo
 let getOldDatabaseStatus (oldDbPath: string) : Task<Result<OldDatabaseStatusReport, SqliteException>> =
   task {
     try
-      use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
-      do! oldConnection.OpenAsync()
+      use oldConnection = openSqliteConnection oldDbPath
 
       let! oldMarkerStatus = readMarkerStatus oldConnection None "_migration_marker"
       let! migrationLogTablePresent = tableExists oldConnection None "_migration_log"
@@ -1820,8 +1816,7 @@ let private runMigrateInternal
           match targetSchema with
           | Error ex -> return Error ex
           | Ok expectedSchema ->
-            use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
-            do! oldConnection.OpenAsync()
+            use oldConnection = openSqliteConnection oldDbPath
 
             let! sourceSchemaResult = loadSchemaFromDatabase oldConnection migrationTables
 
@@ -1846,8 +1841,7 @@ let private runMigrateInternal
                   if not (String.IsNullOrWhiteSpace newDirectory) then
                     Directory.CreateDirectory newDirectory |> ignore
 
-                  use newConnection = new SqliteConnection($"Data Source={newDbPath}")
-                  do! newConnection.OpenAsync()
+                  use newConnection = openSqliteConnection newDbPath
 
                   let! initResult = initializeNewDatabase newConnection expectedSchema schemaHash schemaCommit
 
@@ -1896,8 +1890,7 @@ let runInit (schemaPath: string) (newDbPath: string) : Task<Result<InitResult, S
           if not (String.IsNullOrWhiteSpace newDirectory) then
             Directory.CreateDirectory newDirectory |> ignore
 
-          use newConnection = new SqliteConnection($"Data Source={newDbPath}")
-          do! newConnection.OpenAsync()
+          use newConnection = openSqliteConnection newDbPath
 
           let! initResult = initializeDatabaseFromSchemaOnly newConnection schema
 
@@ -1921,11 +1914,9 @@ let runDrain (oldDbPath: string) (newDbPath: string) : Task<Result<DrainResult, 
       elif not (File.Exists newDbPath) then
         return Error(toSqliteError $"New database was not found: {newDbPath}")
       else
-        use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
-        do! oldConnection.OpenAsync()
+        use oldConnection = openSqliteConnection oldDbPath
 
-        use newConnection = new SqliteConnection($"Data Source={newDbPath}")
-        do! newConnection.OpenAsync()
+        use newConnection = openSqliteConnection newDbPath
 
         let! setDrainResult = setOldMarkerToDraining oldConnection
 
@@ -2004,8 +1995,7 @@ let runCleanupOld (oldDbPath: string) : Task<Result<CleanupOldResult, SqliteExce
       if not (File.Exists oldDbPath) then
         return Error(toSqliteError $"Old database was not found: {oldDbPath}")
       else
-        use connection = new SqliteConnection($"Data Source={oldDbPath}")
-        do! connection.OpenAsync()
+        use connection = openSqliteConnection oldDbPath
         use transaction = connection.BeginTransaction()
         let! markerStatus = readMarkerStatus connection (Some transaction) "_migration_marker"
 
@@ -2062,8 +2052,7 @@ let getResetMigrationPlan (oldDbPath: string) (newDbPath: string) : Task<Result<
           if newDatabaseExisted then
             task {
               try
-                use newConnection = new SqliteConnection($"Data Source={newDbPath}")
-                do! newConnection.OpenAsync()
+                use newConnection = openSqliteConnection newDbPath
                 let! status = readMarkerStatus newConnection None "_migration_status"
                 return Ok status
               with
@@ -2076,8 +2065,7 @@ let getResetMigrationPlan (oldDbPath: string) (newDbPath: string) : Task<Result<
         match previousNewStatusResult with
         | Error ex -> return Error ex
         | Ok previousNewStatus ->
-          use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
-          do! oldConnection.OpenAsync()
+          use oldConnection = openSqliteConnection oldDbPath
 
           let! previousOldMarkerStatus = readMarkerStatus oldConnection None "_migration_marker"
           let! oldHasMarker = tableExists oldConnection None "_migration_marker"
@@ -2124,8 +2112,7 @@ let runResetMigration (oldDbPath: string) (newDbPath: string) : Task<Result<Rese
           let message = plan.blockedReason |> Option.defaultValue "Reset cannot be applied."
           return Error(toSqliteError message)
         else
-          use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
-          do! oldConnection.OpenAsync()
+          use oldConnection = openSqliteConnection oldDbPath
 
           use transaction = oldConnection.BeginTransaction()
           let! previousOldMarkerStatus = readMarkerStatus oldConnection (Some transaction) "_migration_marker"
@@ -2176,8 +2163,7 @@ let private ensureOldStateSafeForCutover (oldDbPath: string) (newDbPath: string)
       elif not (File.Exists newDbPath) then
         return Error(toSqliteError $"New database was not found: {newDbPath}")
       else
-        use newConnection = new SqliteConnection($"Data Source={newDbPath}")
-        do! newConnection.OpenAsync()
+        use newConnection = openSqliteConnection newDbPath
 
         let! newMigrationStatus = readMarkerStatus newConnection None "_migration_status"
 
@@ -2204,8 +2190,7 @@ let private ensureOldStateSafeForCutover (oldDbPath: string) (newDbPath: string)
                   "Drain is not complete. Pending replay entries still exist. Run `mig drain` again before `mig cutover`."
               )
           | Some progressRow ->
-            use oldConnection = new SqliteConnection($"Data Source={oldDbPath}")
-            do! oldConnection.OpenAsync()
+            use oldConnection = openSqliteConnection oldDbPath
 
             let! oldMarkerStatus = readMarkerStatus oldConnection None "_migration_marker"
             let! hasMigrationLog = tableExists oldConnection None "_migration_log"
@@ -2257,8 +2242,7 @@ let private ensureOldStateSafeForCutover (oldDbPath: string) (newDbPath: string)
 let runCutover (newDbPath: string) : Task<Result<CutoverResult, SqliteException>> =
   task {
     try
-      use connection = new SqliteConnection($"Data Source={newDbPath}")
-      do! connection.OpenAsync()
+      use connection = openSqliteConnection newDbPath
       use transaction = connection.BeginTransaction()
 
       let! hasMigrationStatus = tableExists connection (Some transaction) "_migration_status"

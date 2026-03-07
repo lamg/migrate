@@ -1,4 +1,4 @@
-module MigLib.SchemaScript
+module Mig.SchemaScript
 
 open System
 open System.Collections
@@ -11,8 +11,8 @@ open FSharp.Compiler.Diagnostics
 open FSharp.Compiler.Interactive.Shell
 open Microsoft.FSharp.Reflection
 open MigLib.Db
-open MigLib.DeclarativeMigrations.Types
-open MigLib.SchemaReflection
+open DeclarativeMigrations.Types
+open SchemaReflection
 
 let private isRecordType (t: Type) =
   try

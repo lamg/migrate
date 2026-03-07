@@ -21,6 +21,24 @@
     <PackageIcon>logo.png</PackageIcon>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="AssemblyInfo.fs" />
+    <Compile Include="DeclarativeMigrations/Types.fs" />
+    <Compile Include="DeclarativeMigrations/SchemaDiff.fs" />
+    <Compile Include="DeclarativeMigrations/DataCopy.fs" />
+    <Compile Include="DeclarativeMigrations/DrainReplay.fs" />
+    <Compile Include="SchemaReflection.fs" />
+    <Compile Include="SchemaScript.fs" />
+    <Compile Include="HotMigration.fs" />
+    <Compile Include="CodeGen/FabulousAstHelpers.fs" />
+    <Compile Include="CodeGen/AstExprBuilders.fs" />
+    <Compile Include="CodeGen/ViewIntrospection.fs" />
+    <Compile Include="CodeGen/TypeGenerator.fs" />
+    <Compile Include="CodeGen/NormalizedSchema.fs" />
+    <Compile Include="CodeGen/NormalizedTypeGenerator.fs" />
+    <Compile Include="CodeGen/NormalizedQueryGenerator.fs" />
+    <Compile Include="CodeGen/QueryGenerator.fs" />
+    <Compile Include="CodeGen/ProjectGenerator.fs" />
+    <Compile Include="CodeGen/CodeGen.fs" />
     <Compile Include="Program.fs" />
     <Content Include="../../README.md" Pack="true" PackagePath="\" />
     <Content Include="../../images/logo.png" Pack="true" PackagePath="\" />
@@ -28,6 +46,10 @@
   <ItemGroup>
     <PackageReference Include="Argu" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="FsToolkit.ErrorHandling" />
+    <PackageReference Include="FSharp.Compiler.Service" />
+    <PackageReference Include="Fabulous.AST" />
+    <PackageReference Include="Fantomas.Core" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../MigLib/MigLib.fsproj" />

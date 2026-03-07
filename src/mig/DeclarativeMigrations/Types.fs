@@ -1,4 +1,4 @@
-module MigLib.DeclarativeMigrations.Types
+module Mig.DeclarativeMigrations.Types
 
 type internal SqlType =
   | SqlInteger

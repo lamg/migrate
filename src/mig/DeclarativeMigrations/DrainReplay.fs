@@ -1,4 +1,4 @@
-module MigLib.DeclarativeMigrations.DrainReplay
+module Mig.DeclarativeMigrations.DrainReplay
 
 open System
 open System.Globalization
@@ -6,8 +6,8 @@ open System.Text.Json.Nodes
 open System.Threading.Tasks
 open FsToolkit.ErrorHandling
 open Microsoft.Data.Sqlite
-open MigLib.DeclarativeMigrations.DataCopy
-open MigLib.DeclarativeMigrations.Types
+open Mig.DeclarativeMigrations.DataCopy
+open Mig.DeclarativeMigrations.Types
 
 type internal ReplayOperation =
   | Insert

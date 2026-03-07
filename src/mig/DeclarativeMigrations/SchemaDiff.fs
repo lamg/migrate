@@ -1,8 +1,8 @@
-module MigLib.DeclarativeMigrations.SchemaDiff
+module Mig.DeclarativeMigrations.SchemaDiff
 
 open System
 open System.Collections.Generic
-open MigLib.DeclarativeMigrations.Types
+open Mig.DeclarativeMigrations.Types
 
 type internal ColumnValueSource =
   | SourceColumn of columnName: string

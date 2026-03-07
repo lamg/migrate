@@ -41,9 +41,9 @@ Optional metadata:
 
 Expected outcomes:
 
-- `new.db` exists and contains the new schema
+- inferred target DB (`<dir-name>-<schema-hash>.sqlite`) exists and contains the new schema
 - old DB has `_migration_marker(status='recording')` and `_migration_log`
-- new DB has `_migration_status(status='migrating')`, `_migration_progress`, `_id_mapping`
+- new DB has `_migration_status(status='migrating')`, `_migration_progress`, `_id_mapping`, and `_schema_identity`
 - bulk copy summary is printed
 
 Validation:
@@ -63,8 +63,10 @@ If the old DB has already been archived and only the inferred new DB remains, `m
 
 ## Deploy New Service (Still Blocked)
 
-Deploy/start the new service pointing at `new.db`.
+Deploy/start the new service pointing at the explicit inferred target DB path (`<dir-name>-<schema-hash>.sqlite`).
 It should remain blocked from serving while `_migration_status='migrating'`.
+
+If the service normally uses a hash-template path such as `<dir-name>-<HASH>.sqlite`, do not rely on that template for this pre-cutover deployment unless it resolves unambiguously. When both old and new files coexist, template resolution only auto-selects when there is a unique match or a unique `ready` database.
 
 ## Phase 2: Drain
 
@@ -101,8 +103,9 @@ mig cutover [--dir|-d /path/to/project]
 
 Expected outcomes:
 
+- if the inferred old DB is still present, cutover re-checks `_migration_marker='draining'` and that no unreplayed `_migration_log` entries remain beyond the checkpoint
 - `_migration_status` becomes `ready`
-- replay-only tables `_id_mapping` and `_migration_progress` are removed from `new.db`
+- replay-only tables `_id_mapping` and `_migration_progress` are removed from the inferred target DB
 - new service can now serve traffic
 
 Validation:

@@ -1,5 +1,5 @@
 /// Module providing helpers for generating F# code using Fantomas.
-module internal MigLib.CodeGen.FabulousAstHelpers
+module internal Mig.CodeGen.FabulousAstHelpers
 
 open Fantomas.Core
 

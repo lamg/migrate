@@ -1,7 +1,7 @@
 /// Helper functions for building Fabulous.AST expressions for query generation.
 /// Provides reusable AST builders for common patterns like try/with blocks,
 /// method declarations, and SQL command execution.
-module internal MigLib.CodeGen.AstExprBuilders
+module internal Mig.CodeGen.AstExprBuilders
 
 open Fabulous.AST
 open Fantomas.Core
