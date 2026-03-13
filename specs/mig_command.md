@@ -79,6 +79,36 @@ Behavior:
 5. Writes the generated module to the requested output file
 6. Reports counts for normalized tables, regular tables, and views
 
+## Offline mode
+
+For deployments where the application can stay offline during migration, `mig` also provides a one-shot workflow that skips the hot-migration coordination tables entirely.
+
+### `mig offline`
+
+```sh
+mig offline [--dir|-d /path/to/project]
+```
+
+Default behavior:
+
+- Uses the current directory as project root (override with `--dir` / `-d`)
+- Uses `<dir>/schema.fsx` as schema input
+- Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite`
+- Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file excluding the target path
+
+If the schema-matched target database already exists and no source candidate is found, offline migration is skipped as a no-op.
+
+Behavior:
+
+1. Evaluates `schema.fsx` and derives the target schema via reflection
+2. Creates the new SQLite file with the target schema plus `_schema_identity`
+3. Bulk-copies data from old to new in FK dependency order
+4. Archives the old database into `<dir>/archive/<old-file-name>` after the copy succeeds, replacing any existing file with the same name
+5. Does not create `_migration_marker`, `_migration_log`, `_migration_status`, `_migration_progress`, or `_id_mapping`
+6. Reports completion, including the archive path used for the archived old database
+
+Use this command when downtime is acceptable and there is no need to keep the old database writable while the new one is being prepared.
+
 ## Online mode
 
 When services are deployed, the administrator can run one optional planning command, then three required phase commands plus optional cleanup/reset commands:
@@ -178,10 +208,10 @@ Run after `mig drain` has exited:
 The administrator then switches traffic from the old service to the new one.
 Old migration tables (`_migration_marker`, `_migration_log`) are retained until the old database is archived/deleted.
 
-### `mig cleanup-old`
+### `mig archive-old`
 
 ```
-mig cleanup-old [--dir|-d /path/to/project]
+mig archive-old [--dir|-d /path/to/project]
 ```
 
 Optional command for archived environments, run after traffic has moved to the new service:
@@ -190,10 +220,10 @@ Optional command for archived environments, run after traffic has moved to the n
 - Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file (excluding inferred current-schema target when available)
 
 - Validates the old database is not still in `_migration_marker(status='recording')`
-- Drops old migration tables (`_migration_marker`, `_migration_log`) when present
-- Reports previous marker status and cleanup actions
-
-The command is idempotent: if migration tables are already gone, it succeeds and reports no-op cleanup.
+- Moves the old database file into `<dir>/archive/<old-file-name>`
+- Creates the `archive/` directory when missing
+- Replaces any existing archive file with the same name
+- Reports previous marker status and the archive path used
 
 ### `mig reset`
 
@@ -261,10 +291,11 @@ MigLib in the new service checks the `_migration_status` table on startup and pe
 |---|---|---|
 | `mig init` | Creates a schema-matched database from `schema.fsx` + seed data (no source DB) | — |
 | `mig codegen` | Generates F# query helpers from `schema.fsx` into a source file | — |
+| `mig offline` | Creates a fully copied target DB in one step without hot-migration tables | — |
 | `mig plan` | Prints dry-run migration plan and prerequisites without mutating DBs | — |
 | `mig migrate` | Creates new DB, copies data, exits | Old service starts recording writes |
 | `mig drain` | Sets drain marker, replays all accumulated writes, exits | Old service stops writes |
 | `mig cutover` | Sets ready marker, removes replay-only tables | New service starts serving |
-| `mig cleanup-old` | Removes old migration tables from archived old DB | — |
+| `mig archive-old` | Archives the old DB into `archive/`, replacing any same-named prior archive | — |
 | `mig reset` | Clears failed-migration artifacts (old marker/log + non-ready target DB), or reports dry-run impact with `--dry-run` | — |
 | `mig status` | Shows migration progress | — |

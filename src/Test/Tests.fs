@@ -1957,13 +1957,14 @@ let ``cutover fails when drain has not completed`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cleanup old drops migration marker and log tables`` () =
+let ``archive old moves database to archive directory`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cleanup_old_success_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
   let oldDbPath = Path.Combine(tempDir, "old.db")
+  let expectedArchivePath = Path.Combine(tempDir, "archive", "old.db")
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -1975,41 +1976,43 @@ let ``cleanup old drops migration marker and log tables`` () =
     use cmd = new SqliteCommand(sql, oldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let cleanupResult = runCleanupOld oldDbPath |> fun t -> t.Result
+  oldConn.Close()
 
-  match cleanupResult with
-  | Error ex -> failwith $"Expected cleanup old to succeed, got {ex.Message}"
+  let archiveResult = runArchiveOld tempDir oldDbPath |> fun t -> t.Result
+
+  match archiveResult with
+  | Error ex -> failwith $"Expected archive old to succeed, got {ex.Message}"
   | Ok result ->
     Assert.Equal(Some "draining", result.previousMarkerStatus)
-    Assert.True(result.markerDropped)
-    Assert.True(result.logDropped)
+    Assert.Equal(expectedArchivePath, result.archivePath)
+    Assert.False(result.replacedExistingArchive)
+
+  Assert.False(File.Exists oldDbPath)
+  Assert.True(File.Exists expectedArchivePath)
+
+  use verifyConn = openSqliteConnection expectedArchivePath
 
   use markerExistsCmd =
     new SqliteCommand(
       "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_marker' LIMIT 1",
-      oldConn
+      verifyConn
     )
 
   let markerExists = markerExistsCmd.ExecuteScalar()
-  Assert.True(isNull markerExists)
+  Assert.False(isNull markerExists)
 
-  use logExistsCmd =
-    new SqliteCommand("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_log' LIMIT 1", oldConn)
-
-  let logExists = logExistsCmd.ExecuteScalar()
-  Assert.True(isNull logExists)
-
-  oldConn.Close()
+  verifyConn.Close()
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cleanup old is idempotent when migration tables are missing`` () =
+let ``archive old moves database to archive even when migration tables are missing`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cleanup_old_missing_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
   let oldDbPath = Path.Combine(tempDir, "old.db")
+  let expectedArchivePath = Path.Combine(tempDir, "archive", "old.db")
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -2017,21 +2020,23 @@ let ``cleanup old is idempotent when migration tables are missing`` () =
     new SqliteCommand("CREATE TABLE student(id INTEGER PRIMARY KEY, name TEXT NOT NULL);", oldConn)
 
   initCmd.ExecuteNonQuery() |> ignore
+  oldConn.Close()
 
-  let cleanupResult = runCleanupOld oldDbPath |> fun t -> t.Result
+  let archiveResult = runArchiveOld tempDir oldDbPath |> fun t -> t.Result
 
-  match cleanupResult with
-  | Error ex -> failwith $"Expected idempotent cleanup old to succeed, got {ex.Message}"
+  match archiveResult with
+  | Error ex -> failwith $"Expected archive old to succeed, got {ex.Message}"
   | Ok result ->
     Assert.Equal(None, result.previousMarkerStatus)
-    Assert.False(result.markerDropped)
-    Assert.False(result.logDropped)
+    Assert.Equal(expectedArchivePath, result.archivePath)
+    Assert.False(result.replacedExistingArchive)
 
-  oldConn.Close()
+  Assert.False(File.Exists oldDbPath)
+  Assert.True(File.Exists expectedArchivePath)
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cleanup old fails while marker status is recording`` () =
+let ``archive old fails while marker status is recording`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cleanup_old_recording_{Guid.NewGuid()}")
 
@@ -2048,10 +2053,10 @@ let ``cleanup old fails while marker status is recording`` () =
     use cmd = new SqliteCommand(sql, oldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let cleanupResult = runCleanupOld oldDbPath |> fun t -> t.Result
+  let archiveResult = runArchiveOld tempDir oldDbPath |> fun t -> t.Result
 
-  match cleanupResult with
-  | Ok _ -> failwith "Expected cleanup old to fail while marker status is recording"
+  match archiveResult with
+  | Ok _ -> failwith "Expected archive old to fail while marker status is recording"
   | Error ex -> Assert.Contains("recording mode", ex.Message)
 
   oldConn.Close()
@@ -2178,10 +2183,11 @@ let ``cli root help shows current command surface`` () =
     [ "init <options>"
       "codegen <options>"
       "migrate <options>"
+      "offline <options>"
       "plan <options>"
       "drain <options>"
       "cutover <options>"
-      "cleanup-old <options>"
+      "archive-old <options>"
       "reset <options>"
       "status <options>"
       "--version, -v" ]
@@ -2209,10 +2215,11 @@ let ``cli subcommand help shows usage and options`` () =
        "USAGE: mig codegen [--help] [--dir <path>] [--module <name>] [--output <path>]",
        [ "--dir, -d <path>"; "--module, -m <name>"; "--output, -o <path>" ])
       ([ "migrate"; "--help" ], "USAGE: mig migrate [--help] [--dir <path>]", [ "--dir, -d <path>" ])
+      ([ "offline"; "--help" ], "USAGE: mig offline [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "plan"; "--help" ], "USAGE: mig plan [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "drain"; "--help" ], "USAGE: mig drain [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "cutover"; "--help" ], "USAGE: mig cutover [--help] [--dir <path>]", [ "--dir, -d <path>" ])
-      ([ "cleanup-old"; "--help" ], "USAGE: mig cleanup-old [--help] [--dir <path>]", [ "--dir, -d <path>" ])
+      ([ "archive-old"; "--help" ], "USAGE: mig archive-old [--help] [--dir <path>]", [ "--dir, -d <path>" ])
       ([ "reset"; "--help" ],
        "USAGE: mig reset [--help] [--dir <path>] [--dry-run]",
        [ "--dir, -d <path>"; "--dry-run" ])
@@ -2540,7 +2547,7 @@ type Student = {{ id: int64; name: string }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli cleanup-old prints dropped table summary`` () =
+let ``cli archive-old archives old database into archive directory`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_cleanup_old_success_{Guid.NewGuid()}")
 
@@ -2548,6 +2555,9 @@ let ``cli cleanup-old prints dropped table summary`` () =
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-99990000aaaabbbb.sqlite")
+
+  let expectedArchivePath =
+    Path.Combine(tempDir, "archive", Path.GetFileName oldDbPath)
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -2560,17 +2570,20 @@ let ``cli cleanup-old prints dropped table summary`` () =
 
   oldConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCli [ "cleanup-old"; "-d"; tempDir ]
+  let exitCode, stdOut, stdErr = runMigCli [ "archive-old"; "-d"; tempDir ]
 
   Assert.Equal(0, exitCode)
-  Assert.Contains("Old database cleanup complete.", stdOut)
+  Assert.Contains("Old database archive complete.", stdOut)
   Assert.Contains($"Old database: {oldDbPath}", stdOut)
   Assert.Contains("Previous marker status: draining", stdOut)
-  Assert.Contains("Dropped _migration_marker: yes", stdOut)
-  Assert.Contains("Dropped _migration_log: yes", stdOut)
+  Assert.Contains($"Archived database: {expectedArchivePath}", stdOut)
+  Assert.Contains("Replaced existing archive: no", stdOut)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
 
-  use verifyConn = openSqliteConnection oldDbPath
+  Assert.False(File.Exists oldDbPath)
+  Assert.True(File.Exists expectedArchivePath)
+
+  use verifyConn = openSqliteConnection expectedArchivePath
 
   use markerExistsCmd =
     new SqliteCommand(
@@ -2579,22 +2592,60 @@ let ``cli cleanup-old prints dropped table summary`` () =
     )
 
   let markerExists = markerExistsCmd.ExecuteScalar()
-  Assert.True(isNull markerExists)
-
-  use logExistsCmd =
-    new SqliteCommand(
-      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_log' LIMIT 1",
-      verifyConn
-    )
-
-  let logExists = logExistsCmd.ExecuteScalar()
-  Assert.True(isNull logExists)
+  Assert.False(isNull markerExists)
 
   verifyConn.Close()
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli cleanup-old returns error while recording`` () =
+let ``archive old replaces existing archive database when moving`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_archive_old_replace_archive_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+  let archiveDir = Path.Combine(tempDir, "archive")
+  let archivePath = Path.Combine(archiveDir, "old.db")
+  Directory.CreateDirectory archiveDir |> ignore
+  File.WriteAllText(archivePath, "stale archive")
+
+  use oldConn = openSqliteConnection oldDbPath
+
+  [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'draining');"
+    "CREATE TABLE student(id INTEGER PRIMARY KEY, name TEXT NOT NULL);"
+    "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, oldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  oldConn.Close()
+
+  let archiveResult = runArchiveOld tempDir oldDbPath |> fun t -> t.Result
+
+  match archiveResult with
+  | Error ex -> failwith $"Expected archive old to succeed, got {ex.Message}"
+  | Ok result ->
+    Assert.Equal(archivePath, result.archivePath)
+    Assert.True(result.replacedExistingArchive)
+
+  Assert.False(File.Exists oldDbPath)
+  Assert.True(File.Exists archivePath)
+
+  use verifyArchiveConn = openSqliteConnection archivePath
+
+  use studentCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM student", verifyArchiveConn)
+
+  let studentCount = studentCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(1L, studentCount)
+
+  verifyArchiveConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli archive-old returns error while recording`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_cleanup_old_recording_{Guid.NewGuid()}")
 
@@ -2614,11 +2665,11 @@ let ``cli cleanup-old returns error while recording`` () =
 
   oldConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCli [ "cleanup-old"; "-d"; tempDir ]
+  let exitCode, stdOut, stdErr = runMigCli [ "archive-old"; "-d"; tempDir ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
-  Assert.Contains("cleanup-old failed: Old database is still in recording mode.", stdErr)
+  Assert.Contains("archive-old failed: Old database is still in recording mode.", stdErr)
 
   use verifyConn = openSqliteConnection oldDbPath
 
@@ -3469,7 +3520,7 @@ type Student = {{ id: int64; name: string }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli drain cutover status and cleanup-old auto-discover deterministic paths from current directory`` () =
+let ``cli drain cutover status and archive-old auto-discover deterministic paths from current directory`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_operational_auto_{Guid.NewGuid()}")
 
@@ -3477,6 +3528,10 @@ let ``cli drain cutover status and cleanup-old auto-discover deterministic paths
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
+
+  let expectedArchivePath =
+    Path.Combine(tempDir, "archive", Path.GetFileName oldDbPath)
+
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
 
   use setupOldConn = openSqliteConnection oldDbPath
@@ -3538,14 +3593,93 @@ type Student = {{ id: int64; name: string }}
   Assert.Contains("Migration status: ready", statusStdOut)
 
   let cleanupExitCode, cleanupStdOut, cleanupStdErr =
-    runMigCliInDirectory (Some tempDir) [ "cleanup-old" ]
+    runMigCliInDirectory (Some tempDir) [ "archive-old" ]
 
   Assert.Equal(0, cleanupExitCode)
   Assert.True(String.IsNullOrWhiteSpace cleanupStdErr, $"Expected no stderr output, got: {cleanupStdErr}")
   Assert.Contains($"Old database: {oldDbPath}", cleanupStdOut)
-  Assert.Contains("Dropped _migration_marker: yes", cleanupStdOut)
-  Assert.Contains("Dropped _migration_log: yes", cleanupStdOut)
+  Assert.Contains($"Archived database: {expectedArchivePath}", cleanupStdOut)
+  Assert.Contains("Replaced existing archive: no", cleanupStdOut)
+  Assert.False(File.Exists oldDbPath)
+  Assert.True(File.Exists expectedArchivePath)
 
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli offline auto-discovers deterministic paths and archives old database after copy`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_offline_auto_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
+
+  let expectedArchivePath =
+    Path.Combine(tempDir, "archive", Path.GetFileName oldDbPath)
+
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+
+  use setupOldConn = openSqliteConnection oldDbPath
+
+  [ "PRAGMA foreign_keys = ON;"
+    "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "INSERT INTO student(id, name) VALUES (1, 'Alice');"
+    "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'draining');"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  setupOldConn.Close()
+
+  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "offline" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains($"Old database: {oldDbPath}", stdOut)
+  Assert.Contains($"New database: {expectedNewDbPath}", stdOut)
+  Assert.Contains("Previous old marker status: draining", stdOut)
+  Assert.Contains($"Archived database: {expectedArchivePath}", stdOut)
+  Assert.Contains("Replaced existing archive: no", stdOut)
+  Assert.Contains("Hot-migration tables were not created.", stdOut)
+
+  Assert.False(File.Exists oldDbPath)
+  Assert.True(File.Exists expectedArchivePath)
+
+  use verifyNewConn = openSqliteConnection expectedNewDbPath
+
+  use newStatusExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_status' LIMIT 1",
+      verifyNewConn
+    )
+
+  let newStatusExists = newStatusExistsCmd.ExecuteScalar()
+  Assert.True(isNull newStatusExists)
+
+  use studentCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM student", verifyNewConn)
+
+  let studentCount = studentCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(1L, studentCount)
+
+  verifyNewConn.Close()
   Directory.Delete(tempDir, true)
 
 [<Fact>]
@@ -3697,6 +3831,127 @@ type Invoice = {{ id: int64; account: Account; total: float }}
   Assert.Equal(0L, progressReader.GetInt64(0))
   Assert.Equal(0L, progressReader.GetInt64(1))
   Assert.False(progressReader.Read())
+
+  use schemaIdentityCmd =
+    new SqliteCommand("SELECT schema_hash FROM _schema_identity WHERE id = 0", verifyNewConn)
+
+  let storedSchemaHash = schemaIdentityCmd.ExecuteScalar() |> string
+  Assert.Equal(expectedSchemaHash, storedSchemaHash)
+
+  verifyOldConn.Close()
+  verifyNewConn.Close()
+  setupOldConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``offline migrate creates new database without hot migration coordination tables`` () =
+  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_offline_flow_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+  let newDbPath = Path.Combine(tempDir, "new.db")
+  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+
+  use setupOldConn = openSqliteConnection oldDbPath
+
+  [ "PRAGMA foreign_keys = ON;"
+    "CREATE TABLE account(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "CREATE TABLE invoice(id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, total REAL NOT NULL, FOREIGN KEY(account_id) REFERENCES account(id));"
+    "INSERT INTO account(id, name) VALUES (10, 'Alice');"
+    "INSERT INTO invoice(id, account_id, total) VALUES (100, 10, 42.5);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<AutoIncPK "id">]
+type Account = {{ id: int64; name: string }}
+
+[<AutoIncPK "id">]
+type Invoice = {{ id: int64; account: Account; total: float }}
+"""
+
+  File.WriteAllText(schemaPath, script.Trim())
+  let expectedSchemaHash = deriveShortSchemaHashFromScript schemaPath
+
+  let migrateResult =
+    runOfflineMigrate oldDbPath schemaPath newDbPath |> fun t -> t.Result
+
+  match migrateResult with
+  | Error ex -> failwith $"Expected offline migrate to succeed, got {ex.Message}"
+  | Ok result ->
+    Assert.Equal(newDbPath, result.newDbPath)
+    Assert.Equal(2, result.copiedTables)
+    Assert.Equal(2L, result.copiedRows)
+
+  use verifyOldConn = openSqliteConnection oldDbPath
+
+  use oldMarkerExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_marker' LIMIT 1",
+      verifyOldConn
+    )
+
+  let oldMarkerExists = oldMarkerExistsCmd.ExecuteScalar()
+  Assert.True(isNull oldMarkerExists)
+
+  use oldLogExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_log' LIMIT 1",
+      verifyOldConn
+    )
+
+  let oldLogExists = oldLogExistsCmd.ExecuteScalar()
+  Assert.True(isNull oldLogExists)
+
+  use verifyNewConn = openSqliteConnection newDbPath
+
+  use migrationStatusExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_status' LIMIT 1",
+      verifyNewConn
+    )
+
+  let migrationStatusExists = migrationStatusExistsCmd.ExecuteScalar()
+  Assert.True(isNull migrationStatusExists)
+
+  use idMappingExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_id_mapping' LIMIT 1",
+      verifyNewConn
+    )
+
+  let idMappingExists = idMappingExistsCmd.ExecuteScalar()
+  Assert.True(isNull idMappingExists)
+
+  use progressExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_progress' LIMIT 1",
+      verifyNewConn
+    )
+
+  let progressExists = progressExistsCmd.ExecuteScalar()
+  Assert.True(isNull progressExists)
+
+  use accountCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM account", verifyNewConn)
+
+  let accountCount = accountCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(1L, accountCount)
+
+  use invoiceCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM invoice", verifyNewConn)
+
+  let invoiceCount = invoiceCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(1L, invoiceCount)
 
   use schemaIdentityCmd =
     new SqliteCommand("SELECT schema_hash FROM _schema_identity WHERE id = 0", verifyNewConn)

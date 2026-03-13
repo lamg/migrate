@@ -90,7 +90,7 @@ Only writes are unavailable between drain and cutover. This window depends on ho
 5. The administrator switches traffic from old to new
 6. Old database migration tables (`_migration_marker`, `_migration_log`) are retained until the old database is archived/deleted
 
-### Phase 4 (optional): Old DB cleanup (`mig cleanup-old`)
+### Phase 4 (optional): Old DB archival (`mig archive-old`)
 
 1. `mig` verifies the old marker is not still in `recording` mode
 2. `mig` drops old migration tables (`_migration_marker`, `_migration_log`) from the old database

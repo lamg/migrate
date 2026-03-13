@@ -32,7 +32,7 @@ Default no-flag mode (`mig migrate` from project directory):
 - uses `./schema.fsx`
 - derives target path `./<dir-name>-<schema-hash>.sqlite`
 - auto-detects source DB as exactly one `./<dir-name>-<old-hash>.sqlite` file excluding the target
-- the same path inference is used by `mig status`, `mig drain`, `mig cutover`, and `mig cleanup-old`
+- the same path inference is used by `mig status`, `mig drain`, `mig cutover`, and `mig archive-old`
 - use `--dir` / `-d` to run the same workflow from a different working directory
 
 Optional metadata:
@@ -132,7 +132,7 @@ Move application traffic from old service to new service only after successful c
 ## Optional Phase 4: Cleanup Old DB Migration Tables
 
 ```sh
-mig cleanup-old [--dir|-d /path/to/project]
+mig archive-old [--dir|-d /path/to/project]
 ```
 
 Expected outcomes:
@@ -175,7 +175,7 @@ After cutover (`_migration_status='ready'`):
 - immediate rollback is operational (route traffic back to old service) but data divergence risk must be evaluated because writes may already be accepted by the new service
 - preserve both DB files for investigation before cleanup
 
-After `cleanup-old`:
+After `archive-old`:
 
 - migration metadata tables are removed from old DB
 - treat rollback as an explicit recovery exercise from backups or retained snapshots
@@ -190,7 +190,7 @@ After `cleanup-old`:
   - rerun `mig drain`, then recheck `mig status`
 - `cutover failed: Cutover blocked: ... replay divergence risk ...`
   - old marker/log state changed after drain; verify old marker is `draining`, then rerun `mig drain` and retry cutover
-- `cleanup-old failed: Old database is still in recording mode...`
+- `archive-old failed: Old database is still in recording mode...`
   - finish `drain` + `cutover` first
 - missing migration tables
   - verify command order (`migrate` -> `drain` -> `cutover`)
