@@ -114,6 +114,7 @@ mig offline
 - Schema identity metadata (`schema_hash`, optional `schema_commit`) persisted in new database
 - Operational status reporting for old/new database migration state
 - Optional old-database archival into `archive/` after cutover
+- Transactional ASP.NET Core request composition via `MigLib.Web` and `webResult`
 
 ## Specs
 
@@ -121,6 +122,7 @@ mig offline
 - [`specs/hot_migrations.md`](./specs/hot_migrations.md)
 - [`specs/mig_command.md`](./specs/mig_command.md)
 - [`specs/operator_runbook.md`](./specs/operator_runbook.md)
+- [`specs/web_result.md`](./specs/web_result.md)
 
 ## Commands
 

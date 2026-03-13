@@ -13,6 +13,9 @@
     <PackageReference Include="coverlet.collector" />
   </ItemGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../MigLib/MigLib.fsproj" />
     <ProjectReference Include="../mig/mig.fsproj" />
   </ItemGroup>
