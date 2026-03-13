@@ -56,12 +56,14 @@ type internal ColumnDef =
   { name: string
     columnType: SqlType
     constraints: ColumnConstraint list
-    enumLikeDu: EnumLikeDu option }
+    enumLikeDu: EnumLikeDu option
+    unitOfMeasure: string option }
 
 type internal ViewColumn =
   { name: string
     columnType: SqlType
-    enumLikeDu: EnumLikeDu option }
+    enumLikeDu: EnumLikeDu option
+    unitOfMeasure: string option }
 
 type internal QueryByAnnotation = { columns: string list }
 
@@ -105,7 +107,8 @@ type internal CreateTrigger =
     dependencies: string list }
 
 type internal SqlFile =
-  { inserts: InsertInto list
+  { measureTypes: string list
+    inserts: InsertInto list
     views: CreateView list
     tables: CreateTable list
     indexes: CreateIndex list
@@ -123,7 +126,8 @@ let internal foldResults
     | Ok value -> folder value item)
 
 let internal emptyFile =
-  { tables = []
+  { measureTypes = []
+    tables = []
     indexes = []
     inserts = []
     views = []

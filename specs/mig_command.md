@@ -74,8 +74,10 @@ Behavior:
 
 1. Evaluates `schema.fsx` and reflects tables, normalized DU tables, views, and query annotations
 2. Generates formatted F# source for the reflected types and query helpers
-3. Writes the generated module to the requested output file
-4. Reports counts for normalized tables, regular tables, and views
+3. Re-emits nullary, non-generic scalar DUs as typed F# fields/query parameters while storing them as strings in SQLite
+4. Re-emits `[<Measure>]` declarations and measured numeric field/query types when those units were declared in `schema.fsx`
+5. Writes the generated module to the requested output file
+6. Reports counts for normalized tables, regular tables, and views
 
 ## Online mode
 

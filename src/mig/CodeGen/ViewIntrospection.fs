@@ -81,10 +81,16 @@ let getViewColumns (tables: CreateTable list) (view: CreateView) : Result<ViewCo
         |> List.tryFind (fun declared -> String.Equals(declared.name, colName, StringComparison.OrdinalIgnoreCase))
         |> Option.bind _.enumLikeDu
 
+      let unitOfMeasure =
+        view.declaredColumns
+        |> List.tryFind (fun declared -> String.Equals(declared.name, colName, StringComparison.OrdinalIgnoreCase))
+        |> Option.bind _.unitOfMeasure
+
       columns.Add
         { name = colName
           columnType = sqlType
-          enumLikeDu = enumLikeDu }
+          enumLikeDu = enumLikeDu
+          unitOfMeasure = unitOfMeasure }
 
     let introspectedColumns = columns |> Seq.toList
 

@@ -493,7 +493,8 @@ let private buildTable
               @ [ { name = toSnakeCase field.Name
                     columnType = sqlType
                     constraints = [ NotNull ]
-                    enumLikeDu = enumLikeDu } ]
+                    enumLikeDu = enumLikeDu
+                    unitOfMeasure = None } ]
             )
           | None when isRecordType field.PropertyType ->
             match pkByType.TryGetValue field.PropertyType with
@@ -515,7 +516,8 @@ let private buildTable
                 @ [ { name = fkColumnName
                       columnType = referencedPk.sqlType
                       constraints = [ NotNull; ForeignKey foreignKey ]
-                      enumLikeDu = None } ]
+                      enumLikeDu = None
+                      unitOfMeasure = None } ]
               )
           | None -> Error $"Field '{recordType.Name}.{field.Name}' has unsupported type '{field.PropertyType.Name}'")
         []
@@ -927,7 +929,8 @@ let private buildView
               columns
               @ [ { name = toSnakeCase field.Name
                     columnType = sqlType
-                    enumLikeDu = enumLikeDu } ]
+                    enumLikeDu = enumLikeDu
+                    unitOfMeasure = None } ]
             )
           | None -> Error $"View field '{viewType.Name}.{field.Name}' has unsupported type '{field.PropertyType.Name}'")
         []
@@ -1030,7 +1033,8 @@ let private buildUnionExtensionTables
                         refColumns = [ referencedPk.columnName ]
                         onDelete = None
                         onUpdate = None } ]
-                enumLikeDu = None }
+                enumLikeDu = None
+                unitOfMeasure = None }
 
             let! extensionColumns =
               caseFields
@@ -1051,7 +1055,8 @@ let private buildUnionExtensionTables
                       @ [ { name = toSnakeCase fieldName
                             columnType = sqlType
                             constraints = [ NotNull ]
-                            enumLikeDu = enumLikeDu } ]
+                            enumLikeDu = enumLikeDu
+                            unitOfMeasure = None } ]
                     )
                   | None ->
                     Error

@@ -48,15 +48,19 @@ let isColumnNullable (column: ColumnDef) : bool =
 let mapColumnType (column: ColumnDef) : string =
   let isNullable = isColumnNullable column
 
-  match column.enumLikeDu with
-  | Some enumLikeDu when isNullable -> $"{enumLikeDu.typeName} option"
-  | Some enumLikeDu -> enumLikeDu.typeName
-  | None -> mapSqlType column.columnType isNullable
+  let baseType =
+    match column.enumLikeDu, column.unitOfMeasure with
+    | Some enumLikeDu, _ -> enumLikeDu.typeName
+    | None, Some unitOfMeasure -> $"{mapSqlType column.columnType false}<{unitOfMeasure}>"
+    | None, None -> mapSqlType column.columnType false
+
+  if isNullable then $"{baseType} option" else baseType
 
 let mapViewColumnType (column: ViewColumn) : string =
-  match column.enumLikeDu with
-  | Some enumLikeDu -> enumLikeDu.typeName
-  | None -> mapSqlType column.columnType false
+  match column.enumLikeDu, column.unitOfMeasure with
+  | Some enumLikeDu, _ -> enumLikeDu.typeName
+  | None, Some unitOfMeasure -> $"{mapSqlType column.columnType false}<{unitOfMeasure}>"
+  | None, None -> mapSqlType column.columnType false
 
 let enumCaseToDbValueExpr (enumLikeDu: EnumLikeDu) (valueExpr: string) : string =
   let cases =
@@ -96,8 +100,17 @@ let readColumnExpr (column: ColumnDef) (index: int) : string =
     match column.enumLikeDu with
     | Some enumLikeDu -> enumFromDbValueExpr enumLikeDu column.name $"reader.GetString {index}"
     | None ->
-      let method = mapSqlType column.columnType false |> readerMethod
-      $"reader.Get{method} {index}"
+      match column.unitOfMeasure, column.columnType with
+      | Some unitOfMeasure, SqlInteger ->
+        $"LanguagePrimitives.Int64WithMeasure<{unitOfMeasure}> (reader.GetInt64 {index})"
+      | Some unitOfMeasure, SqlReal ->
+        $"LanguagePrimitives.FloatWithMeasure<{unitOfMeasure}> (reader.GetDouble {index})"
+      | Some _, _ ->
+        let method = mapSqlType column.columnType false |> readerMethod
+        $"reader.Get{method} {index}"
+      | None, _ ->
+        let method = mapSqlType column.columnType false |> readerMethod
+        $"reader.Get{method} {index}"
 
   if isColumnNullable column then
     $"if reader.IsDBNull {index} then None else Some({readerExpr})"
@@ -108,8 +121,16 @@ let readViewColumnExpr (column: ViewColumn) (index: int) : string =
   match column.enumLikeDu with
   | Some enumLikeDu -> enumFromDbValueExpr enumLikeDu column.name $"reader.GetString {index}"
   | None ->
-    let method = mapSqlType column.columnType false |> readerMethod
-    $"reader.Get{method} {index}"
+    match column.unitOfMeasure, column.columnType with
+    | Some unitOfMeasure, SqlInteger ->
+      $"LanguagePrimitives.Int64WithMeasure<{unitOfMeasure}> (reader.GetInt64 {index})"
+    | Some unitOfMeasure, SqlReal -> $"LanguagePrimitives.FloatWithMeasure<{unitOfMeasure}> (reader.GetDouble {index})"
+    | Some _, _ ->
+      let method = mapSqlType column.columnType false |> readerMethod
+      $"reader.Get{method} {index}"
+    | None, _ ->
+      let method = mapSqlType column.columnType false |> readerMethod
+      $"reader.Get{method} {index}"
 
 let collectEnumLikeDusFromColumns (columns: #seq<ColumnDef>) : EnumLikeDu list =
   columns
@@ -131,6 +152,8 @@ let generateEnumType (enumLikeDu: EnumLikeDu) : string =
 
   $"""type {enumLikeDu.typeName} =
 {cases}"""
+
+let generateMeasureType (measureType: string) = $"[<Measure>] type {measureType}"
 
 /// Generate a record field from a column definition
 let generateField (column: ColumnDef) =

@@ -106,6 +106,9 @@ let internal generateCodeFromModel
         yield "open MigLib.Db"
         yield ""
         yield!
+          schema.measureTypes
+          |> List.collect (fun measureType -> [ TypeGenerator.generateMeasureType measureType; "" ])
+        yield!
           enumLikeDus
           |> List.collect (fun enumLikeDu -> [ TypeGenerator.generateEnumType enumLikeDu; "" ])
         // Generate discriminated union types for normalized tables

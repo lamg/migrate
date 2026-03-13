@@ -23,7 +23,8 @@ let private mkColumn name columnType constraints =
   { name = name
     columnType = columnType
     constraints = constraints
-    enumLikeDu = None }
+    enumLikeDu = None
+    unitOfMeasure = None }
 
 let private mkTable name columns constraints =
   { name = name
@@ -4184,15 +4185,18 @@ let ``codegen generates module and query methods from schema model`` () =
                   { constraintName = None
                     columns = []
                     isAutoincrement = true } ]
-            enumLikeDu = None }
+            enumLikeDu = None
+            unitOfMeasure = None }
           { name = "name"
             columnType = SqlText
             constraints = [ NotNull ]
-            enumLikeDu = None }
+            enumLikeDu = None
+            unitOfMeasure = None }
           { name = "age"
             columnType = SqlInteger
             constraints = [ NotNull ]
-            enumLikeDu = None } ]
+            enumLikeDu = None
+            unitOfMeasure = None } ]
       constraints = []
       queryByAnnotations = [ { columns = [ "name"; "age" ] } ]
       queryLikeAnnotations = [ { columns = [ "name" ] } ]
@@ -4349,15 +4353,18 @@ let ``querybyorinsert works for composite primary keys without SelectById fallba
         [ { name = "order_id"
             columnType = SqlInteger
             constraints = [ NotNull ]
-            enumLikeDu = None }
+            enumLikeDu = None
+            unitOfMeasure = None }
           { name = "sku"
             columnType = SqlText
             constraints = [ NotNull ]
-            enumLikeDu = None }
+            enumLikeDu = None
+            unitOfMeasure = None }
           { name = "description"
             columnType = SqlText
             constraints = [ NotNull ]
-            enumLikeDu = None } ]
+            enumLikeDu = None
+            unitOfMeasure = None } ]
       constraints =
         [ PrimaryKey
             { constraintName = None
@@ -4405,7 +4412,8 @@ let ``codegen rejects upsert annotation when table has no primary key`` () =
         [ { name = "name"
             columnType = SqlText
             constraints = [ NotNull ]
-            enumLikeDu = None } ]
+            enumLikeDu = None
+            unitOfMeasure = None } ]
       constraints = []
       queryByAnnotations = []
       queryLikeAnnotations = []
@@ -4442,11 +4450,13 @@ let ``codegen rejects upsert annotation on views`` () =
                   { constraintName = None
                     columns = []
                     isAutoincrement = true } ]
-            enumLikeDu = None }
+            enumLikeDu = None
+            unitOfMeasure = None }
           { name = "name"
             columnType = SqlText
             constraints = [ NotNull ]
-            enumLikeDu = None } ]
+            enumLikeDu = None
+            unitOfMeasure = None } ]
       constraints = []
       queryByAnnotations = []
       queryLikeAnnotations = []
@@ -4691,6 +4701,84 @@ type StudentStatusView = {{ id: int64; status: Status }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
+let ``schema script evaluation preserves unit-of-measure column metadata`` () =
+  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_script_uom_{Guid.NewGuid()}")
+  Directory.CreateDirectory tempDir |> ignore
+
+  let scriptPath = Path.Combine(tempDir, "schema.fsx")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<Measure>]
+type Byte
+
+[<AutoIncPK "id">]
+type File = {{ id: int64; contentLength: int64<Byte>; slug: string }}
+"""
+
+  File.WriteAllText(scriptPath, script.Trim())
+
+  match buildSchemaFromScript scriptPath with
+  | Error e -> failwith $"schema script failed: {e}"
+  | Ok schema ->
+    Assert.Equal<string list>([ "Byte" ], schema.measureTypes)
+
+    let fileTable = schema.tables |> List.find (fun table -> table.name = "file")
+
+    let contentLength =
+      fileTable.columns |> List.find (fun column -> column.name = "content_length")
+
+    Assert.Equal(SqlInteger, contentLength.columnType)
+    Assert.Equal(Some "Byte", contentLength.unitOfMeasure)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``codegen emits unit-of-measure declarations and typed APIs from schema script`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_uom_script_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let scriptPath = Path.Combine(tempDir, "schema.fsx")
+  let outputPath = Path.Combine(tempDir, "Generated.fs")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+[<Measure>]
+type Byte
+
+[<AutoIncPK "id">]
+[<SelectBy "contentLength">]
+type File = {{ id: int64; contentLength: int64<Byte>; slug: string }}
+"""
+
+  File.WriteAllText(scriptPath, script.Trim())
+
+  match generateCodeFromScript "Generated" scriptPath outputPath with
+  | Error e -> failwith $"codegen-from-script failed: {e}"
+  | Ok _ ->
+    let generated = File.ReadAllText outputPath
+    Assert.Contains("[<Measure>]", generated)
+    Assert.Contains("type Byte", generated)
+    Assert.Contains("ContentLength: int64<Byte>", generated)
+    Assert.Contains("static member SelectByContentLength", generated)
+    Assert.Contains("content_length: int64<Byte>", generated)
+    Assert.Contains("LanguagePrimitives.Int64WithMeasure<Byte>", generated)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
 let ``schema script evaluation reports syntax errors`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_script_syntax_error_{Guid.NewGuid()}")
@@ -4703,7 +4791,7 @@ let ``schema script evaluation reports syntax errors`` () =
   match buildSchemaFromScript scriptPath with
   | Ok _ -> failwith "Expected schema script evaluation to fail on syntax error"
   | Error error ->
-    Assert.Contains("Failed to evaluate script", error)
+    Assert.Contains("Failed to parse schema script", error)
     Assert.Contains("error FS", error)
 
   Directory.Delete(tempDir, true)

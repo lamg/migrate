@@ -6,13 +6,20 @@ open System.Collections.Generic
 open System.Globalization
 open System.IO
 open System.Reflection
+open FSharp.Compiler.CodeAnalysis
 open FsToolkit.ErrorHandling
 open FSharp.Compiler.Diagnostics
 open FSharp.Compiler.Interactive.Shell
+open FSharp.Compiler.Syntax
+open FSharp.Compiler.Text
 open Microsoft.FSharp.Reflection
 open MigLib.Db
 open DeclarativeMigrations.Types
 open SchemaReflection
+
+type private ScriptTypeMetadata =
+  { measureTypes: string list
+    unitOfMeasureByType: Map<string, Map<string, string>> }
 
 let private isRecordType (t: Type) =
   try
@@ -61,6 +68,144 @@ let private formatDiagnostic (diagnostic: FSharpDiagnostic) : string =
     | _ -> "info"
 
   $"{fileName}:{diagnostic.StartLine}:{diagnostic.StartColumn} {severity} FS{diagnostic.ErrorNumber}: {diagnostic.Message}"
+
+let private normalizeLineEndings (text: string) =
+  text.Replace("\r\n", "\n").Replace("\r", "\n")
+
+let private getSourceTextForRange (sourceLines: string array) (range: range) =
+  let startLine = range.StartLine - 1
+  let endLine = range.EndLine - 1
+
+  if startLine = endLine then
+    sourceLines.[startLine].Substring(range.StartColumn, range.EndColumn - range.StartColumn)
+  else
+    let firstLine = sourceLines.[startLine].Substring(range.StartColumn)
+    let middleLines = sourceLines[(startLine + 1) .. (endLine - 1)]
+    let lastLine = sourceLines.[endLine].Substring(0, range.EndColumn)
+    String.concat "\n" ([ firstLine ] @ (middleLines |> Array.toList) @ [ lastLine ])
+
+let private tryGetLongIdentText (synLongIdent: SynLongIdent) =
+  synLongIdent.LongIdent |> List.map _.idText |> String.concat "."
+
+let private hasMeasureAttribute (attributes: SynAttributes) =
+  attributes
+  |> List.collect (fun attributeList -> attributeList.Attributes)
+  |> List.exists (fun attribute ->
+    let attributeName = tryGetLongIdentText attribute.TypeName
+    String.Equals(attributeName, "Measure", StringComparison.Ordinal))
+
+let private tryGetUnitOfMeasure (sourceLines: string array) (fieldType: SynType) : string option =
+  match fieldType with
+  | SynType.App(typeName = SynType.LongIdent baseType; typeArgs = [ measureType ]) ->
+    let baseTypeName = tryGetLongIdentText baseType
+
+    if baseTypeName = "int64" || baseTypeName = "float" then
+      Some(getSourceTextForRange sourceLines measureType.Range)
+    else
+      None
+  | _ -> None
+
+let rec private collectMeasureTypesAndUnitsFromDecls
+  (sourceLines: string array)
+  (decls: SynModuleDecl list)
+  : string list * (string * (string * string) list) list =
+  let rec collectDecl
+    (measureTypes: string list)
+    (unitMaps: (string * (string * string) list) list)
+    (decl: SynModuleDecl)
+    =
+    match decl with
+    | SynModuleDecl.Types(typeDefs, _) ->
+      ((measureTypes, unitMaps), typeDefs)
+      ||> List.fold (fun (measuresAcc, unitsAcc) typeDef ->
+        let (SynTypeDefn(typeInfo = typeInfo; typeRepr = typeRepr)) = typeDef
+        let (SynComponentInfo(attributes = attributes; longId = longId)) = typeInfo
+        let typeName = longId |> List.map _.idText |> List.last
+
+        let measuresAcc =
+          if hasMeasureAttribute attributes then
+            measuresAcc @ [ typeName ]
+          else
+            measuresAcc
+
+        let unitsAcc =
+          match typeRepr with
+          | SynTypeDefnRepr.Simple(simpleRepr = SynTypeDefnSimpleRepr.Record(recordFields = fields)) ->
+            let fieldUnits =
+              fields
+              |> List.choose (fun field ->
+                let (SynField(fieldType = fieldType; idOpt = idOpt)) = field
+
+                match fieldType, idOpt with
+                | fieldType, Some fieldId ->
+                  tryGetUnitOfMeasure sourceLines fieldType
+                  |> Option.map (fun unitName -> toSnakeCase fieldId.idText, unitName)
+                | _ -> None)
+
+            if fieldUnits.IsEmpty then
+              unitsAcc
+            else
+              unitsAcc @ [ typeName, fieldUnits ]
+          | _ -> unitsAcc
+
+        measuresAcc, unitsAcc)
+    | SynModuleDecl.NestedModule(decls = nestedDecls) ->
+      let nestedMeasures, nestedUnits =
+        collectMeasureTypesAndUnitsFromDecls sourceLines nestedDecls
+
+      measureTypes @ nestedMeasures, unitMaps @ nestedUnits
+    | _ -> measureTypes, unitMaps
+
+  (([], []), decls)
+  ||> List.fold (fun (measureTypes, unitMaps) decl -> collectDecl measureTypes unitMaps decl)
+
+let private parseScriptTypeMetadata (scriptPath: string) : Result<ScriptTypeMetadata, string> =
+  result {
+    let source = File.ReadAllText scriptPath |> normalizeLineEndings
+    let sourceText = SourceText.ofString source
+    let checker = FSharpChecker.Create()
+
+    let! projectOptions, _ =
+      checker.GetProjectOptionsFromScript(scriptPath, sourceText)
+      |> Async.RunSynchronously
+      |> Ok
+
+    let parsingOptions, _ = checker.GetParsingOptionsFromProjectOptions projectOptions
+
+    let! parseResults =
+      checker.ParseFile(scriptPath, sourceText, parsingOptions)
+      |> Async.RunSynchronously
+      |> Ok
+
+    let parseErrors =
+      parseResults.Diagnostics
+      |> Array.filter (fun diagnostic -> diagnostic.Severity = FSharpDiagnosticSeverity.Error)
+
+    if not (Array.isEmpty parseErrors) then
+      let messages = parseErrors |> Array.map formatDiagnostic |> String.concat "\n"
+      return! Error $"Failed to parse schema script '{scriptPath}':\n{messages}"
+
+    let sourceLines = source.Split '\n'
+
+    let measureTypes, unitEntries =
+      match parseResults.ParseTree with
+      | ParsedInput.ImplFile impl ->
+        let (ParsedImplFileInput(contents = modules)) = impl
+
+        modules
+        |> List.map (fun moduleOrNamespace ->
+          let (SynModuleOrNamespace(decls = decls)) = moduleOrNamespace
+          collectMeasureTypesAndUnitsFromDecls sourceLines decls)
+        |> List.fold (fun (measureAcc, unitsAcc) (measures, units) -> measureAcc @ measures, unitsAcc @ units) ([], [])
+      | ParsedInput.SigFile _ -> [], []
+
+    return
+      { measureTypes = measureTypes |> List.distinct
+        unitOfMeasureByType =
+          unitEntries
+          |> List.map (fun (typeName, fields) -> typeName, fields |> Map.ofList)
+          |> Map.ofList }
+  }
 
 let private getScriptDefinedTypes (session: FsiEvaluationSession) : Type list =
   session.DynamicAssemblies
@@ -337,6 +482,57 @@ let private toSeedRecordObjects
       else
         [])
 
+let private applyUnitOfMeasureMetadata
+  (reflectedTypes: Type list)
+  (metadata: ScriptTypeMetadata)
+  (schema: SqlFile)
+  : SqlFile =
+  let reflectedTypeByTableName =
+    reflectedTypes
+    |> List.filter isRecordType
+    |> List.map (fun reflectedType -> toSnakeCase reflectedType.Name, reflectedType)
+    |> Map.ofList
+
+  let tryFindUnit typeName columnName =
+    metadata.unitOfMeasureByType
+    |> Map.tryFind typeName
+    |> Option.bind (Map.tryFind columnName)
+
+  let applyUnitToTableColumn typeName (column: ColumnDef) =
+    let unitOfMeasure = tryFindUnit typeName column.name
+
+    { column with
+        unitOfMeasure = unitOfMeasure }
+
+  let applyUnitToViewColumn typeName (column: ViewColumn) =
+    let unitOfMeasure = tryFindUnit typeName column.name
+
+    { column with
+        unitOfMeasure = unitOfMeasure }
+
+  let updatedTables =
+    schema.tables
+    |> List.map (fun table ->
+      match reflectedTypeByTableName.TryFind table.name with
+      | Some reflectedType ->
+        { table with
+            columns = table.columns |> List.map (applyUnitToTableColumn reflectedType.Name) }
+      | None -> table)
+
+  let updatedViews =
+    schema.views
+    |> List.map (fun view ->
+      match reflectedTypeByTableName.TryFind view.name with
+      | Some reflectedType ->
+        { view with
+            declaredColumns = view.declaredColumns |> List.map (applyUnitToViewColumn reflectedType.Name) }
+      | None -> view)
+
+  { schema with
+      measureTypes = metadata.measureTypes
+      tables = updatedTables
+      views = updatedViews }
+
 let private tableDependencies (tableByName: Map<string, CreateTable>) (tableName: string) : Set<string> =
   let table = tableByName[tableName]
 
@@ -448,8 +644,10 @@ let private extractSeedInserts
 
 let internal buildSchemaFromScript (scriptPath: string) : Result<SqlFile, string> =
   result {
+    let! scriptMetadata = parseScriptTypeMetadata scriptPath
     let! reflectedTypes, boundValues = evaluateScript scriptPath
     let! schema = buildSchemaFromTypes reflectedTypes
+    let schema = applyUnitOfMeasureMetadata reflectedTypes scriptMetadata schema
     let! inserts = extractSeedInserts reflectedTypes boundValues schema
 
     return { schema with inserts = inserts }
