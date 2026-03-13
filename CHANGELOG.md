@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.3] - 2026-03-13
+
+Changed:
+
+- **MigLib Runtime**: New-service transactions now enforce `_migration_status` before serving traffic
+  - blocks reads and writes while the target database is still `migrating`
+  - allows normal traffic once the target database reports `ready`
+- **mig CLI / Code Generation**: `mig codegen` now emits a schema-bound `DbFile` literal for generated modules
+  - generated services can bind directly to `<dir-name>-<schema-hash>.sqlite`
+  - release docs and operator guidance now describe explicit schema-specific database paths during online migration
+
 ## [4.1.2] - 2026-03-13
 
 Fixed:
