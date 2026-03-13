@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.2] - 2026-03-13
+
+Fixed:
+
+- **MigLib SQLite Initialization**: `openSqliteConnection` and read-only connection helpers now initialize `SQLitePCL.Batteries_V2` explicitly before opening SQLite
+  - fixes `mig init` failures in packaged/global-tool executions where SQLite provider initialization was not happening reliably
+  - keeps the initialization idempotent through a single lazy guard inside `MigLib.Db`
+
 ## [4.1.1] - 2026-03-13
 
 Fixed:

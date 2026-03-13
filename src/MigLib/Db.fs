@@ -141,15 +141,21 @@ type private TxnContext =
 
 let private txnContext = AsyncLocal<TxnContext option>()
 let private hashPlaceholder = "<HASH>"
+let private sqliteInitialized = lazy (SQLitePCL.Batteries_V2.Init())
 
 let private sqliteConnectionString (dbPath: string) = $"Data Source={dbPath}"
 
+let private ensureSqliteInitialized () = sqliteInitialized.Force()
+
 let openSqliteConnection (dbPath: string) =
+  ensureSqliteInitialized ()
   let connection = new SqliteConnection(sqliteConnectionString dbPath)
   connection.Open()
   connection
 
 let private openReadOnlySqliteConnection (dbPath: string) =
+  ensureSqliteInitialized ()
+
   let connection =
     new SqliteConnection $"{sqliteConnectionString dbPath};Mode=ReadOnly"
 
