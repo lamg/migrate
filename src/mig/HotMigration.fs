@@ -1020,7 +1020,8 @@ let private buildTableDefinition
       { name = row.name
         columnType = parseSqlType row.declaredType
         constraints = constraints |> Seq.toList
-        enumLikeDu = None })
+        enumLikeDu = None
+        unitOfMeasure = None })
 
   let fkGroups = foreignKeyRows |> List.groupBy _.id
 

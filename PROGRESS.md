@@ -49,6 +49,22 @@ src/
 - **Script/codegen bridge completed**: `generateCodeFromScript` now supports full `.fsx` -> schema model -> generated query module flow.
 - **Validation passed**: `fantomas .`, `dotnet test`, and `dotnet build mig/mig.fsproj` all succeed.
 
+## Update (2026-03-13, scalar DU columns)
+
+- **Enum-like scalar DU support added**: `schema.fsx` reflection now accepts nullary, non-generic discriminated unions as scalar columns and maps them to `TEXT`.
+- **Typed codegen preserved for scalar DUs**: `mig codegen` now re-emits those DU definitions and uses them in generated table/view record fields and equality-query parameters/results instead of plain `string`.
+- **Seed serialization added for scalar DUs**: script seed extraction now stores DU values using the exact F# case name.
+- **Invalid DU payload handling added**: generated readers now fail with `SqliteException` when a stored string does not match any known DU case.
+- **Coverage added**: tests now validate scalar DU reflection, script seed inserts, generated table/view APIs, and rejection of payload-bearing scalar unions.
+
+## Update (2026-03-13, units of measure from schema.fsx)
+
+- **Unit-of-measure metadata extraction added**: `schema.fsx` parsing now records `[<Measure>]` declarations and measured numeric field syntax before evaluation erases units at the CLR level.
+- **Measured codegen support added**: `mig codegen` now re-emits measure declarations and preserves `int64<'u>` / `float<'u>` types in generated record fields and equality-query parameters when the source is `schema.fsx`.
+- **Measured reader reconstruction added**: generated query helpers now rebuild measured values with `LanguagePrimitives.Int64WithMeasure` / `FloatWithMeasure` when reading SQLite rows.
+- **Source-bound limitation documented**: this support is available for `generateCodeFromScript` / `mig codegen` from `schema.fsx`; `generateCodeFromTypes` still sees erased CLR types and cannot recover units.
+- **Coverage added**: tests now validate preserved measure metadata and measured generated APIs from `schema.fsx`.
+
 ## Update (2026-02-17, schema diffing)
 
 - **Schema diff module added**: `MigLib/DeclarativeMigrations/SchemaDiff.fs` now computes table-level schema diffs (`addedTables`, `removedTables`, `renamedTables`, `matchedTables`) on the shared `SqlFile` model.

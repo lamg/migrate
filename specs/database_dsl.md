@@ -9,11 +9,18 @@
 | F# type | SQLite type |
 |---------|-------------|
 | `int64` | `INTEGER NOT NULL` |
+| `int64<'u>` from `schema.fsx` | `INTEGER NOT NULL` |
 | `string` | `TEXT NOT NULL` |
 | `float` | `REAL NOT NULL` |
+| `float<'u>` from `schema.fsx` | `REAL NOT NULL` |
 | `byte[]` | `BLOB NOT NULL` |
+| nullary, non-generic DU | `TEXT NOT NULL` |
 
 All columns are `NOT NULL`. Optional data is represented using discriminated unions and extension tables (see [Optional information](#optional-information)).
+
+Scalar discriminated unions are persisted as the exact F# case name. For example, `InProgress` is stored as `TEXT` value `"InProgress"`.
+
+Units of measure are preserved only for `schema.fsx`-driven code generation, where the original source syntax is available. Reflection over already-compiled CLR types erases units of measure, so `generateCodeFromTypes` cannot recover them.
 
 ## Translation rules
 
@@ -125,6 +132,58 @@ translates to
 ```sql
 CREATE TABLE payment(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, amount REAL NOT NULL, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'utc')));
 ```
+
+### Enum-like scalar unions
+
+Nullary, non-generic discriminated unions can be used as scalar columns:
+
+```fsharp
+type Status =
+  | Pending
+  | Running
+  | Done
+  | Error
+
+[<AutoIncPK "id">]
+type Job =
+  { id: int64
+    status: Status
+    externalJobId: string }
+```
+
+translates to
+
+```sql
+CREATE TABLE job(id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT NOT NULL, external_job_id TEXT NOT NULL);
+```
+
+`mig codegen` re-emits the union definition and generates typed APIs using `Status` rather than `string`. Equality-based generated queries accept the DU type; `SelectLike` remains string-based.
+
+Payload-bearing unions and generic unions are not valid scalar columns.
+
+### Units of measure
+
+Numeric units of measure in `schema.fsx` are stored using their underlying SQLite type:
+
+```fsharp
+[<Measure>]
+type Byte
+
+[<AutoIncPK "id">]
+type File =
+  { id: int64
+    contentLength: int64<Byte>
+    progress: int64<Byte>
+    ratio: float<Byte> }
+```
+
+translates to
+
+```sql
+CREATE TABLE file(id INTEGER PRIMARY KEY AUTOINCREMENT, content_length INTEGER NOT NULL, progress INTEGER NOT NULL, ratio REAL NOT NULL);
+```
+
+`mig codegen` re-emits the `[<Measure>]` declaration and preserves the measured F# types in generated records and query signatures when the source is `schema.fsx`.
 
 ### Indexes
 
@@ -449,3 +508,8 @@ mig codegen [--dir|-d /path/to/project] [--module|-m Schema] [--output|-o Schema
 ```
 
 The CLI evaluates `schema.fsx`, generates formatted F# source for reflected tables/views/query helpers, and writes the output file into the same directory as `schema.fsx`. The output file must be a plain file name, not an absolute path or subdirectory path.
+
+Generated source preserves:
+
+- nullary, non-generic scalar DUs as typed F# fields and query parameters, while storing them as strings in SQLite
+- units of measure declared in `schema.fsx` for numeric fields and query parameters
