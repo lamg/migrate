@@ -125,7 +125,7 @@ mig offline
 ## Commands
 
 - `mig init [--dir|-d <path>]` - Create a schema-matched database from `schema.fsx` and apply seed inserts (no source DB required).
-- `mig codegen [--dir|-d <path>] [--module|-m <name>] [--output|-o <file>]` - Generate F# query helpers from `schema.fsx` into a file in the same directory as the schema.
+- `mig codegen [--dir|-d <path>] [--module|-m <name>] [--output|-o <file>]` - Generate F# query helpers from `schema.fsx` into a file in the same directory as the schema, and emit a sibling CPM-style `.fsproj`.
 - `mig offline [--dir|-d <path>]` - Create the fully migrated target DB in one step, then archive the old DB into `archive/`.
 - `mig migrate [--dir|-d <path>]` - Create the new DB from schema, copy data, and start recording on old DB.
 - `mig plan [--dir|-d <path>]` - Print dry-run inferred paths, schema diff summary, and replay prerequisites without mutating DBs.
