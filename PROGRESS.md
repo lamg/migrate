@@ -75,6 +75,15 @@ src/
 - **Copy engine reuse added**: bulk-copy execution now supports in-memory ID translation without requiring persisted `_id_mapping` tables.
 - **Coverage and docs added**: tests now validate direct and CLI offline migration behavior, and the command spec/README document the new workflow.
 
+## Update (2026-03-13, MigLib.Web and webResult CE)
+
+- **Web module added**: `MigLib.Web` now ships as part of `MigLib` and brings in the ASP.NET Core framework reference needed for `HttpContext`, cookies, and response helpers.
+- **Runtime bridge added**: `DbRuntime`, `DbRuntime.RunInTransaction`, and `IHasDbRuntime` now expose reusable transaction execution so web handlers can share MigLib transaction semantics without going through `dbTxn`.
+- **`webResult` CE added**: web handlers can now compose `TxnStep`, `WebOp`, typed app errors, explicit `WebError`, `Task<Result<_, _>>`, and plain `Task` values in one request-scoped CE.
+- **Deferred response plan added**: `Respond.*` queues status/header/body/json/cookie/custom effects during transaction execution and applies them only after a successful commit.
+- **Rollback/error semantics added**: app errors, database errors, and missing-`HttpContext` response usage all abort the operation, roll back the transaction, and skip queued response effects.
+- **Initial coverage and spec added**: tests now cover commit success, app-error rollback, and missing-`HttpContext` rollback, and `specs/web_result.md` documents the design contract.
+
 ## Update (2026-02-17, schema diffing)
 
 - **Schema diff module added**: `MigLib/DeclarativeMigrations/SchemaDiff.fs` now computes table-level schema diffs (`addedTables`, `removedTables`, `renamedTables`, `matchedTables`) on the shared `SqlFile` model.

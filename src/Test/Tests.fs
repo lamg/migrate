@@ -8,6 +8,7 @@ open System.Text
 open System.Text.Json.Nodes
 open System.Threading.Tasks
 open MigLib.Db
+open MigLib.Web
 open Mig.CodeGen.CodeGen
 open Mig.DeclarativeMigrations.Types
 open Mig.DeclarativeMigrations.DataCopy
@@ -16,6 +17,7 @@ open Mig.DeclarativeMigrations.SchemaDiff
 open Mig.HotMigration
 open Mig.SchemaReflection
 open Mig.SchemaScript
+open Microsoft.AspNetCore.Http
 open Microsoft.Data.Sqlite
 open Xunit
 
@@ -140,6 +142,31 @@ let private gitHeadCommitOrFail (repositoryDirectory: string) =
         failwith "git rev-parse HEAD returned an empty commit hash."
       else
         commit
+
+type private TestWebEnv =
+  { dbRuntime: DbRuntime
+    fixedNow: DateTimeOffset }
+
+  interface IHasDbRuntime with
+    member this.DbRuntime = this.dbRuntime
+
+  interface IClock with
+    member this.UtcNow() = this.fixedNow
+
+    member this.UtcNowRfc3339() =
+      this.fixedNow.ToUniversalTime().ToString "O"
+
+    member this.UtcNowPlusDaysRfc3339(days: float) =
+      this.fixedNow.AddDays days |> fun value -> value.ToUniversalTime().ToString "O"
+
+let private createTestWebEnv (dbPath: string) =
+  { dbRuntime = dbRuntime dbPath
+    fixedNow = DateTimeOffset(2025, 1, 2, 3, 4, 5, TimeSpan.Zero) }
+
+let private createTestHttpContext () =
+  let ctx = DefaultHttpContext()
+  ctx.Response.Body <- new MemoryStream()
+  ctx
 
 let private assertCliHelpOutput (args: string list) (expectedUsage: string) (expectedFragments: string list) =
   let exitCode, stdOut, stdErr = runMigCli args
@@ -331,6 +358,33 @@ let ``dbTxn prefers unique ready database when resolving hash-template path`` ()
   match result with
   | Error ex -> failwith $"Expected dbTxn to select ready database, got error: {ex.Message}"
   | Ok count -> Assert.Equal(3L, count)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``dbRuntime resolves single hash-template match at execution time`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_dbruntime_resolve_single_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "marketdesk-1111222233334444.sqlite")
+  let templatePath = Path.Combine(tempDir, "marketdesk-<HASH>.sqlite")
+  createStudentDatabase dbPath [ "Alice"; "Bob" ] None
+  let runtime = dbRuntime templatePath
+
+  let result =
+    runtime.RunInTransaction id (fun tx ->
+      task {
+        use cmd = new SqliteCommand("SELECT COUNT(*) FROM student", tx.Connection, tx)
+        let! countObj = cmd.ExecuteScalarAsync()
+        return Ok(Convert.ToInt64 countObj)
+      })
+    |> fun t -> t.Result
+
+  match result with
+  | Error ex -> failwith $"Expected dbRuntime to resolve hash-template path, got error: {ex.Message}"
+  | Ok count -> Assert.Equal(2L, count)
 
   Directory.Delete(tempDir, true)
 
@@ -1050,6 +1104,233 @@ let ``dbTxn short-circuits generic Task Result errors by mapping to sqlite excep
     Assert.Contains("external-error", ex.Message)
     Assert.False continuationRan
 
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``dbRuntime rolls back transactions on generic errors without remapping them`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_dbruntime_generic_error_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "dbruntime-generic-error.db")
+
+  use setupConn = openSqliteConnection dbPath
+
+  use createCmd =
+    new SqliteCommand("CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);", setupConn)
+
+  createCmd.ExecuteNonQuery() |> ignore
+  setupConn.Close()
+  let runtime = dbRuntime dbPath
+
+  let result: Result<unit, string> =
+    runtime.RunInTransaction (fun ex -> ex.Message) (fun tx ->
+      task {
+        use cmd =
+          new SqliteCommand("INSERT INTO student(name) VALUES ('Alice')", tx.Connection, tx)
+
+        let! _ = cmd.ExecuteNonQueryAsync()
+        return Error "app-error"
+      })
+    |> fun t -> t.Result
+
+  match result with
+  | Ok() -> failwith "Expected generic error from DbRuntime.RunInTransaction"
+  | Error error -> Assert.Equal("app-error", error)
+
+  use verifyConn = openSqliteConnection dbPath
+  use countCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
+  let count = countCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(0L, count)
+
+  verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``runSimple commits transaction and applies queued response effects`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_web_run_simple_success_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "web-success.db")
+
+  use setupConn = openSqliteConnection dbPath
+
+  use createCmd =
+    new SqliteCommand(
+      "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL);",
+      setupConn
+    )
+
+  createCmd.ExecuteNonQuery() |> ignore
+  setupConn.Close()
+
+  let env = createTestWebEnv dbPath
+  let httpContext = createTestHttpContext ()
+  let expectedNow = ((env :> IClock).UtcNowRfc3339())
+
+  let operation =
+    webResult {
+      let! now = Clock.utcNowRfc3339
+
+      let! _ =
+        fun (tx: SqliteTransaction) ->
+          task {
+            use cmd =
+              new SqliteCommand("INSERT INTO student(created_at) VALUES (@created_at)", tx.Connection, tx)
+
+            cmd.Parameters.AddWithValue("@created_at", now) |> ignore
+            let! _ = cmd.ExecuteNonQueryAsync()
+            return Ok()
+          }
+
+      do! Respond.statusCode 201
+      do! Respond.text now
+      return now
+    }
+
+  let result = runSimple env (Some httpContext) operation |> fun t -> t.Result
+
+  match result with
+  | Error error -> failwith $"Expected successful web run, got error: {error}"
+  | Ok now -> Assert.Equal(expectedNow, now)
+
+  Assert.Equal(201, httpContext.Response.StatusCode)
+  Assert.Equal("text/plain; charset=utf-8", httpContext.Response.ContentType)
+
+  httpContext.Response.Body.Position <- 0L
+
+  use reader =
+    new StreamReader(httpContext.Response.Body, Encoding.UTF8, false, 1024, true)
+
+  let responseBody = reader.ReadToEnd()
+  Assert.Equal(expectedNow, responseBody)
+
+  use verifyConn = openSqliteConnection dbPath
+  use countCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
+  let count = countCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(1L, count)
+
+  use valueCmd =
+    new SqliteCommand("SELECT created_at FROM student LIMIT 1", verifyConn)
+
+  let storedCreatedAt = valueCmd.ExecuteScalar() |> string
+  Assert.Equal(expectedNow, storedCreatedAt)
+
+  verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``runSimple rolls back transaction and skips response effects on app error`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_web_run_simple_error_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "web-error.db")
+
+  use setupConn = openSqliteConnection dbPath
+
+  use createCmd =
+    new SqliteCommand("CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);", setupConn)
+
+  createCmd.ExecuteNonQuery() |> ignore
+  setupConn.Close()
+
+  let env = createTestWebEnv dbPath
+  let httpContext = createTestHttpContext ()
+
+  let operation =
+    webResult {
+      let! _ =
+        fun (tx: SqliteTransaction) ->
+          task {
+            use cmd =
+              new SqliteCommand("INSERT INTO student(name) VALUES ('Alice')", tx.Connection, tx)
+
+            let! _ = cmd.ExecuteNonQueryAsync()
+            return Ok()
+          }
+
+      do! Respond.statusCode 201
+      do! Respond.text "should-not-be-written"
+      return! Web.fail "boom"
+    }
+
+  let result = runSimple env (Some httpContext) operation |> fun t -> t.Result
+
+  match result with
+  | Ok() -> failwith "Expected app error from web operation"
+  | Error(AppError error) -> Assert.Equal("boom", error)
+  | Error other -> failwith $"Expected app error, got: {other}"
+
+  Assert.Equal(200, httpContext.Response.StatusCode)
+  httpContext.Response.Body.Position <- 0L
+
+  use reader =
+    new StreamReader(httpContext.Response.Body, Encoding.UTF8, false, 1024, true)
+
+  let responseBody = reader.ReadToEnd()
+  Assert.Equal("", responseBody)
+
+  use verifyConn = openSqliteConnection dbPath
+  use countCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
+  let count = countCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(0L, count)
+
+  verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``runSimple returns MissingHttpContext and rolls back queued response operations`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_web_run_simple_missing_http_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "web-missing-http.db")
+
+  use setupConn = openSqliteConnection dbPath
+
+  use createCmd =
+    new SqliteCommand("CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);", setupConn)
+
+  createCmd.ExecuteNonQuery() |> ignore
+  setupConn.Close()
+
+  let env = createTestWebEnv dbPath
+
+  let operation =
+    webResult {
+      let! _ =
+        fun (tx: SqliteTransaction) ->
+          task {
+            use cmd =
+              new SqliteCommand("INSERT INTO student(name) VALUES ('Alice')", tx.Connection, tx)
+
+            let! _ = cmd.ExecuteNonQueryAsync()
+            return Ok()
+          }
+
+      do! Respond.text "missing-http"
+      return ()
+    }
+
+  let result = runSimple env None operation |> fun t -> t.Result
+
+  match result with
+  | Ok() -> failwith "Expected MissingHttpContext error"
+  | Error MissingHttpContext -> ()
+  | Error other -> failwith $"Expected MissingHttpContext, got: {other}"
+
+  use verifyConn = openSqliteConnection dbPath
+  use countCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
+  let count = countCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(0L, count)
+
+  verifyConn.Close()
   Directory.Delete(tempDir, true)
 
 [<Fact>]

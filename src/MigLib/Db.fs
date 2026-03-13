@@ -451,51 +451,70 @@ module private TxnStep =
         | None -> return Ok()
       }
 
+let internal runTransactionInternal
+  (dbPath: string)
+  (mapDbError: SqliteException -> 'e)
+  (body: SqliteTransaction -> Task<Result<'a, 'e>>)
+  : Task<Result<'a, 'e>> =
+  task {
+    match tryResolveDatabasePath dbPath with
+    | Error message -> return Error(mapDbError (SqliteException(message, 0)))
+    | Ok resolvedDbPath ->
+      use connection = openSqliteConnection resolvedDbPath
+      use transaction = connection.BeginTransaction()
+      let! mode = detectMigrationMode transaction
+
+      let context =
+        { tx = transaction
+          mode = mode
+          writes = ResizeArray() }
+
+      let previousContext = txnContext.Value
+      txnContext.Value <- Some context
+
+      try
+        try
+          let! result = body transaction
+
+          match result with
+          | Ok value ->
+            let! flushResult = flushRecordedWrites context
+
+            match flushResult with
+            | Ok() ->
+              transaction.Commit()
+              return Ok value
+            | Error ex ->
+              transaction.Rollback()
+              return Error(mapDbError ex)
+          | Error _ ->
+            transaction.Rollback()
+            return result
+        with :? SqliteException as ex ->
+          transaction.Rollback()
+          return Error(mapDbError ex)
+      finally
+        txnContext.Value <- previousContext
+  }
+
+type DbRuntime(dbPath: string) =
+  member _.DbPath = dbPath
+
+  member _.RunInTransaction
+    (mapDbError: SqliteException -> 'e)
+    (body: SqliteTransaction -> Task<Result<'a, 'e>>)
+    : Task<Result<'a, 'e>> =
+    runTransactionInternal dbPath mapDbError body
+
+type IHasDbRuntime =
+  abstract DbRuntime: DbRuntime
+
 // DbTxnBuilder computation expression
 type DbTxnBuilder(dbPath: string) =
   member _.DbPath = dbPath
+  member _.DbRuntime = DbRuntime dbPath
 
-  member _.Run(f: TxnStep<'a>) : Task<Result<'a, SqliteException>> =
-    task {
-      match tryResolveDatabasePath dbPath with
-      | Error message -> return Error(SqliteException(message, 0))
-      | Ok resolvedDbPath ->
-        use connection = openSqliteConnection resolvedDbPath
-        use transaction = connection.BeginTransaction()
-        let! mode = detectMigrationMode transaction
-
-        let context =
-          { tx = transaction
-            mode = mode
-            writes = ResizeArray() }
-
-        let previousContext = txnContext.Value
-        txnContext.Value <- Some context
-
-        try
-          try
-            let! result = f transaction
-
-            match result with
-            | Ok value ->
-              let! flushResult = flushRecordedWrites context
-
-              match flushResult with
-              | Ok() ->
-                transaction.Commit()
-                return Ok value
-              | Error ex ->
-                transaction.Rollback()
-                return Error ex
-            | Error _ ->
-              transaction.Rollback()
-              return result
-          with :? SqliteException as ex ->
-            transaction.Rollback()
-            return Error ex
-        finally
-          txnContext.Value <- previousContext
-    }
+  member _.Run(f: TxnStep<'a>) : Task<Result<'a, SqliteException>> = runTransactionInternal dbPath id f
 
   member _.Zero() : TxnStep<unit> = TxnStep.zero ()
 
@@ -537,4 +556,5 @@ type TxnBuilder() =
   member _.For(items: 'a seq, body: 'a -> TxnStep<unit>) : TxnStep<unit> = TxnStep.forEach items body
 
 let dbTxn dbPath = DbTxnBuilder dbPath
+let dbRuntime dbPath = DbRuntime dbPath
 let txn = TxnBuilder()
