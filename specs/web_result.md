@@ -57,6 +57,7 @@ Important details:
 | Source | Result from `run` | Database state | Response effects |
 |---|---|---|---|
 | `TxnStep` error or `SqliteException` during DB work | `Error (DbError ex)` | Rolled back | Discarded |
+| `TxnStep<Result<'a, 'appError>>` inner error | `Error (AppError appError)` | Rolled back | Discarded |
 | `Result<'a, 'appError>` / `Task<Result<'a, 'appError>>` error | `Error (AppError appError)` | Rolled back | Discarded |
 | Explicit `WebError` (`Web.failWeb`, `Result<_, WebError<_>>`, etc.) | That `WebError` | Rolled back | Discarded |
 | `Web.httpContext` or any `Respond.*` helper with no context | `Error MissingHttpContext` | Rolled back | Discarded |
@@ -103,7 +104,11 @@ Plain `Task<'a>` and `Task` are bind-only. They are not valid `return!` targets.
 - `httpContext` returns `HttpContext` or `MissingHttpContext`.
 - `fail` converts an application error into `AppError`.
 - `failWeb` returns any explicit `WebError`.
+- `ignore` discards a successful `WebOp` value while preserving errors and effects.
 - `requireSome` converts `option` values into either `Ok value` or `AppError`.
+- `ofAppResult` lifts `Result<'a, 'appError>` into `WebOp`.
+- `ofAppTaskResult` lifts `Task<Result<'a, 'appError>>` into `WebOp`.
+- `ofTxnAppResult` lifts `TxnStep<Result<'a, 'appError>>` into `WebOp`.
 - `ofWebResult` lifts `Result<'a, WebError<'appError>>` into `WebOp`.
 
 ### `Clock`
@@ -172,7 +177,9 @@ Execution:
 - Use `dbTxn` when the caller only needs a transaction boundary around database work.
 - Use `txn` to build reusable transaction-scoped helpers.
 - Use `webResult` when the caller also needs typed application errors, environment access, optional `HttpContext`, and deferred response composition.
-- Any `TxnStep<'a>` can be bound directly inside `webResult`, so generated query helpers and `txn` helpers compose without adapters.
+- Any `TxnStep<'a>` can be bound directly inside `webResult`.
+- Use `Web.ofTxnAppResult` when a transaction-scoped helper returns `TxnStep<Result<'a, 'appError>>`.
+- Generated query helpers, `txn` helpers, and transaction-scoped validation flows therefore compose without ad-hoc adapters.
 
 ## Example
 

@@ -1283,6 +1283,129 @@ let ``runSimple rolls back transaction and skips response effects on app error``
   verifyConn.Close()
   Directory.Delete(tempDir, true)
 
+
+[<Fact>]
+let ``webResult binds TxnStep<Result<_, _>> as app errors`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_web_txn_app_result_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "web-txn-app-result.db")
+
+  use setupConn = openSqliteConnection dbPath
+
+  use createCmd =
+    new SqliteCommand(
+      "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);",
+      setupConn
+    )
+
+  createCmd.ExecuteNonQuery() |> ignore
+  setupConn.Close()
+
+  let env = createTestWebEnv dbPath
+  let httpContext = createTestHttpContext ()
+
+  let insertStudent (name: string) : TxnStep<Result<int64, string>> =
+    txn {
+      let! existingId =
+        fun (tx: SqliteTransaction) ->
+          task {
+            use cmd =
+              new SqliteCommand("SELECT id FROM student WHERE name = @name LIMIT 1", tx.Connection, tx)
+
+            cmd.Parameters.AddWithValue("@name", name) |> ignore
+            use! reader = cmd.ExecuteReaderAsync()
+            let! hasRow = reader.ReadAsync()
+
+            if hasRow then
+              return Ok(Some(reader.GetInt64 0))
+            else
+              return Ok None
+          }
+
+      match existingId with
+      | Some _ -> return Error "duplicate-student"
+      | None ->
+        let! id =
+          fun (tx: SqliteTransaction) ->
+            task {
+              use cmd =
+                new SqliteCommand("INSERT INTO student(name) VALUES (@name)", tx.Connection, tx)
+
+              cmd.Parameters.AddWithValue("@name", name) |> ignore
+              let! _ = cmd.ExecuteNonQueryAsync()
+              use idCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+              let! idObj = idCmd.ExecuteScalarAsync()
+              return Ok(idObj |> unbox<int64>)
+            }
+
+        return Ok id
+    }
+
+  let successOperation: WebOp<TestWebEnv, string, unit, int64> =
+    webResult {
+      let! id = (insertStudent "Alice" |> Web.ofTxnAppResult: WebOp<TestWebEnv, string, unit, int64>)
+
+      do! (Respond.statusCode 201: WebOp<TestWebEnv, string, unit, unit>)
+      do! (Respond.text $"{id}": WebOp<TestWebEnv, string, unit, unit>)
+      return id
+    }
+
+  let successResult =
+    runSimple env (Some httpContext) successOperation |> fun t -> t.Result
+
+  match successResult with
+  | Error error -> failwith $"Expected success from TxnStep<Result<_, _>> bind, got: {error}"
+  | Ok id -> Assert.Equal(1L, id)
+
+  Assert.Equal(201, httpContext.Response.StatusCode)
+  Assert.Equal("text/plain; charset=utf-8", httpContext.Response.ContentType)
+  httpContext.Response.Body.Position <- 0L
+
+  use reader =
+    new StreamReader(httpContext.Response.Body, Encoding.UTF8, false, 1024, true)
+
+  let responseBody = reader.ReadToEnd()
+  Assert.Equal("1", responseBody)
+
+  let duplicateContext = createTestHttpContext ()
+
+  let duplicateOperation: WebOp<TestWebEnv, string, unit, unit> =
+    webResult {
+      let! _ = (insertStudent "Alice" |> Web.ofTxnAppResult: WebOp<TestWebEnv, string, unit, int64>)
+
+      do! (Respond.statusCode 201: WebOp<TestWebEnv, string, unit, unit>)
+      do! (Respond.text "should-not-be-written": WebOp<TestWebEnv, string, unit, unit>)
+      return ()
+    }
+
+  let duplicateResult =
+    runSimple env (Some duplicateContext) duplicateOperation |> fun t -> t.Result
+
+  match duplicateResult with
+  | Ok() -> failwith "Expected duplicate app error from TxnStep<Result<_, _>> bind"
+  | Error(AppError error) -> Assert.Equal("duplicate-student", error)
+  | Error other -> failwith $"Expected app error, got: {other}"
+
+  Assert.Equal(200, duplicateContext.Response.StatusCode)
+  duplicateContext.Response.Body.Position <- 0L
+
+  use duplicateReader =
+    new StreamReader(duplicateContext.Response.Body, Encoding.UTF8, false, 1024, true)
+
+  let duplicateResponseBody = duplicateReader.ReadToEnd()
+  Assert.Equal("", duplicateResponseBody)
+
+  use verifyConn = openSqliteConnection dbPath
+  use countCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
+  let count = countCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(1L, count)
+
+  verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
 [<Fact>]
 let ``runSimple returns MissingHttpContext and rolls back queued response operations`` () =
   let tempDir =

@@ -111,6 +111,16 @@ module private WebOp =
         return result |> Result.mapError AppError
       }
 
+  let ofTxnAppResult (step: TxnStep<Result<'a, 'appError>>) : WebOp<'env, 'appError, 'custom, 'a> =
+    fun ctx ->
+      task {
+        let! result = step ctx.tx
+
+        match result with
+        | Error ex -> return Error(DbError ex)
+        | Ok appResult -> return appResult |> Result.mapError AppError
+      }
+
   let ofWebResult (result: Result<'a, WebError<'appError>>) : WebOp<'env, 'appError, 'custom, 'a> =
     fun _ -> Task.FromResult result
 
@@ -348,10 +358,21 @@ module Web =
 
   let failWeb (error: WebError<'appError>) : WebOp<'env, 'appError, 'custom, 'a> = fun _ -> Task.FromResult(Error error)
 
+  let ignore (operation: WebOp<'env, 'appError, 'custom, 'a>) : WebOp<'env, 'appError, 'custom, unit> =
+    WebOp.bind operation (fun _ -> WebOp.result ())
+
   let requireSome (error: 'appError) (value: 'a option) : WebOp<'env, 'appError, 'custom, 'a> =
     match value with
     | Some resolved -> fun _ -> Task.FromResult(Ok resolved)
     | None -> fail error
+
+  let ofAppResult (result: Result<'a, 'appError>) : WebOp<'env, 'appError, 'custom, 'a> = WebOp.ofAppResult result
+
+  let ofAppTaskResult (resultTask: Task<Result<'a, 'appError>>) : WebOp<'env, 'appError, 'custom, 'a> =
+    WebOp.ofAppTaskResult resultTask
+
+  let ofTxnAppResult (step: TxnStep<Result<'a, 'appError>>) : WebOp<'env, 'appError, 'custom, 'a> =
+    WebOp.ofTxnAppResult step
 
   let ofWebResult (result: Result<'a, WebError<'appError>>) : WebOp<'env, 'appError, 'custom, 'a> =
     WebOp.ofWebResult result
