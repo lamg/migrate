@@ -90,11 +90,14 @@ let private getAutoIncrementPrimaryKeyColumnName (table: CreateTable) : string o
 let private rowDataPairExprForItem (itemExpr: string) (column: ColumnDef) : string =
   let fieldName = capitalize column.name
   let isNullable = TypeGenerator.isColumnNullable column
+  let itemFieldExpr = $"{itemExpr}.{fieldName}"
 
   if isNullable then
-    $"(\"{column.name}\", match {itemExpr}.{fieldName} with Some v -> box v | None -> null)"
+    let storedValueExpr = TypeGenerator.toDbValueExpr column "v"
+    $"(\"{column.name}\", match {itemFieldExpr} with Some v -> box ({storedValueExpr}) | None -> null)"
   else
-    $"(\"{column.name}\", box {itemExpr}.{fieldName})"
+    let storedValueExpr = TypeGenerator.toDbValueExpr column itemFieldExpr
+    $"(\"{column.name}\", box ({storedValueExpr}))"
 
 let private rowDataListExprForItem (itemExpr: string) (columns: ColumnDef list) : string =
   columns
@@ -104,7 +107,7 @@ let private rowDataListExprForItem (itemExpr: string) (columns: ColumnDef list) 
 
 let private rowDataListExprForParams (columns: ColumnDef list) : string =
   columns
-  |> List.map (fun column -> $"(\"{column.name}\", box {column.name})")
+  |> List.map (fun column -> $"(\"{column.name}\", box ({TypeGenerator.toDbValueExpr column column.name}))")
   |> String.concat "; "
   |> fun pairs -> $"[{pairs}]"
 
@@ -142,12 +145,14 @@ let generateInsert (table: CreateTable) : string =
     |> List.map (fun col ->
       let fieldName = capitalize col.name
       let isNullable = TypeGenerator.isColumnNullable col
+      let itemFieldExpr = $"item.{fieldName}"
 
       if isNullable then
-        OtherExpr
-          $"cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        let dbValueExpr = TypeGenerator.toNullableDbValueExpr col itemFieldExpr
+        OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", {dbValueExpr}) |> ignore"
       else
-        OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
+        let dbValueExpr = TypeGenerator.toDbValueExpr col itemFieldExpr
+        OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", {dbValueExpr}) |> ignore")
 
   let rowDataPairs =
     (insertCols |> List.map (rowDataPairExprForItem "item"))
@@ -209,12 +214,14 @@ let generateInsertOrIgnore (table: CreateTable) : string =
     |> List.map (fun col ->
       let fieldName = capitalize col.name
       let isNullable = TypeGenerator.isColumnNullable col
+      let itemFieldExpr = $"item.{fieldName}"
 
       if isNullable then
-        OtherExpr
-          $"cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        let dbValueExpr = TypeGenerator.toNullableDbValueExpr col itemFieldExpr
+        OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", {dbValueExpr}) |> ignore"
       else
-        OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
+        let dbValueExpr = TypeGenerator.toDbValueExpr col itemFieldExpr
+        OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", {dbValueExpr}) |> ignore")
 
   let rowDataPairs =
     (insertCols |> List.map (rowDataPairExprForItem "item"))
@@ -262,7 +269,7 @@ let generateGet (table: CreateTable) : string option =
     let paramList =
       pks
       |> List.map (fun pk ->
-        let pkType = TypeGenerator.mapSqlType pk.columnType false
+        let pkType = TypeGenerator.mapColumnType pk
         $"({pk.name}: {pkType})")
       |> String.concat " "
 
@@ -271,19 +278,14 @@ let generateGet (table: CreateTable) : string option =
       table.columns
       |> List.mapi (fun i col ->
         let fieldName = capitalize col.name
-        let isNullable = TypeGenerator.isColumnNullable col
-        let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
-
-        if isNullable then
-          $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
-        else
-          $"{fieldName} = reader.Get{method} {i}")
+        $"{fieldName} = {TypeGenerator.readColumnExpr col i}")
       |> String.concat "; "
 
     // Build the async method body using AST with task CE
     let asyncParamBindingExprs =
       pks
-      |> List.map (fun pk -> OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+      |> List.map (fun pk ->
+        OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {TypeGenerator.toDbValueExpr pk pk.name}) |> ignore")
 
     let asyncBodyExprs =
       [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)" ]
@@ -309,13 +311,7 @@ let generateGetAll (table: CreateTable) : string =
     table.columns
     |> List.mapi (fun i col ->
       let fieldName = capitalize col.name
-      let isNullable = TypeGenerator.isColumnNullable col
-      let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
-
-      if isNullable then
-        $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
-      else
-        $"{fieldName} = reader.Get{method} {i}")
+      $"{fieldName} = {TypeGenerator.readColumnExpr col i}")
     |> String.concat "; "
 
   // Build the async method body using AST with task CE
@@ -347,13 +343,7 @@ let generateGetOne (table: CreateTable) : string =
     table.columns
     |> List.mapi (fun i col ->
       let fieldName = capitalize col.name
-      let isNullable = TypeGenerator.isColumnNullable col
-      let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
-
-      if isNullable then
-        $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
-      else
-        $"{fieldName} = reader.Get{method} {i}")
+      $"{fieldName} = {TypeGenerator.readColumnExpr col i}")
     |> String.concat "; "
 
   // Build the async method body using AST with task CE
@@ -399,12 +389,14 @@ let generateUpdate (table: CreateTable) : string option =
       |> List.map (fun col ->
         let fieldName = capitalize col.name
         let isNullable = TypeGenerator.isColumnNullable col
+        let itemFieldExpr = $"item.{fieldName}"
 
         if isNullable then
-          OtherExpr
-            $"cmd.Parameters.AddWithValue(\"@{col.name}\", match item.{fieldName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+          let dbValueExpr = TypeGenerator.toNullableDbValueExpr col itemFieldExpr
+          OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", {dbValueExpr}) |> ignore"
         else
-          OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", item.{fieldName}) |> ignore")
+          let dbValueExpr = TypeGenerator.toDbValueExpr col itemFieldExpr
+          OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", {dbValueExpr}) |> ignore")
 
     let asyncBodyExprs =
       [ OtherExpr $"use cmd = new SqliteCommand(\"{updateSql}\", tx.Connection, tx)" ]
@@ -439,7 +431,7 @@ let generateDelete (table: CreateTable) : string option =
     let paramList =
       pks
       |> List.map (fun pk ->
-        let pkType = TypeGenerator.mapSqlType pk.columnType false
+        let pkType = TypeGenerator.mapColumnType pk
         $"({pk.name}: {pkType})")
       |> String.concat " "
 
@@ -447,7 +439,8 @@ let generateDelete (table: CreateTable) : string option =
     let asyncBodyExprs =
       [ OtherExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)" ]
       @ (pks
-         |> List.map (fun pk -> OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore"))
+         |> List.map (fun pk ->
+           OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {TypeGenerator.toDbValueExpr pk pk.name}) |> ignore"))
       @ [ OtherExpr "MigrationLog.ensureWriteAllowed tx"
           OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"
           OtherExpr $"MigrationLog.recordDelete tx \"{table.name}\" {rowDataExpr}"
@@ -552,8 +545,7 @@ let generateQueryBy (table: CreateTable) (annotation: QueryByAnnotation) : strin
     annotation.columns
     |> List.map (fun col ->
       let columnDef = findColumn table col |> Option.get
-      let isNullable = TypeGenerator.isColumnNullable columnDef
-      let fsharpType = TypeGenerator.mapSqlType columnDef.columnType isNullable
+      let fsharpType = TypeGenerator.mapColumnType columnDef
       $"{col}: {fsharpType}")
     |> String.concat ", "
 
@@ -571,13 +563,7 @@ let generateQueryBy (table: CreateTable) (annotation: QueryByAnnotation) : strin
     table.columns
     |> List.mapi (fun i col ->
       let fieldName = capitalize col.name
-      let isNullable = TypeGenerator.isColumnNullable col
-      let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
-
-      if isNullable then
-        $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
-      else
-        $"{fieldName} = reader.Get{method} {i}")
+      $"{fieldName} = {TypeGenerator.readColumnExpr col i}")
     |> String.concat "; "
 
   // 7. Generate full method with tupled parameters
@@ -590,9 +576,9 @@ let generateQueryBy (table: CreateTable) (annotation: QueryByAnnotation) : strin
 
       if isNullable then
         OtherExpr
-          $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+          $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toNullableDbValueExpr columnDef col}) |> ignore"
       else
-        OtherExpr $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+        OtherExpr $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toDbValueExpr columnDef col}) |> ignore")
 
   let whileLoopBody =
     $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
@@ -629,13 +615,7 @@ let generateQueryLike (table: CreateTable) (annotation: QueryLikeAnnotation) : s
     table.columns
     |> List.mapi (fun i c ->
       let fieldName = capitalize c.name
-      let isNullableField = TypeGenerator.isColumnNullable c
-      let method = TypeGenerator.mapSqlType c.columnType false |> readerMethod
-
-      if isNullableField then
-        $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
-      else
-        $"{fieldName} = reader.Get{method} {i}")
+      $"{fieldName} = {TypeGenerator.readColumnExpr c i}")
     |> String.concat "; "
 
   let asyncParamBindingExpr =
@@ -709,13 +689,7 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
     table.columns
     |> List.mapi (fun i col ->
       let fieldName = capitalize col.name
-      let isNullable = TypeGenerator.isColumnNullable col
-      let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
-
-      if isNullable then
-        $"{fieldName} = if reader.IsDBNull {i} then None else Some(reader.Get{method} {i})"
-      else
-        $"{fieldName} = reader.Get{method} {i}")
+      $"{fieldName} = {TypeGenerator.readColumnExpr col i}")
     |> String.concat "; "
 
   // Keep async version as string template for now (task CE is complex)
@@ -733,9 +707,9 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
       let isNullable = TypeGenerator.isColumnNullable columnDef
 
       if isNullable then
-        $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toNullableDbValueExpr columnDef col}) |> ignore"
       else
-        $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+        $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toDbValueExpr columnDef col}) |> ignore")
     |> String.concat $"\n{lineIndent}"
 
   let asyncParamBindings = generateAsyncParamBindings "cmd" "        "
@@ -873,9 +847,7 @@ let generateViewGetAll (viewName: string) (columns: ViewColumn list) : string =
     columns
     |> List.mapi (fun i col ->
       let fieldName = capitalize col.name
-      let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
-
-      $"{fieldName} = reader.Get{method} {i}")
+      $"{fieldName} = {TypeGenerator.readViewColumnExpr col i}")
     |> String.concat "; "
 
   // Build the async method body using AST with task CE
@@ -906,8 +878,7 @@ let generateViewGetOne (viewName: string) (columns: ViewColumn list) : string =
     columns
     |> List.mapi (fun i col ->
       let fieldName = capitalize col.name
-      let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
-      $"{fieldName} = reader.Get{method} {i}")
+      $"{fieldName} = {TypeGenerator.readViewColumnExpr col i}")
     |> String.concat "; "
 
   // Build the async method body using AST with task CE
@@ -987,7 +958,7 @@ let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotatio
     annotation.columns
     |> List.map (fun col ->
       let columnDef = findViewColumn columns col |> Option.get
-      let fsharpType = TypeGenerator.mapSqlType columnDef.columnType false
+      let fsharpType = TypeGenerator.mapViewColumnType columnDef
       $"{col}: {fsharpType}")
     |> String.concat ", "
 
@@ -1005,15 +976,16 @@ let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotatio
     columns
     |> List.mapi (fun i col ->
       let fieldName = capitalize col.name
-      let method = TypeGenerator.mapSqlType col.columnType false |> readerMethod
-      $"{fieldName} = reader.Get{method} {i}")
+      $"{fieldName} = {TypeGenerator.readViewColumnExpr col i}")
     |> String.concat "; "
 
   // 7. Generate full method with tupled parameters
   // Build the async method body using AST with task CE
   let asyncParamBindingExprs =
     annotation.columns
-    |> List.map (fun col -> OtherExpr $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+    |> List.map (fun col ->
+      let columnDef = findViewColumn columns col |> Option.get
+      OtherExpr $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toViewDbValueExpr columnDef col}) |> ignore")
 
   let whileLoopBody =
     $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
@@ -1048,8 +1020,7 @@ let generateViewQueryLike (viewName: string) (columns: ViewColumn list) (annotat
     columns
     |> List.mapi (fun i c ->
       let fieldName = capitalize c.name
-      let method = TypeGenerator.mapSqlType c.columnType false |> readerMethod
-      $"{fieldName} = reader.Get{method} {i}")
+      $"{fieldName} = {TypeGenerator.readViewColumnExpr c i}")
     |> String.concat "; "
 
   let asyncParamBindingExpr =

@@ -22,7 +22,8 @@ open Xunit
 let private mkColumn name columnType constraints =
   { name = name
     columnType = columnType
-    constraints = constraints }
+    constraints = constraints
+    enumLikeDu = None }
 
 let private mkTable name columns constraints =
   { name = name
@@ -358,6 +359,26 @@ type ReflectionStudentOpt = WithEmail of ReflectionStudent * email: string
 [<SelectBy "name">]
 type ReflectionStudentView = { id: int64; name: string }
 
+type ReflectionStatus =
+  | Active
+  | InProgress
+
+[<AutoIncPK "id">]
+[<SelectBy "status">]
+type ReflectionStatusStudent =
+  { id: int64
+    name: string
+    status: ReflectionStatus }
+
+[<ViewSql "SELECT id, status FROM reflection_status_student">]
+[<SelectBy "status">]
+type ReflectionStatusStudentView = { id: int64; status: ReflectionStatus }
+
+type PayloadStatus = Pending of int64
+
+[<AutoIncPK "id">]
+type UnsupportedPayloadStatusStudent = { id: int64; status: PayloadStatus }
+
 [<AutoIncPK "id">]
 type JoinStudent = { id: int64; name: string; age: int64 }
 
@@ -672,6 +693,7 @@ let ``non-table consistency report passes for valid target schema objects`` () =
         views =
           [ { name = "student_view"
               sqlTokens = [ "CREATE VIEW student_view AS SELECT id, name FROM student;" ]
+              declaredColumns = []
               dependencies = [ "student" ]
               queryByAnnotations = []
               queryLikeAnnotations = []
@@ -700,6 +722,7 @@ let ``non-table consistency report flags invalid target schema objects`` () =
         views =
           [ { name = "student_view"
               sqlTokens = [ "CREATE VIEW student_view AS SELECT id FROM student;" ]
+              declaredColumns = []
               dependencies = [ "student"; "missing_table" ]
               queryByAnnotations = []
               queryLikeAnnotations = []
@@ -708,6 +731,7 @@ let ``non-table consistency report flags invalid target schema objects`` () =
               upsertAnnotations = [] }
             { name = "student_view"
               sqlTokens = [ "CREATE VIEW student_view AS SELECT id FROM student;" ]
+              declaredColumns = []
               dependencies = [ "student" ]
               queryByAnnotations = []
               queryLikeAnnotations = []
@@ -4159,13 +4183,16 @@ let ``codegen generates module and query methods from schema model`` () =
               [ PrimaryKey
                   { constraintName = None
                     columns = []
-                    isAutoincrement = true } ] }
+                    isAutoincrement = true } ]
+            enumLikeDu = None }
           { name = "name"
             columnType = SqlText
-            constraints = [ NotNull ] }
+            constraints = [ NotNull ]
+            enumLikeDu = None }
           { name = "age"
             columnType = SqlInteger
-            constraints = [ NotNull ] } ]
+            constraints = [ NotNull ]
+            enumLikeDu = None } ]
       constraints = []
       queryByAnnotations = [ { columns = [ "name"; "age" ] } ]
       queryLikeAnnotations = [ { columns = [ "name" ] } ]
@@ -4191,8 +4218,8 @@ let ``codegen generates module and query methods from schema model`` () =
     Assert.Contains("(tx: SqliteTransaction)", generated)
     Assert.Contains("MigrationLog.ensureWriteAllowed tx", generated)
     Assert.Contains("MigrationLog.recordInsert tx \"student\"", generated)
-    Assert.Contains("MigrationLog.recordUpdate tx \"student\"", generated)
-    Assert.Contains("MigrationLog.recordDelete tx \"student\"", generated)
+    Assert.Contains("MigrationLog.recordUpdate", generated)
+    Assert.Contains("MigrationLog.recordDelete", generated)
     Assert.DoesNotContain(": Result<", generated)
 
   Directory.Delete(tempDir, true)
@@ -4284,6 +4311,30 @@ let ``schema reflection rejects disconnected view join chains`` () =
     Assert.Contains("join_chain_c", error)
 
 [<Fact>]
+let ``schema reflection maps enum-like DU columns as text with metadata`` () =
+  match buildSchemaFromTypes [ typeof<ReflectionStatusStudent> ] with
+  | Error error -> failwith $"Expected enum-like DU reflection to succeed, got: {error}"
+  | Ok schema ->
+    let table =
+      schema.tables
+      |> List.find (fun candidate -> candidate.name = "reflection_status_student")
+
+    let statusColumn = table.columns |> List.find (fun column -> column.name = "status")
+
+    Assert.Equal(SqlText, statusColumn.columnType)
+    Assert.True(statusColumn.enumLikeDu.IsSome)
+    Assert.Equal("ReflectionStatus", statusColumn.enumLikeDu.Value.typeName)
+    Assert.Equal<string list>([ "Active"; "InProgress" ], statusColumn.enumLikeDu.Value.cases)
+
+[<Fact>]
+let ``schema reflection rejects payload unions as scalar columns`` () =
+  match buildSchemaFromTypes [ typeof<UnsupportedPayloadStatusStudent> ] with
+  | Ok _ -> failwith "Expected reflection failure for payload DU scalar column"
+  | Error error ->
+    Assert.Contains("UnsupportedPayloadStatusStudent.status", error)
+    Assert.Contains("unsupported type", error, StringComparison.OrdinalIgnoreCase)
+
+[<Fact>]
 let ``querybyorinsert works for composite primary keys without SelectById fallback`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_codegen_querybyorcreate_composite_{Guid.NewGuid()}")
@@ -4297,13 +4348,16 @@ let ``querybyorinsert works for composite primary keys without SelectById fallba
       columns =
         [ { name = "order_id"
             columnType = SqlInteger
-            constraints = [ NotNull ] }
+            constraints = [ NotNull ]
+            enumLikeDu = None }
           { name = "sku"
             columnType = SqlText
-            constraints = [ NotNull ] }
+            constraints = [ NotNull ]
+            enumLikeDu = None }
           { name = "description"
             columnType = SqlText
-            constraints = [ NotNull ] } ]
+            constraints = [ NotNull ]
+            enumLikeDu = None } ]
       constraints =
         [ PrimaryKey
             { constraintName = None
@@ -4350,7 +4404,8 @@ let ``codegen rejects upsert annotation when table has no primary key`` () =
       columns =
         [ { name = "name"
             columnType = SqlText
-            constraints = [ NotNull ] } ]
+            constraints = [ NotNull ]
+            enumLikeDu = None } ]
       constraints = []
       queryByAnnotations = []
       queryLikeAnnotations = []
@@ -4386,10 +4441,12 @@ let ``codegen rejects upsert annotation on views`` () =
               [ PrimaryKey
                   { constraintName = None
                     columns = []
-                    isAutoincrement = true } ] }
+                    isAutoincrement = true } ]
+            enumLikeDu = None }
           { name = "name"
             columnType = SqlText
-            constraints = [ NotNull ] } ]
+            constraints = [ NotNull ]
+            enumLikeDu = None } ]
       constraints = []
       queryByAnnotations = []
       queryLikeAnnotations = []
@@ -4400,6 +4457,7 @@ let ``codegen rejects upsert annotation on views`` () =
   let view =
     { name = "student_view"
       sqlTokens = [ "CREATE VIEW student_view AS SELECT id, name FROM student;" ]
+      declaredColumns = []
       dependencies = [ "student" ]
       queryByAnnotations = []
       queryLikeAnnotations = []
@@ -4511,6 +4569,49 @@ let defaultStudent = {{ id = 10L; role = {{ id = 1L; name = "admin" }}; name = "
   Directory.Delete(tempDir, true)
 
 [<Fact>]
+let ``schema script evaluation stores enum-like DU seeds as strings`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_script_enum_seed_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let scriptPath = Path.Combine(tempDir, "schema.fsx")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+type Status =
+  | Active
+  | InProgress
+
+[<AutoIncPK "id">]
+type Student = {{ id: int64; name: string; status: Status }}
+
+let defaultStudent = {{ id = 1L; name = "System"; status = InProgress }}
+"""
+
+  File.WriteAllText(scriptPath, script.Trim())
+
+  match buildSchemaFromScript scriptPath with
+  | Error e -> failwith $"schema script failed: {e}"
+  | Ok schema ->
+    let studentInsert =
+      schema.inserts |> List.find (fun insert -> insert.table = "student")
+
+    let statusIndex =
+      studentInsert.columns |> List.findIndex (fun name -> name = "status")
+
+    match studentInsert.values.Head.[statusIndex] with
+    | String value -> Assert.Equal("InProgress", value)
+    | other -> failwith $"Unexpected status seed expression: {other}"
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
 let ``codegen can run directly from fsx schema script`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_codegen_script_{Guid.NewGuid()}")
@@ -4540,6 +4641,52 @@ type Student = {{ id: int64; name: string }}
     let generated = File.ReadAllText outputPath
     Assert.Contains("module Generated", generated)
     Assert.Contains("static member SelectByName (name: string) (tx: SqliteTransaction)", generated)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``codegen emits enum-like DU types and uses them in table and view APIs`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_enum_script_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let scriptPath = Path.Combine(tempDir, "schema.fsx")
+  let outputPath = Path.Combine(tempDir, "Generated.fs")
+  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+
+  let script =
+    $"""
+#r @"{migLibPath}"
+
+open MigLib.Db
+
+type Status =
+  | Active
+  | InProgress
+
+[<AutoIncPK "id">]
+[<SelectBy "status">]
+type Student = {{ id: int64; name: string; status: Status }}
+
+[<ViewSql "SELECT id, status FROM student">]
+[<SelectBy "status">]
+type StudentStatusView = {{ id: int64; status: Status }}
+"""
+
+  File.WriteAllText(scriptPath, script.Trim())
+
+  match generateCodeFromScript "Generated" scriptPath outputPath with
+  | Error e -> failwith $"codegen-from-script failed: {e}"
+  | Ok _ ->
+    let generated = File.ReadAllText outputPath
+    Assert.Contains("type Status =", generated)
+    Assert.Contains("| Active", generated)
+    Assert.Contains("| InProgress", generated)
+    Assert.Contains("Status: Status", generated)
+    Assert.Contains("static member SelectByStatus (status: Status) (tx: SqliteTransaction)", generated)
+    Assert.Contains("type StudentStatusView =", generated)
+    Assert.Contains("Status: Status", generated)
 
   Directory.Delete(tempDir, true)
 

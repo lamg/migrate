@@ -22,8 +22,7 @@ let private getInsertColumns (table: CreateTable) : ColumnDef list =
 /// Generate an anonymous record field string like "Name: string"
 let private generateAnonField (col: ColumnDef) : string =
   let fieldName = TypeGenerator.toPascalCase col.name
-  let isNullable = TypeGenerator.isColumnNullable col
-  let fsharpType = TypeGenerator.mapSqlType col.columnType isNullable
+  let fsharpType = TypeGenerator.mapColumnType col
   $"{fieldName}: {fsharpType}"
 
 /// Generate anonymous record type string like "{| Name: string; Age: int64 |}"
@@ -73,8 +72,7 @@ let generateNewType (normalized: NormalizedTable) : string =
       columns
       |> List.map (fun (col: ColumnDef) ->
         let fieldName = TypeGenerator.toPascalCase col.name
-        let isNullable = TypeGenerator.isColumnNullable col
-        let fsharpType = TypeGenerator.mapSqlType col.columnType isNullable
+        let fsharpType = TypeGenerator.mapColumnType col
         Ast.Field(fieldName, fsharpType))
 
     UnionCase(caseName, fields)
@@ -108,8 +106,7 @@ let generateQueryType (normalized: NormalizedTable) : string =
       columns
       |> List.map (fun (col: ColumnDef) ->
         let fieldName = TypeGenerator.toPascalCase col.name
-        let isNullable = TypeGenerator.isColumnNullable col
-        let fsharpType = TypeGenerator.mapSqlType col.columnType isNullable
+        let fsharpType = TypeGenerator.mapColumnType col
         Ast.Field(fieldName, fsharpType))
 
     UnionCase(caseName, fields)
@@ -158,8 +155,7 @@ let private collectFields (normalized: NormalizedTable) (includeAutoIncrementPk:
       columns
       |> List.map (fun col ->
         let fieldName = TypeGenerator.toPascalCase col.name
-        let isNullable = TypeGenerator.isColumnNullable col
-        let fsharpType = TypeGenerator.mapSqlType col.columnType isNullable
+        let fsharpType = TypeGenerator.mapColumnType col
         fieldName, fsharpType))
     |> List.groupBy fst
     |> List.map (fun (fieldName, occurrences) ->

@@ -8,6 +8,9 @@ type internal SqlType =
   | SqlString
   | SqlFlexible
 
+type internal EnumLikeDu =
+  { typeName: string; cases: string list }
+
 type internal Autoincrement = Autoincrement
 
 type internal Expr =
@@ -52,7 +55,13 @@ type internal ColumnConstraint =
 type internal ColumnDef =
   { name: string
     columnType: SqlType
-    constraints: ColumnConstraint list }
+    constraints: ColumnConstraint list
+    enumLikeDu: EnumLikeDu option }
+
+type internal ViewColumn =
+  { name: string
+    columnType: SqlType
+    enumLikeDu: EnumLikeDu option }
 
 type internal QueryByAnnotation = { columns: string list }
 
@@ -67,6 +76,7 @@ type internal UpsertAnnotation = UpsertAnnotation
 type internal CreateView =
   { name: string
     sqlTokens: string seq
+    declaredColumns: ViewColumn list
     dependencies: string list
     queryByAnnotations: QueryByAnnotation list
     queryLikeAnnotations: QueryLikeAnnotation list
