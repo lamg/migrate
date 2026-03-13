@@ -151,11 +151,25 @@ let internal generateCodeFromModel
 
     File.WriteAllText(outputFilePath, formattedContent)
 
+    let projectDirectory =
+      if outputDirectory |> String.IsNullOrWhiteSpace then
+        Directory.GetCurrentDirectory()
+      else
+        outputDirectory
+
+    let projectName = Path.GetFileNameWithoutExtension outputFilePath
+
+    if String.IsNullOrWhiteSpace projectName then
+      return! Error $"Could not derive a project name from output path '{outputFilePath}'."
+
+    let projectPath =
+      ProjectGenerator.writeProjectFile projectDirectory projectName [ outputFilePath ]
+
     return
       { NormalizedTables = normalizedTables.Length
         RegularTables = regularTables.Length
         Views = viewsWithColumns.Length
-        GeneratedFiles = [ outputFilePath ] }
+        GeneratedFiles = [ outputFilePath; projectPath ] }
   }
 
 /// Generate project file alongside generated source files.

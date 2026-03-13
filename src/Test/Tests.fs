@@ -2236,6 +2236,7 @@ let ``cli codegen generates query module from schema fsx`` () =
 
   let schemaPath = Path.Combine(tempDir, "schema.fsx")
   let outputPath = Path.Combine(tempDir, "StudentQueries.fs")
+  let projectPath = Path.Combine(tempDir, "StudentQueries.fsproj")
   let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
 
   let script =
@@ -2265,10 +2266,17 @@ type Student = {{ id: int64; name: string }}
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
   Assert.Contains("Code generation complete.", stdOut)
   Assert.True(File.Exists outputPath, $"Expected generated file at: {outputPath}")
+  Assert.True(File.Exists projectPath, $"Expected generated project file at: {projectPath}")
+  Assert.Contains(outputPath, stdOut)
+  Assert.Contains(projectPath, stdOut)
 
   let generated = File.ReadAllText outputPath
+  let generatedProject = File.ReadAllText projectPath
   Assert.Contains("module StudentQueries", generated)
   Assert.Contains("static member SelectByName (name: string) (tx: SqliteTransaction)", generated)
+  Assert.Contains("<Compile Include=\"StudentQueries.fs\" />", generatedProject)
+  Assert.Contains("<PackageReference Include=\"MigLib\" />", generatedProject)
+  Assert.DoesNotContain("Version=", generatedProject)
 
   Directory.Delete(tempDir, true)
 
@@ -4751,9 +4759,11 @@ let ``codegen writes CPM project references`` () =
   let projectPath = writeGeneratedProjectFile tempDir "students" [ "Students.fs" ]
   let generatedProject = File.ReadAllText projectPath
 
+  Assert.Contains("<Compile Include=\"Students.fs\" />", generatedProject)
   Assert.Contains("<PackageReference Include=\"FsToolkit.ErrorHandling\" />", generatedProject)
   Assert.Contains("<PackageReference Include=\"Microsoft.Data.Sqlite\" />", generatedProject)
   Assert.Contains("<PackageReference Include=\"MigLib\" />", generatedProject)
+  Assert.DoesNotContain("Version=", generatedProject)
 
   Directory.Delete(tempDir, true)
 
@@ -4885,6 +4895,7 @@ let ``codegen can run directly from fsx schema script`` () =
 
   let scriptPath = Path.Combine(tempDir, "schema.fsx")
   let outputPath = Path.Combine(tempDir, "Generated.fs")
+  let projectPath = Path.Combine(tempDir, "Generated.fsproj")
   let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
 
   let script =
@@ -4904,8 +4915,12 @@ type Student = {{ id: int64; name: string }}
   | Error e -> failwith $"codegen-from-script failed: {e}"
   | Ok _ ->
     let generated = File.ReadAllText outputPath
+    let generatedProject = File.ReadAllText projectPath
     Assert.Contains("module Generated", generated)
     Assert.Contains("static member SelectByName (name: string) (tx: SqliteTransaction)", generated)
+    Assert.Contains("<Compile Include=\"Generated.fs\" />", generatedProject)
+    Assert.Contains("<PackageReference Include=\"MigLib\" />", generatedProject)
+    Assert.DoesNotContain("Version=", generatedProject)
 
   Directory.Delete(tempDir, true)
 

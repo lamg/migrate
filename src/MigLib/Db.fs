@@ -151,7 +151,7 @@ let openSqliteConnection (dbPath: string) =
 
 let private openReadOnlySqliteConnection (dbPath: string) =
   let connection =
-    new SqliteConnection($"{sqliteConnectionString dbPath};Mode=ReadOnly")
+    new SqliteConnection $"{sqliteConnectionString dbPath};Mode=ReadOnly"
 
   connection.Open()
   connection

@@ -13,6 +13,8 @@ Changed:
   - `mig offline` now archives the source database into `archive/` after a successful copy
   - archived old databases replace any same-named prior file in the project-local `archive/` directory
   - command help, operational docs, and workflow specs now use the new archival terminology consistently
+- **Code Generation**: `mig codegen` now always emits a sibling F# project file next to the generated source
+  - generated `.fsproj` files keep package references versionless for Central Package Management via `Directory.Packages.props`
 - **MigLib Runtime**: Renamed the old-database archival API surface to match the new operation naming
   - `runArchiveOld` now moves the old database file into `archive/`
   - archival result metadata now reports `archivePath` and whether an existing archive was replaced
