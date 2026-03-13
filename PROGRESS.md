@@ -65,6 +65,16 @@ src/
 - **Source-bound limitation documented**: this support is available for `generateCodeFromScript` / `mig codegen` from `schema.fsx`; `generateCodeFromTypes` still sees erased CLR types and cannot recover units.
 - **Coverage added**: tests now validate preserved measure metadata and measured generated APIs from `schema.fsx`.
 
+## Update (2026-03-13, one-shot offline migration command)
+
+- **Offline workflow command added**: `mig offline` now performs deterministic old/new path inference and completes a full copy workflow in one step for downtime-tolerant environments.
+- **Old database archival added**: `archive-old` now moves the old database into a project-local `archive/` directory, creating that directory when needed and replacing any existing archive file with the same name.
+- **Offline archival integrated**: `mig offline` now archives the old database into `archive/` after the target copy succeeds.
+- **Hot-migration setup skipped**: offline migration does not create `_migration_marker`, `_migration_log`, `_migration_status`, `_migration_progress`, or `_id_mapping`.
+- **Schema identity retained**: the offline target database still persists `_schema_identity` with the inferred schema hash and optional git commit metadata.
+- **Copy engine reuse added**: bulk-copy execution now supports in-memory ID translation without requiring persisted `_id_mapping` tables.
+- **Coverage and docs added**: tests now validate direct and CLI offline migration behavior, and the command spec/README document the new workflow.
+
 ## Update (2026-02-17, schema diffing)
 
 - **Schema diff module added**: `MigLib/DeclarativeMigrations/SchemaDiff.fs` now computes table-level schema diffs (`addedTables`, `removedTables`, `renamedTables`, `matchedTables`) on the shared `SqlFile` model.

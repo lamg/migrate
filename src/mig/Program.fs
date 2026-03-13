@@ -18,6 +18,15 @@ type MigrateArgs =
       | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
+type OfflineArgs =
+  | [<AltCommandLine("-d")>] Dir of path: string
+
+  interface IArgParserTemplate with
+    member this.Usage =
+      match this with
+      | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
+
+[<CliPrefix(CliPrefix.DoubleDash)>]
 type InitArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
 
@@ -54,7 +63,7 @@ type CutoverArgs =
       | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
-type CleanupOldArgs =
+type ArchiveOldArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
 
   interface IArgParserTemplate with
@@ -100,10 +109,11 @@ type Command =
   | [<CliPrefix(CliPrefix.None)>] Init of ParseResults<InitArgs>
   | [<CliPrefix(CliPrefix.None)>] Codegen of ParseResults<CodegenArgs>
   | [<CliPrefix(CliPrefix.None)>] Migrate of ParseResults<MigrateArgs>
+  | [<CliPrefix(CliPrefix.None)>] Offline of ParseResults<OfflineArgs>
   | [<CliPrefix(CliPrefix.None)>] Plan of ParseResults<PlanArgs>
   | [<CliPrefix(CliPrefix.None)>] Drain of ParseResults<DrainArgs>
   | [<CliPrefix(CliPrefix.None)>] Cutover of ParseResults<CutoverArgs>
-  | [<CliPrefix(CliPrefix.None); CustomCommandLine("cleanup-old")>] CleanupOld of ParseResults<CleanupOldArgs>
+  | [<CliPrefix(CliPrefix.None); CustomCommandLine("archive-old")>] ArchiveOld of ParseResults<ArchiveOldArgs>
   | [<CliPrefix(CliPrefix.None)>] Reset of ParseResults<ResetArgs>
   | [<CliPrefix(CliPrefix.None)>] Status of ParseResults<StatusArgs>
 
@@ -114,10 +124,11 @@ type Command =
       | Init _ -> "initialize a schema-matched database from schema.fsx without requiring a source database"
       | Codegen _ -> "generate F# query helpers from schema.fsx"
       | Migrate _ -> "create new database and copy data from old"
+      | Offline _ -> "run a one-shot offline migration without hot-migration coordination tables"
       | Plan _ -> "show dry-run migration plan without mutating databases"
       | Drain _ -> "stop writes on old database and replay accumulated changes"
       | Cutover _ -> "mark new database as ready for serving"
-      | CleanupOld _ -> "drop old-database migration tables after cutover"
+      | ArchiveOld _ -> "archive the old database after cutover"
       | Reset _ -> "reset failed migration artifacts on old/new databases"
       | Status _ -> "show current migration state"
 
@@ -443,6 +454,74 @@ let migrate (args: ParseResults<MigrateArgs>) =
           printMigrateRecoveryGuidance old newDb
           1
 
+let offline (args: ParseResults<OfflineArgs>) =
+  match resolveCommandDirectory "offline" (args.TryGetResult OfflineArgs.Dir) with
+  | Error message ->
+    eprintfn $"offline failed: {message}"
+    1
+  | Ok currentDirectory ->
+    let directoryName = DirectoryInfo(currentDirectory).Name
+
+    let schemaPath = defaultSchemaPathForCurrentDirectory currentDirectory
+
+    match resolveDeterministicNewDbPath currentDirectory directoryName schemaPath with
+    | Error message ->
+      eprintfn
+        $"offline failed: Could not resolve deterministic new database path from schema '{schemaPath}': {message}"
+
+      1
+    | Ok resolvedNew ->
+      let newDb = resolvedNew.path
+
+      let oldResult =
+        match inferOldDbFromCurrentDirectory currentDirectory directoryName (Some newDb) with
+        | Ok inferredOld -> Ok(Some inferredOld)
+        | Error _ when File.Exists newDb -> Ok None
+        | Error message -> Error($"{message} Excluding target '{newDb}'. Use `-d` to select a different directory.")
+
+      match oldResult with
+      | Error message ->
+        eprintfn $"offline failed: {message}"
+        1
+      | Ok None ->
+        printfn "Offline migration skipped."
+        printfn $"Schema script: {schemaPath}"
+        printfn $"Schema hash: {resolvedNew.schemaHash}"
+        printfn $"Database already present for current schema: {newDb}"
+        0
+      | Ok(Some old) ->
+        match runOfflineMigrate old schemaPath newDb |> fun t -> t.Result with
+        | Error ex ->
+          eprintfn $"offline failed: {ex.Message}"
+          1
+        | Ok result ->
+          match runArchiveOld currentDirectory old |> fun t -> t.Result with
+          | Error ex ->
+            eprintfn $"offline failed after creating new database: {ex.Message}"
+            1
+          | Ok cleanupResult ->
+            let previousMarkerStatus =
+              cleanupResult.previousMarkerStatus |> Option.defaultValue "no marker"
+
+            let replacedExistingArchive =
+              if cleanupResult.replacedExistingArchive then
+                "yes"
+              else
+                "no"
+
+            printfn "Offline migration complete."
+            printfn $"Old database: {old}"
+            printfn $"Schema script: {schemaPath}"
+            printfn $"Schema hash: {resolvedNew.schemaHash}"
+            printfn $"New database: {result.newDbPath}"
+            printfn $"Copied tables: {result.copiedTables}"
+            printfn $"Copied rows: {result.copiedRows}"
+            printfn $"Previous old marker status: {previousMarkerStatus}"
+            printfn $"Archived database: {cleanupResult.archivePath}"
+            printfn $"Replaced existing archive: {replacedExistingArchive}"
+            printfn "Hot-migration tables were not created."
+            0
+
 let init (args: ParseResults<InitArgs>) =
   match resolveCommandDirectory "init" (args.TryGetResult InitArgs.Dir) with
   | Error message ->
@@ -629,16 +708,16 @@ let cutover (args: ParseResults<CutoverArgs>) =
         eprintfn $"cutover failed: {ex.Message}"
         1
 
-let cleanupOld (args: ParseResults<CleanupOldArgs>) =
-  match resolveCommandDirectory "cleanup-old" (args.TryGetResult CleanupOldArgs.Dir) with
+let archiveOld (args: ParseResults<ArchiveOldArgs>) =
+  match resolveCommandDirectory "archive-old" (args.TryGetResult ArchiveOldArgs.Dir) with
   | Error message ->
-    eprintfn $"cleanup-old failed: {message}"
+    eprintfn $"archive-old failed: {message}"
     1
   | Ok currentDirectory ->
     let directoryName = DirectoryInfo(currentDirectory).Name
 
     let inferredNew =
-      match resolveDefaultNewDbFromCurrentSchema "cleanup-old" currentDirectory directoryName with
+      match resolveDefaultNewDbFromCurrentSchema "archive-old" currentDirectory directoryName with
       | Ok inferredTarget -> Some inferredTarget.path
       | Error _ -> None
 
@@ -652,25 +731,24 @@ let cleanupOld (args: ParseResults<CleanupOldArgs>) =
 
     match oldResult with
     | Error message ->
-      eprintfn $"cleanup-old failed: {message}"
+      eprintfn $"archive-old failed: {message}"
       1
     | Ok old ->
-      match runCleanupOld old |> fun t -> t.Result with
+      match runArchiveOld currentDirectory old |> fun t -> t.Result with
       | Ok result ->
         let previousMarkerStatus =
           result.previousMarkerStatus |> Option.defaultValue "no marker"
 
-        let droppedMarker = if result.markerDropped then "yes" else "no"
-        let droppedLog = if result.logDropped then "yes" else "no"
+        let replacedExistingArchive = if result.replacedExistingArchive then "yes" else "no"
 
-        printfn "Old database cleanup complete."
+        printfn "Old database archive complete."
         printfn $"Old database: {old}"
         printfn $"Previous marker status: {previousMarkerStatus}"
-        printfn $"Dropped _migration_marker: {droppedMarker}"
-        printfn $"Dropped _migration_log: {droppedLog}"
+        printfn $"Archived database: {result.archivePath}"
+        printfn $"Replaced existing archive: {replacedExistingArchive}"
         0
       | Error ex ->
-        eprintfn $"cleanup-old failed: {ex.Message}"
+        eprintfn $"archive-old failed: {ex.Message}"
         1
 
 let reset (args: ParseResults<ResetArgs>) =
@@ -893,10 +971,11 @@ let main argv =
       | Init args -> init args
       | Codegen args -> codegen args
       | Migrate args -> migrate args
+      | Offline args -> offline args
       | Plan args -> plan args
       | Drain args -> drain args
       | Cutover args -> cutover args
-      | CleanupOld args -> cleanupOld args
+      | ArchiveOld args -> archiveOld args
       | Reset args -> reset args
       | Status args -> status args
       | Version ->

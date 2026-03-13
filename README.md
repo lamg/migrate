@@ -8,7 +8,7 @@
 ![Tests][tests]
 
 Migrate is a SQLite-first migration toolchain built around F# schema scripts (`.fsx`).
-It provides a hot-migration workflow (`migrate` -> `drain` -> `cutover`) plus type-safe code generation from reflected schema types.
+It provides both a hot-migration workflow (`migrate` -> `drain` -> `cutover`) and a one-shot offline workflow (`offline`), plus type-safe code generation from reflected schema types.
 
 ## Installation
 
@@ -72,7 +72,7 @@ mig status
 mig drain
 mig cutover
 # optional, after traffic has fully moved to the new service:
-mig cleanup-old
+mig archive-old
 
 # from a different directory:
 mig migrate -d /path/to/project
@@ -93,6 +93,19 @@ When you want to bootstrap a database directly from `schema.fsx` (no source DB y
 mig init
 ```
 
+## Quickstart (Offline Migration)
+
+When downtime is acceptable and you want to create the fully migrated target DB in one command:
+
+```sh
+# from your project directory:
+# - expects ./schema.fsx
+# - expects exactly one source db matching <dir>-<old-hash>.sqlite
+# - derives target db as <dir>-<schema-hash>.sqlite
+# - archives the old db into ./archive/ after the copy succeeds
+mig offline
+```
+
 ## Features
 
 - F# schema reflection from `.fsx` scripts
@@ -100,7 +113,7 @@ mig init
 - Replay checkpoints and drain safety validation
 - Schema identity metadata (`schema_hash`, optional `schema_commit`) persisted in new database
 - Operational status reporting for old/new database migration state
-- Optional old-database migration-table cleanup after cutover
+- Optional old-database archival into `archive/` after cutover
 
 ## Specs
 
@@ -113,11 +126,12 @@ mig init
 
 - `mig init [--dir|-d <path>]` - Create a schema-matched database from `schema.fsx` and apply seed inserts (no source DB required).
 - `mig codegen [--dir|-d <path>] [--module|-m <name>] [--output|-o <file>]` - Generate F# query helpers from `schema.fsx` into a file in the same directory as the schema.
+- `mig offline [--dir|-d <path>]` - Create the fully migrated target DB in one step, then archive the old DB into `archive/`.
 - `mig migrate [--dir|-d <path>]` - Create the new DB from schema, copy data, and start recording on old DB.
 - `mig plan [--dir|-d <path>]` - Print dry-run inferred paths, schema diff summary, and replay prerequisites without mutating DBs.
 - `mig drain [--dir|-d <path>]` - Switch old DB to draining mode and replay pending migration log entries.
 - `mig cutover [--dir|-d <path>]` - Verify drain completion plus old marker/log replay safety, switch new DB to `ready`, and remove replay-only tables.
-- `mig cleanup-old [--dir|-d <path>]` - Optional cleanup of old DB migration tables (`_migration_marker`, `_migration_log`).
+- `mig archive-old [--dir|-d <path>]` - Optional archival of the old DB into `archive/`, replacing any existing archive with the same name.
 - `mig reset [--dir|-d <path>] [--dry-run]` - Reset failed/aborted migration artifacts, or inspect reset impact without mutating DB files.
 - `mig status [--dir|-d <path>]` - Show marker/status state and migration counters for operational visibility.
 

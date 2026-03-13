@@ -66,10 +66,10 @@ type DrainResult =
   { replayedEntries: int
     remainingEntries: int64 }
 
-type CleanupOldResult =
+type ArchiveOldResult =
   { previousMarkerStatus: string option
-    markerDropped: bool
-    logDropped: bool }
+    archivePath: string
+    replacedExistingArchive: bool }
 
 type ResetMigrationResult =
   { previousOldMarkerStatus: string option
@@ -681,6 +681,18 @@ let private setOldMarkerToDraining (oldConnection: SqliteConnection) : Task<Resu
     | ex -> return Error(toSqliteError ex.Message)
   }
 
+let private createSchemaIdentityTable (connection: SqliteConnection) (tx: SqliteTransaction) : Task<unit> =
+  task {
+    use schemaIdentityCmd =
+      createCommand
+        connection
+        (Some tx)
+        "CREATE TABLE IF NOT EXISTS _schema_identity(id INTEGER PRIMARY KEY CHECK (id = 0), schema_hash TEXT NOT NULL, schema_commit TEXT, created_utc TEXT NOT NULL);"
+
+    let! _ = schemaIdentityCmd.ExecuteNonQueryAsync()
+    return ()
+  }
+
 let private createNewMigrationTables
   (newConnection: SqliteConnection)
   (tx: SqliteTransaction)
@@ -704,18 +716,40 @@ let private createNewMigrationTables
 
     let! _ = statusCmd.ExecuteNonQueryAsync()
 
-    use schemaIdentityCmd =
-      createCommand
-        newConnection
-        (Some tx)
-        "CREATE TABLE IF NOT EXISTS _schema_identity(id INTEGER PRIMARY KEY CHECK (id = 0), schema_hash TEXT NOT NULL, schema_commit TEXT, created_utc TEXT NOT NULL);"
-
-    let! _ = schemaIdentityCmd.ExecuteNonQueryAsync()
-
+    do! createSchemaIdentityTable newConnection tx
     do! upsertStatusRow newConnection (Some tx) "_migration_status" "migrating"
     do! upsertSchemaIdentity newConnection (Some tx) schemaHash schemaCommit
     let! _ = ensureMigrationProgressRow newConnection (Some tx)
     do! upsertMigrationProgress newConnection (Some tx) 0L false
+  }
+
+let private createSchemaObjects
+  (connection: SqliteConnection)
+  (tx: SqliteTransaction)
+  (targetSchema: SqlFile)
+  : Task<unit> =
+  task {
+    for table in targetSchema.tables do
+      use createTableCmd = createCommand connection (Some tx) (createTableSql table)
+      let! _ = createTableCmd.ExecuteNonQueryAsync()
+      ()
+
+    for index in targetSchema.indexes do
+      use createIndexCmd = createCommand connection (Some tx) (createIndexSql index)
+      let! _ = createIndexCmd.ExecuteNonQueryAsync()
+      ()
+
+    for view in targetSchema.views do
+      for sql in view.sqlTokens do
+        use createViewCmd = createCommand connection (Some tx) sql
+        let! _ = createViewCmd.ExecuteNonQueryAsync()
+        ()
+
+    for trigger in targetSchema.triggers do
+      for sql in trigger.sqlTokens do
+        use createTriggerCmd = createCommand connection (Some tx) sql
+        let! _ = createTriggerCmd.ExecuteNonQueryAsync()
+        ()
   }
 
 let private initializeNewDatabase
@@ -730,29 +764,33 @@ let private initializeNewDatabase
       use fkOffCmd = createCommand newConnection (Some tx) "PRAGMA foreign_keys = OFF;"
       let! _ = fkOffCmd.ExecuteNonQueryAsync()
 
-      for table in targetSchema.tables do
-        use createTableCmd = createCommand newConnection (Some tx) (createTableSql table)
-        let! _ = createTableCmd.ExecuteNonQueryAsync()
-        ()
-
-      for index in targetSchema.indexes do
-        use createIndexCmd = createCommand newConnection (Some tx) (createIndexSql index)
-        let! _ = createIndexCmd.ExecuteNonQueryAsync()
-        ()
-
-      for view in targetSchema.views do
-        for sql in view.sqlTokens do
-          use createViewCmd = createCommand newConnection (Some tx) sql
-          let! _ = createViewCmd.ExecuteNonQueryAsync()
-          ()
-
-      for trigger in targetSchema.triggers do
-        for sql in trigger.sqlTokens do
-          use createTriggerCmd = createCommand newConnection (Some tx) sql
-          let! _ = createTriggerCmd.ExecuteNonQueryAsync()
-          ()
-
+      do! createSchemaObjects newConnection tx targetSchema
       do! createNewMigrationTables newConnection tx schemaHash schemaCommit
+
+      use fkOnCmd = createCommand newConnection (Some tx) "PRAGMA foreign_keys = ON;"
+      let! _ = fkOnCmd.ExecuteNonQueryAsync()
+      tx.Commit()
+      return Ok()
+    with
+    | :? SqliteException as ex -> return Error ex
+    | ex -> return Error(toSqliteError ex.Message)
+  }
+
+let private initializeOfflineDatabase
+  (newConnection: SqliteConnection)
+  (targetSchema: SqlFile)
+  (schemaHash: string)
+  (schemaCommit: string option)
+  : Task<Result<unit, SqliteException>> =
+  task {
+    try
+      use tx = newConnection.BeginTransaction()
+      use fkOffCmd = createCommand newConnection (Some tx) "PRAGMA foreign_keys = OFF;"
+      let! _ = fkOffCmd.ExecuteNonQueryAsync()
+
+      do! createSchemaObjects newConnection tx targetSchema
+      do! createSchemaIdentityTable newConnection tx
+      do! upsertSchemaIdentity newConnection (Some tx) schemaHash schemaCommit
 
       use fkOnCmd = createCommand newConnection (Some tx) "PRAGMA foreign_keys = ON;"
       let! _ = fkOnCmd.ExecuteNonQueryAsync()
@@ -773,28 +811,7 @@ let private initializeDatabaseFromSchemaOnly
       use fkOffCmd = createCommand newConnection (Some tx) "PRAGMA foreign_keys = OFF;"
       let! _ = fkOffCmd.ExecuteNonQueryAsync()
 
-      for table in targetSchema.tables do
-        use createTableCmd = createCommand newConnection (Some tx) (createTableSql table)
-        let! _ = createTableCmd.ExecuteNonQueryAsync()
-        ()
-
-      for index in targetSchema.indexes do
-        use createIndexCmd = createCommand newConnection (Some tx) (createIndexSql index)
-        let! _ = createIndexCmd.ExecuteNonQueryAsync()
-        ()
-
-      for view in targetSchema.views do
-        for sql in view.sqlTokens do
-          use createViewCmd = createCommand newConnection (Some tx) sql
-          let! _ = createViewCmd.ExecuteNonQueryAsync()
-          ()
-
-      for trigger in targetSchema.triggers do
-        for sql in trigger.sqlTokens do
-          use createTriggerCmd = createCommand newConnection (Some tx) sql
-          let! _ = createTriggerCmd.ExecuteNonQueryAsync()
-          ()
-
+      do! createSchemaObjects newConnection tx targetSchema
       use fkOnCmd = createCommand newConnection (Some tx) "PRAGMA foreign_keys = ON;"
       let! _ = fkOnCmd.ExecuteNonQueryAsync()
 
@@ -1209,17 +1226,21 @@ let private syncCopiedIdentityMapping
   (step: TableCopyStep)
   (sourceRow: Map<string, Expr>)
   (mappings: IdMappingStore)
+  (persistToTable: bool)
   : Task<Result<unit, SqliteException>> =
   task {
-    match step.identity with
-    | None -> return Ok()
-    | Some identity ->
-      match extractValues sourceRow identity.sourceKeyColumns with
-      | Error message -> return Error(toSqliteError message)
-      | Ok sourceIdentity ->
-        match lookupMappedIdentity step.mapping.targetTable sourceIdentity mappings with
+    if not persistToTable then
+      return Ok()
+    else
+      match step.identity with
+      | None -> return Ok()
+      | Some identity ->
+        match extractValues sourceRow identity.sourceKeyColumns with
         | Error message -> return Error(toSqliteError message)
-        | Ok targetIdentity -> return! persistIdMapping tx step.mapping.targetTable sourceIdentity targetIdentity
+        | Ok sourceIdentity ->
+          match lookupMappedIdentity step.mapping.targetTable sourceIdentity mappings with
+          | Error message -> return Error(toSqliteError message)
+          | Ok targetIdentity -> return! persistIdMapping tx step.mapping.targetTable sourceIdentity targetIdentity
   }
 
 let private copyTableRows
@@ -1227,6 +1248,7 @@ let private copyTableRows
   (newTx: SqliteTransaction)
   (step: TableCopyStep)
   (initialMappings: IdMappingStore)
+  (persistIdMappings: bool)
   : Task<Result<IdMappingStore * int64, SqliteException>> =
   task {
     try
@@ -1274,7 +1296,7 @@ let private copyTableRows
                       $"Bulk copy ID mapping failed for source table '{step.mapping.sourceTable}' -> target '{step.mapping.targetTable}': {message}"
                   )
               | Ok updatedMappings ->
-                let! persistResult = syncCopiedIdentityMapping newTx step sourceRow updatedMappings
+                let! persistResult = syncCopiedIdentityMapping newTx step sourceRow updatedMappings persistIdMappings
 
                 match persistResult with
                 | Error ex -> result <- Error ex
@@ -1294,6 +1316,7 @@ let private executeBulkCopy
   (oldConnection: SqliteConnection)
   (newConnection: SqliteConnection)
   (plan: BulkCopyPlan)
+  (persistIdMappings: bool)
   : Task<Result<IdMappingStore * int64, SqliteException>> =
   task {
     try
@@ -1307,7 +1330,7 @@ let private executeBulkCopy
 
       while stepIndex < plan.steps.Length && result.IsOk do
         let step = plan.steps[stepIndex]
-        let! tableResult = copyTableRows oldConnection tx step mappings
+        let! tableResult = copyTableRows oldConnection tx step mappings persistIdMappings
 
         match tableResult with
         | Error ex -> result <- Error ex
@@ -1797,6 +1820,10 @@ let private runMigrateInternal
   (schemaPath: string)
   (newDbPath: string)
   (schemaCommit: string option)
+  (prepareOldDatabase: SqliteConnection -> Task<Result<unit, SqliteException>>)
+  (initializeTargetDatabase:
+    SqliteConnection -> SqlFile -> string -> string option -> Task<Result<unit, SqliteException>>)
+  (persistIdMappings: bool)
   : Task<Result<MigrateResult, SqliteException>> =
   task {
     try
@@ -1833,7 +1860,7 @@ let private runMigrateInternal
               match copyPlan with
               | Error ex -> return Error ex
               | Ok plan ->
-                let! oldSetupResult = ensureOldRecordingTables oldConnection
+                let! oldSetupResult = prepareOldDatabase oldConnection
 
                 match oldSetupResult with
                 | Error ex -> return Error ex
@@ -1845,12 +1872,12 @@ let private runMigrateInternal
 
                   use newConnection = openSqliteConnection newDbPath
 
-                  let! initResult = initializeNewDatabase newConnection expectedSchema schemaHash schemaCommit
+                  let! initResult = initializeTargetDatabase newConnection expectedSchema schemaHash schemaCommit
 
                   match initResult with
                   | Error ex -> return Error ex
                   | Ok() ->
-                    let! copyResult = executeBulkCopy oldConnection newConnection plan
+                    let! copyResult = executeBulkCopy oldConnection newConnection plan persistIdMappings
 
                     match copyResult with
                     | Error ex -> return Error ex
@@ -1871,7 +1898,23 @@ let runMigrate
   (newDbPath: string)
   : Task<Result<MigrateResult, SqliteException>> =
   let schemaCommit = tryResolveSchemaCommitFromGit schemaPath
-  runMigrateInternal oldDbPath schemaPath newDbPath schemaCommit
+  runMigrateInternal oldDbPath schemaPath newDbPath schemaCommit ensureOldRecordingTables initializeNewDatabase true
+
+let runOfflineMigrate
+  (oldDbPath: string)
+  (schemaPath: string)
+  (newDbPath: string)
+  : Task<Result<MigrateResult, SqliteException>> =
+  let schemaCommit = tryResolveSchemaCommitFromGit schemaPath
+
+  runMigrateInternal
+    oldDbPath
+    schemaPath
+    newDbPath
+    schemaCommit
+    (fun _ -> Task.FromResult(Ok()))
+    initializeOfflineDatabase
+    false
 
 let runInit (schemaPath: string) (newDbPath: string) : Task<Result<InitResult, SqliteException>> =
   task {
@@ -1991,52 +2034,60 @@ let runDrain (oldDbPath: string) (newDbPath: string) : Task<Result<DrainResult, 
     | ex -> return Error(toSqliteError ex.Message)
   }
 
-let runCleanupOld (oldDbPath: string) : Task<Result<CleanupOldResult, SqliteException>> =
+let runArchiveOld (projectDirectory: string) (oldDbPath: string) : Task<Result<ArchiveOldResult, SqliteException>> =
   task {
     try
-      if not (File.Exists oldDbPath) then
+      let resolvedProjectDirectory = Path.GetFullPath projectDirectory
+      let resolvedOldDbPath = Path.GetFullPath oldDbPath
+
+      if not (Directory.Exists resolvedProjectDirectory) then
+        return Error(toSqliteError $"Project directory was not found: {resolvedProjectDirectory}")
+      elif not (File.Exists resolvedOldDbPath) then
         return Error(toSqliteError $"Old database was not found: {oldDbPath}")
       else
-        use connection = openSqliteConnection oldDbPath
-        use transaction = connection.BeginTransaction()
-        let! markerStatus = readMarkerStatus connection (Some transaction) "_migration_marker"
+        let! markerStatus =
+          task {
+            use connection = openSqliteConnection resolvedOldDbPath
+            use transaction = connection.BeginTransaction()
+            let! markerStatus = readMarkerStatus connection (Some transaction) "_migration_marker"
 
-        let markerIsRecording =
-          markerStatus
-          |> Option.exists (fun status -> status.Equals("recording", StringComparison.OrdinalIgnoreCase))
+            let markerIsRecording =
+              markerStatus
+              |> Option.exists (fun status -> status.Equals("recording", StringComparison.OrdinalIgnoreCase))
 
-        if markerIsRecording then
-          transaction.Rollback()
+            if markerIsRecording then
+              transaction.Rollback()
 
-          return
-            Error(
-              toSqliteError "Old database is still in recording mode. Run `mig drain` and `mig cutover` before cleanup."
-            )
-        else
-          let! hasMarker = tableExists connection (Some transaction) "_migration_marker"
-          let! hasLog = tableExists connection (Some transaction) "_migration_log"
+              return
+                Error(
+                  toSqliteError
+                    "Old database is still in recording mode. Run `mig drain` and `mig cutover` before cleanup."
+                )
+            else
+              transaction.Commit()
+              return Ok markerStatus
+          }
 
-          if hasMarker then
-            use dropMarkerCmd =
-              createCommand connection (Some transaction) "DROP TABLE _migration_marker"
+        match markerStatus with
+        | Error ex -> return Error ex
+        | Ok markerStatus ->
+          let archiveDirectory = Path.Combine(resolvedProjectDirectory, "archive")
+          Directory.CreateDirectory archiveDirectory |> ignore
 
-            let! _ = dropMarkerCmd.ExecuteNonQueryAsync()
-            ()
+          let archivePath = Path.Combine(archiveDirectory, Path.GetFileName resolvedOldDbPath)
 
-          if hasLog then
-            use dropLogCmd =
-              createCommand connection (Some transaction) "DROP TABLE _migration_log"
+          let replacedExistingArchive = File.Exists archivePath
 
-            let! _ = dropLogCmd.ExecuteNonQueryAsync()
-            ()
+          if replacedExistingArchive then
+            File.Delete archivePath
 
-          transaction.Commit()
+          File.Move(resolvedOldDbPath, archivePath)
 
           return
             Ok
               { previousMarkerStatus = markerStatus
-                markerDropped = hasMarker
-                logDropped = hasLog }
+                archivePath = archivePath
+                replacedExistingArchive = replacedExistingArchive }
     with
     | :? SqliteException as ex -> return Error ex
     | ex -> return Error(toSqliteError ex.Message)
