@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0] - 2026-03-13
+
+Changed:
+
+- **mig CLI**: Renamed the old-database finalization command from `cleanup-old` to `archive-old`
+  - `mig offline` now archives the source database into `archive/` after a successful copy
+  - archived old databases replace any same-named prior file in the project-local `archive/` directory
+  - command help, operational docs, and workflow specs now use the new archival terminology consistently
+- **MigLib Runtime**: Renamed the old-database archival API surface to match the new operation naming
+  - `runArchiveOld` now moves the old database file into `archive/`
+  - archival result metadata now reports `archivePath` and whether an existing archive was replaced
+
 ## [3.0.0] - 2026-03-07
 
 Changed:
