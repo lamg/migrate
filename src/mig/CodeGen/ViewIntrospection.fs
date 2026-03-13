@@ -6,9 +6,6 @@ open Microsoft.Data.Sqlite
 open FsToolkit.ErrorHandling
 open Mig.DeclarativeMigrations.Types
 
-/// Column information extracted from a view
-type ViewColumn = { name: string; columnType: SqlType }
-
 /// Extract column information from a view by creating it in a temporary database
 let getViewColumns (tables: CreateTable list) (view: CreateView) : Result<ViewColumn list, string> =
   result {
@@ -79,7 +76,21 @@ let getViewColumns (tables: CreateTable list) (view: CreateView) : Result<ViewCo
         | t when t.Contains "TIME" || t.Contains "DATE" -> SqlTimestamp
         | _ -> SqlFlexible
 
-      columns.Add { name = colName; columnType = sqlType }
+      let enumLikeDu =
+        view.declaredColumns
+        |> List.tryFind (fun declared -> String.Equals(declared.name, colName, StringComparison.OrdinalIgnoreCase))
+        |> Option.bind _.enumLikeDu
 
-    return columns |> Seq.toList
+      columns.Add
+        { name = colName
+          columnType = sqlType
+          enumLikeDu = enumLikeDu }
+
+    let introspectedColumns = columns |> Seq.toList
+
+    return
+      if introspectedColumns.IsEmpty && not view.declaredColumns.IsEmpty then
+        view.declaredColumns
+      else
+        introspectedColumns
   }

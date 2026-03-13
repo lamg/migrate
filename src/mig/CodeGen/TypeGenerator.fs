@@ -2,7 +2,6 @@ module internal Mig.CodeGen.TypeGenerator
 
 open System
 open Mig.DeclarativeMigrations.Types
-open Mig.CodeGen.ViewIntrospection
 open Fabulous.AST
 open type Fabulous.AST.Ast
 
@@ -32,6 +31,9 @@ let mapSqlType (sqlType: SqlType) (isNullable: bool) : string =
 
   if isNullable then $"{baseType} option" else baseType
 
+let private readerMethod (t: string) =
+  t.Replace("int64", "Int64").Replace("string", "String").Replace("float", "Double").Replace("DateTime", "DateTime")
+
 /// Check if a column is nullable (doesn't have NOT NULL constraint or PRIMARY KEY)
 /// PRIMARY KEY columns are implicitly NOT NULL in SQLite
 let isColumnNullable (column: ColumnDef) : bool =
@@ -43,10 +45,96 @@ let isColumnNullable (column: ColumnDef) : bool =
     | _ -> false)
   |> not
 
+let mapColumnType (column: ColumnDef) : string =
+  let isNullable = isColumnNullable column
+
+  match column.enumLikeDu with
+  | Some enumLikeDu when isNullable -> $"{enumLikeDu.typeName} option"
+  | Some enumLikeDu -> enumLikeDu.typeName
+  | None -> mapSqlType column.columnType isNullable
+
+let mapViewColumnType (column: ViewColumn) : string =
+  match column.enumLikeDu with
+  | Some enumLikeDu -> enumLikeDu.typeName
+  | None -> mapSqlType column.columnType false
+
+let enumCaseToDbValueExpr (enumLikeDu: EnumLikeDu) (valueExpr: string) : string =
+  let cases =
+    enumLikeDu.cases
+    |> List.map (fun caseName -> $"| {enumLikeDu.typeName}.{caseName} -> \"{caseName}\"")
+    |> String.concat " "
+
+  $"(match {valueExpr} with {cases})"
+
+let enumFromDbValueExpr (enumLikeDu: EnumLikeDu) (columnName: string) (valueExpr: string) : string =
+  let cases =
+    enumLikeDu.cases
+    |> List.map (fun caseName -> $"| \"{caseName}\" -> {enumLikeDu.typeName}.{caseName}")
+    |> String.concat " "
+
+  $"(match {valueExpr} with {cases} | other -> raise (SqliteException($\"Invalid value '{{other}}' for {enumLikeDu.typeName} column '{columnName}'\", 0)))"
+
+let toDbValueExpr (column: ColumnDef) (valueExpr: string) : string =
+  match column.enumLikeDu with
+  | Some enumLikeDu -> enumCaseToDbValueExpr enumLikeDu valueExpr
+  | None -> valueExpr
+
+let toViewDbValueExpr (column: ViewColumn) (valueExpr: string) : string =
+  match column.enumLikeDu with
+  | Some enumLikeDu -> enumCaseToDbValueExpr enumLikeDu valueExpr
+  | None -> valueExpr
+
+let toNullableDbValueExpr (column: ColumnDef) (valueExpr: string) : string =
+  match column.enumLikeDu with
+  | Some _ ->
+    let innerExpr = toDbValueExpr column "v"
+    $"match {valueExpr} with Some v -> box ({innerExpr}) | None -> box DBNull.Value"
+  | None -> $"match {valueExpr} with Some v -> box v | None -> box DBNull.Value"
+
+let readColumnExpr (column: ColumnDef) (index: int) : string =
+  let readerExpr =
+    match column.enumLikeDu with
+    | Some enumLikeDu -> enumFromDbValueExpr enumLikeDu column.name $"reader.GetString {index}"
+    | None ->
+      let method = mapSqlType column.columnType false |> readerMethod
+      $"reader.Get{method} {index}"
+
+  if isColumnNullable column then
+    $"if reader.IsDBNull {index} then None else Some({readerExpr})"
+  else
+    readerExpr
+
+let readViewColumnExpr (column: ViewColumn) (index: int) : string =
+  match column.enumLikeDu with
+  | Some enumLikeDu -> enumFromDbValueExpr enumLikeDu column.name $"reader.GetString {index}"
+  | None ->
+    let method = mapSqlType column.columnType false |> readerMethod
+    $"reader.Get{method} {index}"
+
+let collectEnumLikeDusFromColumns (columns: #seq<ColumnDef>) : EnumLikeDu list =
+  columns
+  |> Seq.choose _.enumLikeDu
+  |> Seq.distinctBy (fun enumLikeDu -> enumLikeDu.typeName, enumLikeDu.cases)
+  |> Seq.toList
+
+let collectEnumLikeDusFromViewColumns (columns: #seq<ViewColumn>) : EnumLikeDu list =
+  columns
+  |> Seq.choose _.enumLikeDu
+  |> Seq.distinctBy (fun enumLikeDu -> enumLikeDu.typeName, enumLikeDu.cases)
+  |> Seq.toList
+
+let generateEnumType (enumLikeDu: EnumLikeDu) : string =
+  let cases =
+    enumLikeDu.cases
+    |> List.map (fun caseName -> $"  | {caseName}")
+    |> String.concat "\n"
+
+  $"""type {enumLikeDu.typeName} =
+{cases}"""
+
 /// Generate a record field from a column definition
 let generateField (column: ColumnDef) =
-  let isNullable = isColumnNullable column
-  let fsharpType = mapSqlType column.columnType isNullable
+  let fsharpType = mapColumnType column
   let fieldName = toPascalCase column.name
   fieldName, fsharpType
 
@@ -74,7 +162,7 @@ let generateViewRecordType (viewName: string) (columns: ViewColumn list) : strin
     AnonymousModule() {
       Record typeName {
         for col in columns do
-          let fsharpType = mapSqlType col.columnType false
+          let fsharpType = mapViewColumnType col
           let fieldName = toPascalCase col.name
           Field(fieldName, fsharpType)
       }

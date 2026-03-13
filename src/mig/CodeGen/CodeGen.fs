@@ -83,6 +83,19 @@ let internal generateCodeFromModel
       |> Result.map List.concat
 
     // Generate module content
+    let enumLikeDus =
+      (regularTables
+       |> List.collect (fun table -> TypeGenerator.collectEnumLikeDusFromColumns table.columns))
+      @ (normalizedTables
+         |> List.collect (fun normalized ->
+           TypeGenerator.collectEnumLikeDusFromColumns normalized.baseTable.columns
+           @ (normalized.extensions
+              |> List.collect (fun extensionTable ->
+                TypeGenerator.collectEnumLikeDusFromColumns extensionTable.table.columns))))
+      @ (viewsWithColumns
+         |> List.collect (fun (_, columns) -> TypeGenerator.collectEnumLikeDusFromViewColumns columns))
+      |> List.distinctBy (fun enumLikeDu -> enumLikeDu.typeName, enumLikeDu.cases)
+
     let moduleContent =
       [ yield $"module {moduleName}"
         yield ""
@@ -92,6 +105,9 @@ let internal generateCodeFromModel
         yield "open FsToolkit.ErrorHandling"
         yield "open MigLib.Db"
         yield ""
+        yield!
+          enumLikeDus
+          |> List.collect (fun enumLikeDu -> [ TypeGenerator.generateEnumType enumLikeDu; "" ])
         // Generate discriminated union types for normalized tables
         yield!
           normalizedTables

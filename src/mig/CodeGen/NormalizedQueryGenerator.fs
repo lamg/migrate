@@ -96,9 +96,9 @@ let private generateParamBindings (columns: ColumnDef list) (cmdVarName: string)
     let isNullable = TypeGenerator.isColumnNullable col
 
     if isNullable then
-      $"{cmdVarName}.Parameters.AddWithValue(\"@{col.name}\", match {varName} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+      $"{cmdVarName}.Parameters.AddWithValue(\"@{col.name}\", {TypeGenerator.toNullableDbValueExpr col varName}) |> ignore"
     else
-      $"{cmdVarName}.Parameters.AddWithValue(\"@{col.name}\", {varName}) |> ignore")
+      $"{cmdVarName}.Parameters.AddWithValue(\"@{col.name}\", {TypeGenerator.toDbValueExpr col varName}) |> ignore")
 
 let private getSinglePrimaryKeyColumn (table: CreateTable) : ColumnDef option =
   let tableLevelPk =
@@ -399,13 +399,7 @@ let private generateBaseFieldReads (baseTable: CreateTable) (startIndex: int) : 
   |> List.mapi (fun i col ->
     let fieldName = TypeGenerator.toPascalCase col.name
     let colIndex = startIndex + i
-    let isNullable = TypeGenerator.isColumnNullable col
-    let readerMethod = TypeGenerator.mapSqlType col.columnType false |> readerMethod
-
-    if isNullable then
-      $"{fieldName} = if reader.IsDBNull {colIndex} then None else Some(reader.Get{readerMethod} {colIndex})"
-    else
-      $"{fieldName} = reader.Get{readerMethod} {colIndex}")
+    $"{fieldName} = {TypeGenerator.readColumnExpr col colIndex}")
 
 /// Generate field reading code for extension columns (excluding FK)
 let private generateExtensionFieldReads (extension: ExtensionTable) (startIndex: int) : string list =
@@ -414,13 +408,7 @@ let private generateExtensionFieldReads (extension: ExtensionTable) (startIndex:
   |> List.mapi (fun i col ->
     let fieldName = TypeGenerator.toPascalCase col.name
     let colIndex = startIndex + i
-    let isNullable = TypeGenerator.isColumnNullable col
-    let readerMethod = TypeGenerator.mapSqlType col.columnType false |> readerMethod
-
-    if isNullable then
-      $"{fieldName} = if reader.IsDBNull {colIndex} then None else Some(reader.Get{readerMethod} {colIndex})"
-    else
-      $"{fieldName} = reader.Get{readerMethod} {colIndex}")
+    $"{fieldName} = {TypeGenerator.readColumnExpr col colIndex}")
 
 /// Generate pattern matching for case selection based on NULL checks
 /// baseIndent is the number of spaces for the base indentation (12 or 14 for async)
@@ -560,13 +548,14 @@ let generateGetById (normalized: NormalizedTable) : string option =
     let paramList =
       pks
       |> List.map (fun pk ->
-        let pkType = TypeGenerator.mapSqlType pk.columnType false
+        let pkType = TypeGenerator.mapColumnType pk
         $"({pk.name}: {pkType})")
       |> String.concat " "
 
     let asyncParamBindings =
       pks
-      |> List.map (fun pk -> $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore")
+      |> List.map (fun pk ->
+        $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {TypeGenerator.toDbValueExpr pk pk.name}) |> ignore")
       |> String.concat "\n        "
 
     let caseSelection =
@@ -814,7 +803,7 @@ let generateDelete (normalized: NormalizedTable) : string option =
     let paramList =
       pks
       |> List.map (fun pk ->
-        let pkType = TypeGenerator.mapSqlType pk.columnType false
+        let pkType = TypeGenerator.mapColumnType pk
         $"({pk.name}: {pkType})")
       |> String.concat " "
 
@@ -822,7 +811,8 @@ let generateDelete (normalized: NormalizedTable) : string option =
     let asyncBodyExprs =
       [ OtherExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)" ]
       @ (pks
-         |> List.map (fun pk -> OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {pk.name}) |> ignore"))
+         |> List.map (fun pk ->
+           OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {TypeGenerator.toDbValueExpr pk pk.name}) |> ignore"))
       @ [ OtherExpr "MigrationLog.ensureWriteAllowed tx"
           OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"
           OtherExpr "return Ok()" ]
@@ -912,8 +902,7 @@ let private generateNormalizedQueryBy (normalized: NormalizedTable) (annotation:
     annotation.columns
     |> List.map (fun col ->
       let _, columnDef = findNormalizedColumn normalized col |> Option.get
-      let isNullable = TypeGenerator.isColumnNullable columnDef
-      let fsharpType = TypeGenerator.mapSqlType columnDef.columnType isNullable
+      let fsharpType = TypeGenerator.mapColumnType columnDef
       $"{col}: {fsharpType}")
     |> String.concat ", "
 
@@ -956,9 +945,9 @@ let private generateNormalizedQueryBy (normalized: NormalizedTable) (annotation:
       let isNullable = TypeGenerator.isColumnNullable columnDef
 
       if isNullable then
-        $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toNullableDbValueExpr columnDef col}) |> ignore"
       else
-        $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+        $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toDbValueExpr columnDef col}) |> ignore")
     |> String.concat "\n        "
 
   // 6. Generate case selection logic (async needs 14-space indent)
@@ -1029,9 +1018,9 @@ let private generateNormalizedQueryLike (normalized: NormalizedTable) (annotatio
     let isNullable = TypeGenerator.isColumnNullable columnDef
 
     if isNullable then
-      $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+      $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toNullableDbValueExpr columnDef col}) |> ignore"
     else
-      $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore"
+      $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toDbValueExpr columnDef col}) |> ignore"
 
   let caseSelection =
     generateCaseSelection 14 normalized.baseTable normalized.extensions typeName
@@ -1213,9 +1202,9 @@ let private generateNormalizedQueryByOrCreate
       let isNullable = TypeGenerator.isColumnNullable columnDef
 
       if isNullable then
-        $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+        $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toNullableDbValueExpr columnDef col}) |> ignore"
       else
-        $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore")
+        $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toDbValueExpr columnDef col}) |> ignore")
     |> String.concat $"\n{lineIndent}"
 
   let asyncParamBindings = generateAsyncParamBindings "cmd" "        "

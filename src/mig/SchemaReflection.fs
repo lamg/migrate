@@ -72,11 +72,34 @@ let private isUnionType (t: Type) =
   with _ ->
     false
 
+let private tryGetEnumLikeDu (t: Type) : EnumLikeDu option =
+  if t.ContainsGenericParameters || not (isUnionType t) then
+    None
+  else
+    let unionCases = FSharpType.GetUnionCases(t, true) |> Array.toList
+
+    if
+      unionCases.IsEmpty
+      || (unionCases |> List.exists (fun unionCase -> unionCase.GetFields().Length > 0))
+    then
+      None
+    else
+      Some
+        { typeName = t.Name
+          cases = unionCases |> List.map _.Name }
+
+let private mapSupportedScalarType (t: Type) : (SqlType * EnumLikeDu option) option =
+  if t = typeof<int64> then
+    Some(SqlInteger, None)
+  elif t = typeof<string> then
+    Some(SqlText, None)
+  elif t = typeof<float> then
+    Some(SqlReal, None)
+  else
+    tryGetEnumLikeDu t |> Option.map (fun enumLikeDu -> SqlText, Some enumLikeDu)
+
 let private mapPrimitiveSqlType (t: Type) : SqlType option =
-  if t = typeof<int64> then Some SqlInteger
-  elif t = typeof<string> then Some SqlText
-  elif t = typeof<float> then Some SqlReal
-  else None
+  mapSupportedScalarType t |> Option.map fst
 
 let private getTypeAttributes<'a when 'a :> Attribute> (t: Type) : 'a list =
   t.GetCustomAttributes(typeof<'a>, true) |> Seq.cast<'a> |> Seq.toList
@@ -444,7 +467,7 @@ let private buildTable
       |> Array.toList
       |> foldResults
         (fun pairs field ->
-          match mapPrimitiveSqlType field.PropertyType with
+          match mapSupportedScalarType field.PropertyType with
           | Some _ -> Ok(pairs @ [ field.Name, toSnakeCase field.Name ])
           | None when isRecordType field.PropertyType ->
             if schemaTypes.Contains field.PropertyType then
@@ -463,13 +486,14 @@ let private buildTable
       |> Array.toList
       |> foldResults
         (fun cols field ->
-          match mapPrimitiveSqlType field.PropertyType with
-          | Some sqlType ->
+          match mapSupportedScalarType field.PropertyType with
+          | Some(sqlType, enumLikeDu) ->
             Ok(
               cols
               @ [ { name = toSnakeCase field.Name
                     columnType = sqlType
-                    constraints = [ NotNull ] } ]
+                    constraints = [ NotNull ]
+                    enumLikeDu = enumLikeDu } ]
             )
           | None when isRecordType field.PropertyType ->
             match pkByType.TryGetValue field.PropertyType with
@@ -490,7 +514,8 @@ let private buildTable
                 cols
                 @ [ { name = fkColumnName
                       columnType = referencedPk.sqlType
-                      constraints = [ NotNull; ForeignKey foreignKey ] } ]
+                      constraints = [ NotNull; ForeignKey foreignKey ]
+                      enumLikeDu = None } ]
               )
           | None -> Error $"Field '{recordType.Name}.{field.Name}' has unsupported type '{field.PropertyType.Name}'")
         []
@@ -891,6 +916,22 @@ let private buildView
     let tableName = toSnakeCase viewType.Name
     let fields = FSharpType.GetRecordFields(viewType, true)
 
+    let! declaredColumns =
+      fields
+      |> Array.toList
+      |> foldResults
+        (fun columns field ->
+          match mapSupportedScalarType field.PropertyType with
+          | Some(sqlType, enumLikeDu) ->
+            Ok(
+              columns
+              @ [ { name = toSnakeCase field.Name
+                    columnType = sqlType
+                    enumLikeDu = enumLikeDu } ]
+            )
+          | None -> Error $"View field '{viewType.Name}.{field.Name}' has unsupported type '{field.PropertyType.Name}'")
+        []
+
     let fieldColumnPairs =
       fields
       |> Array.toList
@@ -924,6 +965,7 @@ let private buildView
     return
       { name = tableName
         sqlTokens = [ sql ]
+        declaredColumns = declaredColumns
         dependencies = dependencies
         queryByAnnotations = queryByAnnotations
         queryLikeAnnotations = queryLikeAnnotations
@@ -987,7 +1029,8 @@ let private buildUnionExtensionTables
                         refTable = baseTableName
                         refColumns = [ referencedPk.columnName ]
                         onDelete = None
-                        onUpdate = None } ] }
+                        onUpdate = None } ]
+                enumLikeDu = None }
 
             let! extensionColumns =
               caseFields
@@ -995,8 +1038,8 @@ let private buildUnionExtensionTables
               |> List.skip 1
               |> foldResults
                 (fun (cols: ColumnDef list) field ->
-                  match mapPrimitiveSqlType field.PropertyType with
-                  | Some sqlType ->
+                  match mapSupportedScalarType field.PropertyType with
+                  | Some(sqlType, enumLikeDu) ->
                     let fieldName =
                       if field.Name.StartsWith "Item" then
                         $"value_{cols.Length + 1}"
@@ -1007,7 +1050,8 @@ let private buildUnionExtensionTables
                       cols
                       @ [ { name = toSnakeCase fieldName
                             columnType = sqlType
-                            constraints = [ NotNull ] } ]
+                            constraints = [ NotNull ]
+                            enumLikeDu = enumLikeDu } ]
                     )
                   | None ->
                     Error

@@ -194,6 +194,19 @@ let private toExpr (value: obj) : Result<Expr, string> =
         |> String.concat ""
 
       Ok(Value $"X'{hex}'")
+    | _ when FSharpType.IsUnion(value.GetType(), true) ->
+      let unionType = value.GetType()
+      let unionCases = FSharpType.GetUnionCases(unionType, true) |> Array.toList
+
+      if
+        unionType.ContainsGenericParameters
+        || unionCases.IsEmpty
+        || (unionCases |> List.exists (fun unionCase -> unionCase.GetFields().Length > 0))
+      then
+        Error $"Unsupported seed value type '{value.GetType().FullName}'"
+      else
+        let caseInfo, _ = FSharpValue.GetUnionFields(value, unionType, true)
+        Ok(String caseInfo.Name)
     | _ -> Error $"Unsupported seed value type '{value.GetType().FullName}'"
 
 let private tryGetPrimaryKeyColumn (table: CreateTable) : ColumnDef option =
@@ -261,6 +274,10 @@ let private createSeedRow
         || field.PropertyType = typeof<string>
         || field.PropertyType = typeof<float>
         || field.PropertyType = typeof<byte[]>
+        || (FSharpType.IsUnion(field.PropertyType, true)
+            && not field.PropertyType.ContainsGenericParameters
+            && (FSharpType.GetUnionCases(field.PropertyType, true)
+                |> Array.forall (fun unionCase -> unionCase.GetFields().Length = 0)))
       then
         let columnName = toSnakeCase field.Name
         let! expr = toExpr fieldValue
