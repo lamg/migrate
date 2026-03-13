@@ -66,7 +66,7 @@ CREATE TABLE _migration_log(
 4. `mig` bulk-copies data from old to new in FK dependency order. For each row copied, the mapping from old ID to new ID is recorded in `_id_mapping`. Foreign key columns are translated using `_id_mapping` for already-copied parent tables. Column mapping for schema changes (renames, additions with defaults, removals) is derived automatically from the DSL diff between the old and new .fsx specifications.
 5. `mig` exits
 
-The old service continues operating normally while recording writes. The new service can be deployed at any time — MigLib reads `_migration_status(status='migrating')` and rejects all requests until cutover.
+The old service continues operating normally while recording writes. The new service can be deployed at any time, but MigLib rejects all requests while `_migration_status='migrating'`.
 
 ### Phase 2: Drain (`mig drain`)
 

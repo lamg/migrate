@@ -2,6 +2,8 @@ module Mig.CodeGen.CodeGen
 
 open System
 open System.IO
+open System.Security.Cryptography
+open System.Text
 open FsToolkit.ErrorHandling
 open Mig.SchemaScript
 open Mig.SchemaReflection
@@ -29,13 +31,39 @@ let private validateModuleName (moduleName: string) =
   else
     Ok()
 
+let private normalizeLineEndings (text: string) =
+  text.Replace("\r\n", "\n").Replace("\r", "\n")
+
+let private computeShortSchemaHash (schemaPath: string) : Result<string, string> =
+  try
+    let normalizedSchema = File.ReadAllText schemaPath |> normalizeLineEndings
+    use sha256 = SHA256.Create()
+    let schemaBytes = Encoding.UTF8.GetBytes normalizedSchema
+    let hashBytes = sha256.ComputeHash schemaBytes
+    Ok(Convert.ToHexString(hashBytes).ToLowerInvariant().Substring(0, 16))
+  with ex ->
+    Error $"Could not compute schema hash from script '{schemaPath}': {ex.Message}"
+
+let private deriveDatabaseFileName (schemaPath: string) : Result<string, string> =
+  result {
+    let! schemaHash = computeShortSchemaHash schemaPath
+    let schemaDirectory = Path.GetDirectoryName(Path.GetFullPath schemaPath)
+
+    if String.IsNullOrWhiteSpace schemaDirectory then
+      return! Error $"Could not determine the schema directory for '{schemaPath}'."
+
+    let directoryName = DirectoryInfo(schemaDirectory).Name
+    return $"{directoryName}-{schemaHash}.sqlite"
+  }
+
 /// Generate F# code from an in-memory schema model.
 /// The schema model is intentionally decoupled from input parsing so we can
 /// feed it from reflection over .fsx files.
-let internal generateCodeFromModel
+let private generateCode
   (moduleName: string)
   (schema: SqlFile)
   (outputFilePath: string)
+  (dbFileName: string option)
   : Result<CodeGenStats, string> =
   result {
     do! validateModuleName moduleName
@@ -105,6 +133,12 @@ let internal generateCodeFromModel
         yield "open FsToolkit.ErrorHandling"
         yield "open MigLib.Db"
         yield ""
+        match dbFileName with
+        | Some fileName ->
+          yield "[<Literal>]"
+          yield $"let DbFile = \"{fileName}\""
+          yield ""
+        | None -> ()
         yield!
           schema.measureTypes
           |> List.collect (fun measureType -> [ TypeGenerator.generateMeasureType measureType; "" ])
@@ -172,6 +206,13 @@ let internal generateCodeFromModel
         GeneratedFiles = [ outputFilePath; projectPath ] }
   }
 
+let internal generateCodeFromModel
+  (moduleName: string)
+  (schema: SqlFile)
+  (outputFilePath: string)
+  : Result<CodeGenStats, string> =
+  generateCode moduleName schema outputFilePath None
+
 /// Generate project file alongside generated source files.
 let internal writeGeneratedProjectFile (directory: string) (projectName: string) (sourceFiles: string list) : string =
   ProjectGenerator.writeProjectFile directory projectName sourceFiles
@@ -196,5 +237,6 @@ let generateCodeFromScript
   : Result<CodeGenStats, string> =
   result {
     let! schema = buildSchemaFromScript scriptPath
-    return! generateCodeFromModel moduleName schema outputFilePath
+    let! dbFileName = deriveDatabaseFileName scriptPath
+    return! generateCode moduleName schema outputFilePath (Some dbFileName)
   }

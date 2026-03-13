@@ -219,7 +219,7 @@ let private createStudentDatabase (dbPath: string) (studentNames: string list) (
   connection.Close()
 
 [<Fact>]
-let ``tryResolveDatabasePath returns explicit absolute path when no hash template is used`` () =
+let ``resolveDatabasePathOrFail returns explicit absolute path when configured path is explicit`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_resolve_path_explicit_{Guid.NewGuid()}")
 
@@ -228,87 +228,24 @@ let ``tryResolveDatabasePath returns explicit absolute path when no hash templat
   let dbPath = Path.Combine(tempDir, "database.sqlite")
   createDatabaseWithMigrationStatus dbPath None
 
-  match tryResolveDatabasePath dbPath with
-  | Error error -> failwith $"Expected explicit path to resolve, got error: {error}"
-  | Ok resolvedPath -> Assert.Equal(Path.GetFullPath dbPath, resolvedPath)
+  let resolvedPath = resolveDatabasePathOrFail dbPath
+
+  Assert.Equal(Path.GetFullPath dbPath, resolvedPath)
 
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``tryResolveDatabasePath resolves single hash-template match`` () =
+let ``dbTxn rejects requests while target database status is migrating`` () =
   let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_resolve_path_single_{Guid.NewGuid()}")
-
-  Directory.CreateDirectory tempDir |> ignore
-
-  let resolvedDbPath = Path.Combine(tempDir, "marketdesk-1111222233334444.sqlite")
-  createDatabaseWithMigrationStatus resolvedDbPath None
-
-  let templatePath = Path.Combine(tempDir, "marketdesk-<HASH>.sqlite")
-
-  match tryResolveDatabasePath templatePath with
-  | Error error -> failwith $"Expected hash template to resolve, got error: {error}"
-  | Ok resolvedPath -> Assert.Equal(resolvedDbPath, resolvedPath)
-
-  Directory.Delete(tempDir, true)
-
-[<Fact>]
-let ``tryResolveDatabasePath prefers unique ready database when multiple hash matches exist`` () =
-  let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_resolve_path_ready_{Guid.NewGuid()}")
-
-  Directory.CreateDirectory tempDir |> ignore
-
-  let oldDbPath = Path.Combine(tempDir, "marketdesk-1111222233334444.sqlite")
-  let newReadyDbPath = Path.Combine(tempDir, "marketdesk-aaaabbbbccccdddd.sqlite")
-
-  createDatabaseWithMigrationStatus oldDbPath None
-  createDatabaseWithMigrationStatus newReadyDbPath (Some "ready")
-
-  let templatePath = Path.Combine(tempDir, "marketdesk-<HASH>.sqlite")
-
-  match tryResolveDatabasePath templatePath with
-  | Error error -> failwith $"Expected unique ready database to resolve, got error: {error}"
-  | Ok resolvedPath -> Assert.Equal(newReadyDbPath, resolvedPath)
-
-  Directory.Delete(tempDir, true)
-
-[<Fact>]
-let ``tryResolveDatabasePath fails when multiple hash matches are ambiguous`` () =
-  let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_resolve_path_ambiguous_{Guid.NewGuid()}")
-
-  Directory.CreateDirectory tempDir |> ignore
-
-  let dbPath1 = Path.Combine(tempDir, "marketdesk-1111222233334444.sqlite")
-  let dbPath2 = Path.Combine(tempDir, "marketdesk-aaaabbbbccccdddd.sqlite")
-
-  createDatabaseWithMigrationStatus dbPath1 None
-  createDatabaseWithMigrationStatus dbPath2 None
-
-  let templatePath = Path.Combine(tempDir, "marketdesk-<HASH>.sqlite")
-
-  match tryResolveDatabasePath templatePath with
-  | Ok resolvedPath -> failwith $"Expected ambiguity error, got resolved path: {resolvedPath}"
-  | Error error ->
-    Assert.Contains("selection is ambiguous", error)
-    Assert.Contains("Set DATABASE_PATH to an explicit file path", error)
-
-  Directory.Delete(tempDir, true)
-
-[<Fact>]
-let ``dbTxn resolves single hash-template match at execution time`` () =
-  let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_dbtxn_resolve_single_{Guid.NewGuid()}")
+    Path.Combine(Path.GetTempPath(), $"mig_dbtxn_target_migrating_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
   let dbPath = Path.Combine(tempDir, "marketdesk-1111222233334444.sqlite")
-  let templatePath = Path.Combine(tempDir, "marketdesk-<HASH>.sqlite")
-  createStudentDatabase dbPath [ "Alice"; "Bob" ] None
+  createStudentDatabase dbPath [ "Alice"; "Bob" ] (Some "migrating")
 
   let result =
-    dbTxn templatePath {
+    dbTxn dbPath {
       let! count =
         fun tx ->
           task {
@@ -322,27 +259,23 @@ let ``dbTxn resolves single hash-template match at execution time`` () =
     |> fun t -> t.Result
 
   match result with
-  | Error ex -> failwith $"Expected dbTxn to resolve hash-template path, got error: {ex.Message}"
-  | Ok count -> Assert.Equal(2L, count)
+  | Ok count -> failwith $"Expected migrating target database to reject requests, got count: {count}"
+  | Error ex -> Assert.Contains("Target database is still migrating", ex.Message)
 
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``dbTxn prefers unique ready database when resolving hash-template path`` () =
+let ``dbTxn allows requests when target database status is ready`` () =
   let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_dbtxn_resolve_ready_{Guid.NewGuid()}")
+    Path.Combine(Path.GetTempPath(), $"mig_dbtxn_target_ready_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let oldDbPath = Path.Combine(tempDir, "marketdesk-1111222233334444.sqlite")
-  let readyDbPath = Path.Combine(tempDir, "marketdesk-aaaabbbbccccdddd.sqlite")
-  let templatePath = Path.Combine(tempDir, "marketdesk-<HASH>.sqlite")
-
-  createStudentDatabase oldDbPath [ "OldOnly" ] None
-  createStudentDatabase readyDbPath [ "Alice"; "Bob"; "Carol" ] (Some "ready")
+  let dbPath = Path.Combine(tempDir, "marketdesk-aaaabbbbccccdddd.sqlite")
+  createStudentDatabase dbPath [ "Alice"; "Bob"; "Carol" ] (Some "ready")
 
   let result =
-    dbTxn templatePath {
+    dbTxn dbPath {
       let! count =
         fun tx ->
           task {
@@ -356,22 +289,21 @@ let ``dbTxn prefers unique ready database when resolving hash-template path`` ()
     |> fun t -> t.Result
 
   match result with
-  | Error ex -> failwith $"Expected dbTxn to select ready database, got error: {ex.Message}"
+  | Error ex -> failwith $"Expected ready target database to serve requests, got error: {ex.Message}"
   | Ok count -> Assert.Equal(3L, count)
 
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``dbRuntime resolves single hash-template match at execution time`` () =
+let ``dbRuntime rejects requests while target database status is migrating`` () =
   let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_dbruntime_resolve_single_{Guid.NewGuid()}")
+    Path.Combine(Path.GetTempPath(), $"mig_dbruntime_target_migrating_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
   let dbPath = Path.Combine(tempDir, "marketdesk-1111222233334444.sqlite")
-  let templatePath = Path.Combine(tempDir, "marketdesk-<HASH>.sqlite")
-  createStudentDatabase dbPath [ "Alice"; "Bob" ] None
-  let runtime = dbRuntime templatePath
+  createStudentDatabase dbPath [ "Alice"; "Bob" ] (Some "migrating")
+  let runtime = dbRuntime dbPath
 
   let result =
     runtime.RunInTransaction id (fun tx ->
@@ -383,8 +315,8 @@ let ``dbRuntime resolves single hash-template match at execution time`` () =
     |> fun t -> t.Result
 
   match result with
-  | Error ex -> failwith $"Expected dbRuntime to resolve hash-template path, got error: {ex.Message}"
-  | Ok count -> Assert.Equal(2L, count)
+  | Ok count -> failwith $"Expected migrating target database to reject dbRuntime requests, got count: {count}"
+  | Error ex -> Assert.Contains("Target database is still migrating", ex.Message)
 
   Directory.Delete(tempDir, true)
 
@@ -2676,7 +2608,13 @@ type Student = {{ id: int64; name: string }}
 
   let generated = File.ReadAllText outputPath
   let generatedProject = File.ReadAllText projectPath
+
+  let expectedDbFile =
+    $"{DirectoryInfo(tempDir).Name}-{deriveShortSchemaHashFromScript schemaPath}.sqlite"
+
   Assert.Contains("module StudentQueries", generated)
+  Assert.Contains("let DbFile =", generated)
+  Assert.Contains(expectedDbFile, generated)
   Assert.Contains("static member SelectByName (name: string) (tx: SqliteTransaction)", generated)
   Assert.Contains("<Compile Include=\"StudentQueries.fs\" />", generatedProject)
   Assert.Contains("<PackageReference Include=\"MigLib\" />", generatedProject)
@@ -5320,7 +5258,13 @@ type Student = {{ id: int64; name: string }}
   | Ok _ ->
     let generated = File.ReadAllText outputPath
     let generatedProject = File.ReadAllText projectPath
+
+    let expectedDbFile =
+      $"{DirectoryInfo(tempDir).Name}-{deriveShortSchemaHashFromScript scriptPath}.sqlite"
+
     Assert.Contains("module Generated", generated)
+    Assert.Contains("let DbFile =", generated)
+    Assert.Contains(expectedDbFile, generated)
     Assert.Contains("static member SelectByName (name: string) (tx: SqliteTransaction)", generated)
     Assert.Contains("<Compile Include=\"Generated.fs\" />", generatedProject)
     Assert.Contains("<PackageReference Include=\"MigLib\" />", generatedProject)

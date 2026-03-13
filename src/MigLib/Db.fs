@@ -140,7 +140,6 @@ type private TxnContext =
     writes: ResizeArray<MigrationWrite> }
 
 let private txnContext = AsyncLocal<TxnContext option>()
-let private hashPlaceholder = "<HASH>"
 let private sqliteInitialized = lazy (SQLitePCL.Batteries_V2.Init())
 
 let private sqliteConnectionString (dbPath: string) = $"Data Source={dbPath}"
@@ -153,98 +152,14 @@ let openSqliteConnection (dbPath: string) =
   connection.Open()
   connection
 
-let private openReadOnlySqliteConnection (dbPath: string) =
-  ensureSqliteInitialized ()
-
-  let connection =
-    new SqliteConnection $"{sqliteConnectionString dbPath};Mode=ReadOnly"
-
-  connection.Open()
-  connection
-
-let private isHashSegment (value: string) =
-  value.Length = 16 && value |> Seq.forall Uri.IsHexDigit
-
-let private tryReadMigrationStatus (dbPath: string) : string option =
-  try
-    use connection = openReadOnlySqliteConnection dbPath
-
-    use cmd =
-      new SqliteCommand("SELECT status FROM _migration_status WHERE id = 0 LIMIT 1", connection)
-
-    let statusObj = cmd.ExecuteScalar()
-
-    if isNull statusObj then None else Some(string statusObj)
-  with _ ->
-    None
-
-let tryResolveDatabasePath (configuredPath: string) : Result<string, string> =
+let private resolveDatabasePath (configuredPath: string) : Result<string, string> =
   if String.IsNullOrWhiteSpace configuredPath then
     Error "Configured database path is empty."
   else
-    let fullPath = Path.GetFullPath configuredPath
-
-    if not (fullPath.Contains hashPlaceholder) then
-      Ok fullPath
-    else
-      let directory = Path.GetDirectoryName fullPath
-      let fileName = Path.GetFileName fullPath
-      let placeholderIndex = fileName.IndexOf(hashPlaceholder, StringComparison.Ordinal)
-
-      if
-        String.IsNullOrWhiteSpace directory
-        || String.IsNullOrWhiteSpace fileName
-        || placeholderIndex < 0
-      then
-        Error $"Invalid hash-template database path: {configuredPath}"
-      elif not (Directory.Exists directory) then
-        Error $"Directory does not exist for database template '{configuredPath}': {directory}"
-      else
-        let prefix = fileName.Substring(0, placeholderIndex)
-        let suffix = fileName.Substring(placeholderIndex + hashPlaceholder.Length)
-
-        let candidates =
-          Directory.GetFiles(directory, $"{prefix}*{suffix}")
-          |> Array.filter (fun path ->
-            let candidateFileName = Path.GetFileName path
-
-            if
-              candidateFileName.StartsWith(prefix, StringComparison.Ordinal)
-              && candidateFileName.EndsWith(suffix, StringComparison.Ordinal)
-            then
-              let hashLength = candidateFileName.Length - prefix.Length - suffix.Length
-
-              if hashLength <= 0 then
-                false
-              else
-                let hashSegment = candidateFileName.Substring(prefix.Length, hashLength)
-                isHashSegment hashSegment
-            else
-              false)
-          |> Array.sort
-
-        if candidates.Length = 0 then
-          Error $"No database file matched template '{configuredPath}'."
-        elif candidates.Length = 1 then
-          Ok candidates[0]
-        else
-          let readyCandidates =
-            candidates
-            |> Array.filter (fun candidate ->
-              match tryReadMigrationStatus candidate with
-              | Some status -> status.Equals("ready", StringComparison.OrdinalIgnoreCase)
-              | None -> false)
-
-          if readyCandidates.Length = 1 then
-            Ok readyCandidates[0]
-          else
-            let discovered = String.concat ", " candidates
-
-            Error
-              $"Multiple database files matched template '{configuredPath}' and the selection is ambiguous: {discovered}. Set DATABASE_PATH to an explicit file path."
+    Ok(Path.GetFullPath configuredPath)
 
 let resolveDatabasePathOrFail (configuredPath: string) : string =
-  match tryResolveDatabasePath configuredPath with
+  match resolveDatabasePath configuredPath with
   | Ok path -> path
   | Error message -> invalidOp message
 
@@ -291,6 +206,62 @@ let private tableExists (tx: SqliteTransaction) (tableName: string) : Task<bool>
     cmd.Parameters.AddWithValue("@name", tableName) |> ignore
     let! scalar = cmd.ExecuteScalarAsync()
     return not (isNull scalar)
+  }
+
+let private tryReadStatusValue
+  (tx: SqliteTransaction)
+  (tableName: string)
+  : Task<Result<string option, SqliteException>> =
+  task {
+    try
+      let! statusTableExists = tableExists tx tableName
+
+      if not statusTableExists then
+        return Ok None
+      else
+        use cmd =
+          new SqliteCommand($"SELECT status FROM {tableName} WHERE id = 0 LIMIT 1", tx.Connection, tx)
+
+        let! statusObj = cmd.ExecuteScalarAsync()
+
+        if isNull statusObj then
+          return Ok None
+        else
+          return Ok(Some(string statusObj))
+    with :? SqliteException as ex ->
+      return Error ex
+  }
+
+let private ensureNewDatabaseReadyForTransactions (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
+  task {
+    let! statusResult = tryReadStatusValue tx "_migration_status"
+
+    match statusResult with
+    | Error ex -> return Error ex
+    | Ok None ->
+      let! hasStatusTable = tableExists tx "_migration_status"
+
+      if hasStatusTable then
+        return
+          Error(
+            SqliteException(
+              "Target database has a _migration_status table but no status row at id = 0. Run `mig migrate` again or repair the target before serving traffic.",
+              0
+            )
+          )
+      else
+        return Ok()
+    | Ok(Some status) when status.Equals("ready", StringComparison.OrdinalIgnoreCase) -> return Ok()
+    | Ok(Some status) when status.Equals("migrating", StringComparison.OrdinalIgnoreCase) ->
+      return Error(SqliteException("Target database is still migrating. Run `mig cutover` before serving requests.", 0))
+    | Ok(Some status) ->
+      return
+        Error(
+          SqliteException(
+            $"Unsupported _migration_status value '{status}'. Expected 'migrating' or 'ready' before serving requests.",
+            0
+          )
+        )
   }
 
 let private detectMigrationMode (tx: SqliteTransaction) : Task<MigrationMode> =
@@ -463,44 +434,51 @@ let internal runTransactionInternal
   (body: SqliteTransaction -> Task<Result<'a, 'e>>)
   : Task<Result<'a, 'e>> =
   task {
-    match tryResolveDatabasePath dbPath with
+    match resolveDatabasePath dbPath with
     | Error message -> return Error(mapDbError (SqliteException(message, 0)))
     | Ok resolvedDbPath ->
       use connection = openSqliteConnection resolvedDbPath
       use transaction = connection.BeginTransaction()
-      let! mode = detectMigrationMode transaction
+      let! readinessResult = ensureNewDatabaseReadyForTransactions transaction
 
-      let context =
-        { tx = transaction
-          mode = mode
-          writes = ResizeArray() }
+      match readinessResult with
+      | Error ex ->
+        transaction.Rollback()
+        return Error(mapDbError ex)
+      | Ok() ->
+        let! mode = detectMigrationMode transaction
 
-      let previousContext = txnContext.Value
-      txnContext.Value <- Some context
+        let context =
+          { tx = transaction
+            mode = mode
+            writes = ResizeArray() }
 
-      try
+        let previousContext = txnContext.Value
+        txnContext.Value <- Some context
+
         try
-          let! result = body transaction
+          try
+            let! result = body transaction
 
-          match result with
-          | Ok value ->
-            let! flushResult = flushRecordedWrites context
+            match result with
+            | Ok value ->
+              let! flushResult = flushRecordedWrites context
 
-            match flushResult with
-            | Ok() ->
-              transaction.Commit()
-              return Ok value
-            | Error ex ->
+              match flushResult with
+              | Ok() ->
+                transaction.Commit()
+                return Ok value
+              | Error ex ->
+                transaction.Rollback()
+                return Error(mapDbError ex)
+            | Error _ ->
               transaction.Rollback()
-              return Error(mapDbError ex)
-          | Error _ ->
+              return result
+          with :? SqliteException as ex ->
             transaction.Rollback()
-            return result
-        with :? SqliteException as ex ->
-          transaction.Rollback()
-          return Error(mapDbError ex)
-      finally
-        txnContext.Value <- previousContext
+            return Error(mapDbError ex)
+        finally
+          txnContext.Value <- previousContext
   }
 
 type DbRuntime(dbPath: string) =

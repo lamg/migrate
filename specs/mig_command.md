@@ -22,14 +22,7 @@ They communicate through marker tables in the databases:
 
 ## Service DB path resolution
 
-MigLib accepts either an explicit SQLite file path or a hash-template path containing `<HASH>`.
-When a template is used, MigLib applies these rules:
-
-1. If exactly one matching file exists (`<prefix><16-hex><suffix>`), use it.
-2. If multiple matching files exist and exactly one has `_migration_status='ready'`, use that file.
-3. Otherwise resolution fails and the service must be configured with an explicit path.
-
-In practice, hash-template paths are useful for steady-state deployments after cutover. During `migrate` and `drain`, when both old and new databases may coexist and neither is uniquely `ready`, the blocked new service should use the explicit inferred target path instead of a template.
+Services should be configured with the exact schema-bound SQLite filename they intend to use.
 
 ## Schema bootstrap and code generation
 
@@ -74,11 +67,12 @@ Behavior:
 
 1. Evaluates `schema.fsx` and reflects tables, normalized DU tables, views, and query annotations
 2. Generates formatted F# source for the reflected types and query helpers
-3. Re-emits nullary, non-generic scalar DUs as typed F# fields/query parameters while storing them as strings in SQLite
-4. Re-emits `[<Measure>]` declarations and measured numeric field/query types when those units were declared in `schema.fsx`
-5. Writes the generated module to the requested output file
-6. Writes a sibling SDK-style `.fsproj` named after the output file base name with CPM-compatible, versionless `PackageReference` entries
-7. Reports counts for normalized tables, regular tables, and views
+3. Emits a `DbFile` literal set to `<dir-name>-<schema-hash>.sqlite` so services can bind to the schema-specific SQLite file explicitly
+4. Re-emits nullary, non-generic scalar DUs as typed F# fields/query parameters while storing them as strings in SQLite
+5. Re-emits `[<Measure>]` declarations and measured numeric field/query types when those units were declared in `schema.fsx`
+6. Writes the generated module to the requested output file
+7. Writes a sibling SDK-style `.fsproj` named after the output file base name with CPM-compatible, versionless `PackageReference` entries
+8. Reports counts for normalized tables, regular tables, and views
 
 ## Offline mode
 
@@ -167,7 +161,7 @@ If the schema-matched target database already exists and no source candidate is 
 
 If migrate fails after partial setup, the CLI prints a recovery snapshot (old/new migration artifacts and status) plus rerun guidance so operators can safely reset before retrying.
 
-After this command the old service continues operating normally while recording writes. The administrator can deploy the new service pointing at the new database at any time — MigLib in the new service reads `_migration_status(status='migrating')` and rejects all requests until cutover. The administrator can use `mig status` to monitor how many writes have accumulated in the migration log before triggering drain.
+After this command the old service continues operating normally while recording writes. The administrator can deploy the new service pointing at the new database at any time, but MigLib rejects all requests while `_migration_status='migrating'`. The administrator can use `mig status` to monitor how many writes have accumulated in the migration log before triggering drain.
 
 ### `mig drain`
 
@@ -281,7 +275,7 @@ MigLib in the old service periodically checks for the `_migration_marker` table:
 
 ### New service
 
-MigLib in the new service checks the `_migration_status` table on startup and periodically:
+MigLib in the new service checks the `_migration_status` table before running each transaction:
 
 - **`status = 'migrating'`**: all requests (reads and writes) are rejected
 - **`status = 'ready'`**: normal operation
