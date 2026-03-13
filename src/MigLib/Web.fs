@@ -423,30 +423,35 @@ module Respond =
   let bytes (contentType: string) (content: byte array) : WebOp<'env, 'appError, 'custom, unit> =
     Response.append (WriteBytes(contentType, content))
 
-  let json<'a> (value: 'a) =
+  let json<'env, 'appError, 'custom, 'a> (value: 'a) : WebOp<'env, 'appError, 'custom, unit> =
     let boxedValue =
       match box value with
       | null -> None
       | boxed -> Some boxed
 
     Response.append (
-      WriteJson
+      (WriteJson
         { Value = boxedValue
           ValueType = typeof<'a>
           Options = None }
+      : ResponseEffect<'custom>)
     )
 
-  let jsonWith<'a> (options: JsonSerializerOptions) (value: 'a) =
+  let jsonWith<'env, 'appError, 'custom, 'a>
+    (options: JsonSerializerOptions)
+    (value: 'a)
+    : WebOp<'env, 'appError, 'custom, unit> =
     let boxedValue =
       match box value with
       | null -> None
       | boxed -> Some boxed
 
     Response.append (
-      WriteJson
+      (WriteJson
         { Value = boxedValue
           ValueType = typeof<'a>
           Options = Some options }
+      : ResponseEffect<'custom>)
     )
 
   let redirect (location: string) : WebOp<'env, 'appError, 'custom, unit> =

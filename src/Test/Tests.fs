@@ -1349,7 +1349,7 @@ let ``webResult binds TxnStep<Result<_, _>> as app errors`` () =
       let! id = (insertStudent "Alice" |> Web.ofTxnAppResult: WebOp<TestWebEnv, string, unit, int64>)
 
       do! (Respond.statusCode 201: WebOp<TestWebEnv, string, unit, unit>)
-      do! (Respond.text $"{id}": WebOp<TestWebEnv, string, unit, unit>)
+      do! (Respond.json {| id = id |}: WebOp<TestWebEnv, string, unit, unit>)
       return id
     }
 
@@ -1361,14 +1361,14 @@ let ``webResult binds TxnStep<Result<_, _>> as app errors`` () =
   | Ok id -> Assert.Equal(1L, id)
 
   Assert.Equal(201, httpContext.Response.StatusCode)
-  Assert.Equal("text/plain; charset=utf-8", httpContext.Response.ContentType)
+  Assert.Equal("application/json; charset=utf-8", httpContext.Response.ContentType)
   httpContext.Response.Body.Position <- 0L
 
   use reader =
     new StreamReader(httpContext.Response.Body, Encoding.UTF8, false, 1024, true)
 
   let responseBody = reader.ReadToEnd()
-  Assert.Equal("1", responseBody)
+  Assert.Equal("""{"id":1}""", responseBody)
 
   let duplicateContext = createTestHttpContext ()
 

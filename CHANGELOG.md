@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.1] - 2026-03-13
+
+Fixed:
+
+- **MigLib.Web**: Added explicit `WebOp` return signatures to `Respond.json` and `Respond.jsonWith`
+  - prevents F# consumers from widening queued JSON response operations to `WebOp<obj, obj, obj, unit>`
+  - restores clean composition with `webResult`, `Web.ofTxnAppResult`, and typed response helpers
+- **Tests**: Regression coverage now exercises `Respond.json` after `Web.ofTxnAppResult`
 
 ## [4.1.0] - 2026-03-13
 
