@@ -140,6 +140,31 @@ let private getVersionText () =
   else
     $"{version.Major}.{version.Minor}.{version.Build}"
 
+let private formatExceptionDetails (ex: exn) =
+  let rec loop (current: exn) (acc: string list) =
+    if isNull current then
+      List.rev acc
+    else
+      let message =
+        if String.IsNullOrWhiteSpace current.Message then
+          "(no message)"
+        else
+          current.Message.Trim()
+
+      let rendered = $"{current.GetType().FullName}: {message}"
+      loop current.InnerException (rendered :: acc)
+
+  let chain = loop ex [] |> String.concat " --> "
+  let debugValue = Environment.GetEnvironmentVariable("MIG_DEBUG")
+
+  if
+    String.Equals(debugValue, "1", StringComparison.Ordinal)
+    || String.Equals(debugValue, "true", StringComparison.OrdinalIgnoreCase)
+  then
+    $"{chain}{Environment.NewLine}{ex}"
+  else
+    chain
+
 type private DeterministicNewDbPath =
   { schemaPath: string
     schemaHash: string
@@ -283,7 +308,7 @@ let private printMigrateRecoveryGuidance (oldDbPath: string) (newDbPath: string)
 
     eprintfn $"  Old marker status: {oldMarkerStatus}"
     eprintfn $"  Old _migration_log: {oldMigrationLogState}"
-  | Error ex -> eprintfn $"  Old database snapshot unavailable: {ex.Message}"
+  | Error ex -> eprintfn $"  Old database snapshot unavailable: {formatExceptionDetails ex}"
 
   let newDbState = if newDbPresent then "present" else "absent"
   eprintfn $"  New database file: {newDbState} ({newDbPath})"
@@ -307,7 +332,7 @@ let private printMigrateRecoveryGuidance (oldDbPath: string) (newDbPath: string)
     eprintfn $"  New migration status: {newStatus}"
     eprintfn $"  New _id_mapping: {idMappingState}"
     eprintfn $"  New _migration_progress: {migrationProgressState}"
-  | Some(Error ex) -> eprintfn $"  New database snapshot unavailable: {ex.Message}"
+  | Some(Error ex) -> eprintfn $"  New database snapshot unavailable: {formatExceptionDetails ex}"
   | None -> ()
 
   let hasRecordingMarker =
@@ -450,7 +475,7 @@ let migrate (args: ParseResults<MigrateArgs>) =
           printfn $"Copied rows: {result.copiedRows}"
           0
         | Error ex ->
-          eprintfn $"migrate failed: {ex.Message}"
+          eprintfn $"migrate failed: {formatExceptionDetails ex}"
           printMigrateRecoveryGuidance old newDb
           1
 
@@ -492,12 +517,12 @@ let offline (args: ParseResults<OfflineArgs>) =
       | Ok(Some old) ->
         match runOfflineMigrate old schemaPath newDb |> fun t -> t.Result with
         | Error ex ->
-          eprintfn $"offline failed: {ex.Message}"
+          eprintfn $"offline failed: {formatExceptionDetails ex}"
           1
         | Ok result ->
           match runArchiveOld currentDirectory old |> fun t -> t.Result with
           | Error ex ->
-            eprintfn $"offline failed after creating new database: {ex.Message}"
+            eprintfn $"offline failed after creating new database: {formatExceptionDetails ex}"
             1
           | Ok cleanupResult ->
             let previousMarkerStatus =
@@ -555,7 +580,7 @@ let init (args: ParseResults<InitArgs>) =
           printfn $"Seeded rows: {result.seededRows}"
           0
         | Error ex ->
-          eprintfn $"init failed: {ex.Message}"
+          eprintfn $"init failed: {formatExceptionDetails ex}"
           1
 
 let plan (args: ParseResults<PlanArgs>) =
@@ -594,7 +619,7 @@ let plan (args: ParseResults<PlanArgs>) =
       | Ok(Some old) ->
         match getMigratePlan old schemaPath newDb |> fun t -> t.Result with
         | Error ex ->
-          eprintfn $"plan failed: {ex.Message}"
+          eprintfn $"plan failed: {formatExceptionDetails ex}"
           1
         | Ok report ->
           let canRunMigrate = if report.canRunMigrate then "yes" else "no"
@@ -662,7 +687,7 @@ let drain (args: ParseResults<DrainArgs>) =
           printfn "Run `mig cutover` when ready."
           0
         | Error ex ->
-          eprintfn $"drain failed: {ex.Message}"
+          eprintfn $"drain failed: {formatExceptionDetails ex}"
           1
 
 let cutover (args: ParseResults<CutoverArgs>) =
@@ -705,7 +730,7 @@ let cutover (args: ParseResults<CutoverArgs>) =
         printfn $"Dropped _migration_progress: {droppedMigrationProgress}"
         0
       | Error ex ->
-        eprintfn $"cutover failed: {ex.Message}"
+        eprintfn $"cutover failed: {formatExceptionDetails ex}"
         1
 
 let archiveOld (args: ParseResults<ArchiveOldArgs>) =
@@ -748,7 +773,7 @@ let archiveOld (args: ParseResults<ArchiveOldArgs>) =
         printfn $"Replaced existing archive: {replacedExistingArchive}"
         0
       | Error ex ->
-        eprintfn $"archive-old failed: {ex.Message}"
+        eprintfn $"archive-old failed: {formatExceptionDetails ex}"
         1
 
 let reset (args: ParseResults<ResetArgs>) =
@@ -783,7 +808,7 @@ let reset (args: ParseResults<ResetArgs>) =
         if isDryRun then
           match getResetMigrationPlan old newDb |> fun t -> t.Result with
           | Error ex ->
-            eprintfn $"reset failed: {ex.Message}"
+            eprintfn $"reset failed: {formatExceptionDetails ex}"
             1
           | Ok plan ->
             let previousOldMarkerStatus =
@@ -821,7 +846,7 @@ let reset (args: ParseResults<ResetArgs>) =
         else
           match runResetMigration old newDb |> fun t -> t.Result with
           | Error ex ->
-            eprintfn $"reset failed: {ex.Message}"
+            eprintfn $"reset failed: {formatExceptionDetails ex}"
             1
           | Ok result ->
             let previousOldMarkerStatus =
@@ -870,7 +895,7 @@ let status (args: ParseResults<StatusArgs>) =
     | Ok oldPath, _ ->
       match getStatus oldPath inferredNew |> fun t -> t.Result with
       | Error ex ->
-        eprintfn $"status failed: {ex.Message}"
+        eprintfn $"status failed: {formatExceptionDetails ex}"
         1
       | Ok report ->
         let markerStatus = report.oldMarkerStatus |> Option.defaultValue "no marker"
@@ -921,7 +946,7 @@ let status (args: ParseResults<StatusArgs>) =
     | Error _, Some newPath ->
       match getNewDatabaseStatus newPath |> fun t -> t.Result with
       | Error ex ->
-        eprintfn $"status failed: {ex.Message}"
+        eprintfn $"status failed: {formatExceptionDetails ex}"
         1
       | Ok report ->
         let migrationStatus =

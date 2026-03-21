@@ -9,7 +9,7 @@
     <PackageId>migtool</PackageId>
     <RootNamespace>migrate</RootNamespace>
     <AssemblyName>migrate</AssemblyName>
-    <Version>4.1.3</Version>
+    <Version>4.1.4</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <InvariantGlobalization>true</InvariantGlobalization>
 

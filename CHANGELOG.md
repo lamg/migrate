@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.4] - 2026-03-21
+
+Fixed:
+
+- **mig CLI Error Reporting**: Command failures now include full exception chain details instead of only top-level messages
+  - `init`, `migrate`, `offline`, `plan`, `drain`, `cutover`, `archive-old`, `reset`, and `status` now render inner exception context
+  - set `MIG_DEBUG=1` to include full exception text (with stack trace) in CLI failure output
+
 ## [4.1.3] - 2026-03-13
 
 Changed:
