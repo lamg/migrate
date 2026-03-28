@@ -9,10 +9,10 @@
 | F# type | SQLite type |
 |---------|-------------|
 | `int64` | `INTEGER NOT NULL` |
-| `int64<'u>` from `schema.fsx` | `INTEGER NOT NULL` |
+| `int64<'u>` | `INTEGER NOT NULL` |
 | `string` | `TEXT NOT NULL` |
 | `float` | `REAL NOT NULL` |
-| `float<'u>` from `schema.fsx` | `REAL NOT NULL` |
+| `float<'u>` | `REAL NOT NULL` |
 | `byte[]` | `BLOB NOT NULL` |
 | nullary, non-generic DU | `TEXT NOT NULL` |
 
@@ -20,7 +20,7 @@ All columns are `NOT NULL`. Optional data is represented using discriminated uni
 
 Scalar discriminated unions are persisted as the exact F# case name. For example, `InProgress` is stored as `TEXT` value `"InProgress"`.
 
-Units of measure are preserved only for `schema.fsx`-driven code generation, where the original source syntax is available. Reflection over already-compiled CLR types erases units of measure, so `generateCodeFromTypes` cannot recover them.
+Units of measure are currently not preserved by compiled-schema reflection/code generation. The underlying SQLite type is still `INTEGER` or `REAL`, but generated APIs currently expose the erased numeric type.
 
 ## Translation rules
 
@@ -133,6 +133,24 @@ translates to
 CREATE TABLE payment(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, amount REAL NOT NULL, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'utc')));
 ```
 
+### Explicit source-column drops
+
+Source columns are not dropped implicitly during migration planning.
+
+If a target table intentionally removes a source column, declare it explicitly on the target type:
+
+```fsharp
+[<AutoIncPK "id">]
+[<DropColumn "legacyNote">]
+type Student = { id: int64; name: string }
+```
+
+This allows MigLib to accept dropping `legacy_note` from the source table during migration planning.
+
+If `DropColumn` is missing, the planner fails rather than silently dropping data.
+
+`DropColumn` only covers columns from a table that still exists in the target schema. Removing whole source tables remains unsupported.
+
 ### Enum-like scalar unions
 
 Nullary, non-generic discriminated unions can be used as scalar columns:
@@ -163,7 +181,7 @@ Payload-bearing unions and generic unions are not valid scalar columns.
 
 ### Units of measure
 
-Numeric units of measure in `schema.fsx` are stored using their underlying SQLite type:
+Numeric units of measure in `Schema.fs` are stored using their underlying SQLite type:
 
 ```fsharp
 [<Measure>]
@@ -183,7 +201,7 @@ translates to
 CREATE TABLE file(id INTEGER PRIMARY KEY AUTOINCREMENT, content_length INTEGER NOT NULL, progress INTEGER NOT NULL, ratio REAL NOT NULL);
 ```
 
-`mig codegen` re-emits the `[<Measure>]` declaration and preserves the measured F# types in generated records and query signatures when the source is `schema.fsx`.
+Current limitation: compiled-schema code generation does not preserve the `[<Measure>]` declaration or the measured F# types in generated records and query signatures.
 
 ### Indexes
 
@@ -355,15 +373,10 @@ The `txn` computation expression builds reusable transaction-scoped operations. 
 ```fsharp
 let insertStudent (name: string) =
   txn {
-    let! _ =
-      fun tx ->
-        task {
-          use cmd = new SqliteCommand("INSERT INTO student(name) VALUES (@name)", tx.Connection, tx)
-          cmd.Parameters.AddWithValue("@name", name) |> ignore
-          let! _ = cmd.ExecuteNonQueryAsync()
-          return Ok ()
-        }
-
+    // id = 0 is ignored because in the above Student definition is marked
+    // as autoincrement
+    let student = { id = 0L; name = name; age = 18L }
+    let! (_actualId:int64) = Student.Insert student
     return ()
   }
 
@@ -377,7 +390,7 @@ Use `dbTxn` when you need the transaction boundary. Use `txn` when you need a co
 
 ### Foreign keys
 
-Foreign keys are automatically generated when a record field references another type defined in the same .fsx database specification. The referenced type must have a primary key.
+Foreign keys are automatically generated when a record field references another type defined in the same schema module. The referenced type must have a primary key.
 
 ```fsharp
 [<AutoIncPK "id">]
@@ -499,17 +512,16 @@ INSERT OR REPLACE INTO student(id, name, age) VALUES (1, 'System', 0);
 
 ## SQL generation
 
-The database schema is defined in .fsx files. The tool evaluates the script and uses reflection on the resulting types to generate SQL and run the migration.
+The supported CLI code-generation path now starts from compiled schema types plus `Schema.fs` as the source file for schema-bound naming.
 
-Use `mig codegen` to materialize the reflected schema as F# query helpers next to the schema script:
+Use `mig codegen` to materialize generated `Db.fs` code next to `Schema.fs`:
 
 ```sh
-mig codegen [--dir|-d /path/to/project] [--module|-m Schema] [--output|-o Schema.fs]
+mig codegen [--dir|-d /path/to/project] [--assembly|-a /path/to/App.dll] [--schema-module|-s Schema] [--module|-m Db] [--output|-o Db.fs]
 ```
 
-The CLI evaluates `schema.fsx`, generates formatted F# source for reflected tables/views/query helpers, emits a `DbFile` literal whose value is `<dir-name>-<schema-hash>.sqlite`, and writes the output file into the same directory as `schema.fsx`. The output file must be a plain file name, not an absolute path or subdirectory path.
+The CLI reads `Schema.fs` to derive the schema-bound SQLite filename, reflects tables/views/query helpers from the compiled schema module, emits a `DbFile` literal whose value is `<dir-name>-<schema-hash>.sqlite`, and writes the output file into the same directory as `Schema.fs`. The default generated module is `Db`, and the default output file is `Db.fs`. The output file must be a plain file name, not an absolute path or subdirectory path.
 
 Generated source preserves:
 
 - nullary, non-generic scalar DUs as typed F# fields and query parameters, while storing them as strings in SQLite
-- units of measure declared in `schema.fsx` for numeric fields and query parameters

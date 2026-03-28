@@ -1,6 +1,6 @@
 # mig command specification
 
-Every migration creates a fresh database from the .fsx specification and copies data from the old one. There is no incremental migration state to track — the .fsx file is always the complete source of truth. This means there is no need for a migration history table (`_schema_migration`) or a `mig log` command.
+Every migration creates a fresh database from the generated schema description and copies data from the old one. There is no incremental migration state to track. Runtime migration commands operate on compiled generated `Db` modules, while `mig codegen` remains the bridge from `Schema.fs` plus compiled schema types to generated runtime code.
 
 ## Architecture
 
@@ -29,19 +29,19 @@ Services should be configured with the exact schema-bound SQLite filename they i
 ### `mig init`
 
 ```sh
-mig init [--dir|-d /path/to/project]
+mig init [--dir|-d /path/to/project] [--assembly|-a /path/to/App.dll] [--module|-m Db]
 ```
 
 Schema-only bootstrap mode (no source database required):
 
 - Uses the current directory as project root (override with `--dir` / `-d`)
-- Uses `<dir>/schema.fsx` as schema input
-- Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite`
+- Loads a generated `Db`-style module from `--assembly` and `--module`
+- Derives target path from `DbFile` in the generated module
 - If the schema-matched target already exists, reports skip and exits `0`
 
 Behavior:
 
-1. Evaluates `schema.fsx` and derives schema + seed inserts via reflection
+1. Loads `Schema` and `DbFile` from the compiled generated module
 2. Creates a new SQLite file at the deterministic target path
 3. Creates all tables, indexes, views, and triggers
 4. Applies schema seed inserts in dependency order
@@ -52,27 +52,25 @@ This command does not create migration coordination tables (`_migration_status`,
 ### `mig codegen`
 
 ```sh
-mig codegen [--dir|-d /path/to/project] [--module|-m Schema] [--output|-o Schema.fs]
+mig codegen [--dir|-d /path/to/project] [--assembly|-a /path/to/App.dll] [--schema-module|-s Schema] [--module|-m <name>] [--output|-o <file>]
 ```
 
 Schema/code generation mode (no database mutations):
 
 - Uses the current directory as project root (override with `--dir` / `-d`)
-- Uses `<dir>/schema.fsx` as schema input
-- Uses `Schema` as the default generated module name (override with `--module` / `-m`)
-- Uses `Schema.fs` as the default output file name (override with `--output` / `-o`)
-- Requires the output to be a file name in the same directory as `schema.fsx` (no absolute paths or subdirectories)
+- Uses `<dir>/Schema.fs` for schema hashing
+- Loads schema types from `--assembly` and `--schema-module`
+- Defaults to generated module `Db` and output file `Db.fs`
+- Requires the output to be a file name in the same schema directory (no absolute paths or subdirectories)
 
 Behavior:
 
-1. Evaluates `schema.fsx` and reflects tables, normalized DU tables, views, and query annotations
+1. Reflects tables, normalized DU tables, views, and query annotations from the compiled schema module
 2. Generates formatted F# source for the reflected types and query helpers
 3. Emits a `DbFile` literal set to `<dir-name>-<schema-hash>.sqlite` so services can bind to the schema-specific SQLite file explicitly
 4. Re-emits nullary, non-generic scalar DUs as typed F# fields/query parameters while storing them as strings in SQLite
-5. Re-emits `[<Measure>]` declarations and measured numeric field/query types when those units were declared in `schema.fsx`
-6. Writes the generated module to the requested output file
-7. Writes a sibling SDK-style `.fsproj` named after the output file base name with CPM-compatible, versionless `PackageReference` entries
-8. Reports counts for normalized tables, regular tables, and views
+5. Writes the generated module to the requested output file
+6. Reports counts for normalized tables, regular tables, and views
 
 ## Offline mode
 
@@ -81,21 +79,21 @@ For deployments where the application can stay offline during migration, `mig` a
 ### `mig offline`
 
 ```sh
-mig offline [--dir|-d /path/to/project]
+mig offline [--dir|-d /path/to/project] [--assembly|-a /path/to/App.dll] [--module|-m Db]
 ```
 
 Default behavior:
 
 - Uses the current directory as project root (override with `--dir` / `-d`)
-- Uses `<dir>/schema.fsx` as schema input
-- Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite`
+- Loads a generated `Db`-style module from `--assembly` and `--module`
+- Derives target path from `DbFile` in the generated module
 - Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file excluding the target path
 
 If the schema-matched target database already exists and no source candidate is found, offline migration is skipped as a no-op.
 
 Behavior:
 
-1. Evaluates `schema.fsx` and derives the target schema via reflection
+1. Loads `Schema`, `SchemaIdentity`, and `DbFile` from the compiled generated module
 2. Creates the new SQLite file with the target schema plus `_schema_identity`
 3. Bulk-copies data from old to new in FK dependency order
 4. Archives the old database into `<dir>/archive/<old-file-name>` after the copy succeeds, replacing any existing file with the same name
@@ -111,14 +109,14 @@ When services are deployed, the administrator can run one optional planning comm
 ### `mig plan`
 
 ```sh
-mig plan [--dir|-d /path/to/project]
+mig plan [--dir|-d /path/to/project] [--assembly|-a /path/to/App.dll] [--module|-m Db]
 ```
 
 Dry-run planning mode (no database mutations):
 
 - Uses the current directory as project root (override with `--dir` / `-d`)
-- Uses `<dir>/schema.fsx` as schema input
-- Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite`
+- Loads a generated `Db`-style module from `--assembly` and `--module`
+- Derives target path from `DbFile` in the generated module
 - Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file excluding the target path
 
 If the schema-matched target database already exists and no source candidate is found, plan is skipped as a no-op.
@@ -140,19 +138,19 @@ Exit code:
 ### `mig migrate`
 
 ```
-mig migrate [--dir|-d /path/to/project]
+mig migrate [--dir|-d /path/to/project] [--assembly|-a /path/to/App.dll] [--module|-m Db]
 ```
 
 Default behavior:
 
 - Uses the current directory as project root (override with `--dir` / `-d`)
-- Uses `<dir>/schema.fsx` as schema input
-- Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite`
+- Loads a generated `Db`-style module from `--assembly` and `--module`
+- Derives target path from `DbFile` in the generated module
 - Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file excluding the target path
 
 If the schema-matched target database already exists and no source candidate is found, migrate is skipped as a no-op.
 
-1. Evaluates `schema.fsx` and derives the new schema via reflection
+1. Loads `Schema`, `SchemaIdentity`, and `DbFile` from the compiled generated module
 2. Creates the new SQLite file with the new schema, `_id_mapping`, `_migration_status(status='migrating')`, and `_schema_identity`
 3. Writes `_migration_marker(status='recording')` and `_migration_log` to the old database
 4. MigLib in the old service detects the marker and begins recording all writes executed inside `dbTxn` transactions into `_migration_log`
@@ -166,13 +164,14 @@ After this command the old service continues operating normally while recording 
 ### `mig drain`
 
 ```
-mig drain [--dir|-d /path/to/project]
+mig drain [--dir|-d /path/to/project] [--assembly|-a /path/to/App.dll] [--module|-m Db]
 ```
 
 Default behavior:
 
 - Uses the current directory as project root (override with `--dir` / `-d`)
-- Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite` from `<dir>/schema.fsx`
+- Without `--assembly`, derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite` from `<dir>/Schema.fs`
+- In compiled mode, resolves the target path from `DbFile` in the generated module loaded from `--assembly` and `--module`
 - Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file excluding the target path
 
 1. Updates `_migration_marker` status to 'draining' in the old database
@@ -186,13 +185,14 @@ Only writes are unavailable between drain and cutover. This window depends on ho
 ### `mig cutover`
 
 ```
-mig cutover [--dir|-d /path/to/project]
+mig cutover [--dir|-d /path/to/project] [--assembly|-a /path/to/App.dll] [--module|-m Db]
 ```
 
 Run after `mig drain` has exited:
 
 - Uses the current directory as project root (override with `--dir` / `-d`)
-- Derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite` from `<dir>/schema.fsx`
+- Without `--assembly`, derives target path as `<dir>/<dir-name>-<schema-hash>.sqlite` from `<dir>/Schema.fs`
+- In compiled mode, resolves the target path from `DbFile` in the generated module loaded from `--assembly` and `--module`
 
 - Verifies that drain is complete from `_migration_progress`; when the old DB can also be inferred, re-checks old-db replay safety (`_migration_marker='draining'`, `_migration_log` present, no log entries beyond the replay checkpoint)
 - Drops replay-only tables (`_id_mapping`, `_migration_progress`) from the new database
@@ -206,12 +206,14 @@ Old migration tables (`_migration_marker`, `_migration_log`) are retained until 
 ### `mig archive-old`
 
 ```
-mig archive-old [--dir|-d /path/to/project]
+mig archive-old [--dir|-d /path/to/project] [--assembly|-a /path/to/App.dll] [--module|-m Db]
 ```
 
 Optional command for archived environments, run after traffic has moved to the new service:
 
 - Uses the current directory as project root (override with `--dir` / `-d`)
+- Without `--assembly`, excludes the inferred current-schema target when it can be resolved from `Schema.fs`
+- In compiled mode, excludes the target path resolved from `DbFile` in the generated module loaded from `--assembly` and `--module`
 - Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file (excluding inferred current-schema target when available)
 
 - Validates the old database is not still in `_migration_marker(status='recording')`
@@ -223,13 +225,14 @@ Optional command for archived environments, run after traffic has moved to the n
 ### `mig reset`
 
 ```sh
-mig reset [--dir|-d /path/to/project] [--dry-run]
+mig reset [--dir|-d /path/to/project] [--assembly|-a /path/to/App.dll] [--module|-m Db] [--dry-run]
 ```
 
 Optional command for failed/aborted migrations before cutover:
 
 - Uses the current directory as project root (override with `--dir` / `-d`)
-- Uses `<dir>/schema.fsx` to infer target path `<dir>/<dir-name>-<schema-hash>.sqlite`
+- Without `--assembly`, infers target path `<dir>/<dir-name>-<schema-hash>.sqlite` from `Schema.fs`
+- In compiled mode, resolves the target path from `DbFile` in the generated module loaded from `--assembly` and `--module`
 - Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file excluding the inferred target
 
 Behavior:
@@ -245,14 +248,16 @@ Use `mig reset` to return to a clean pre-migration state after a failed migrate 
 ### `mig status`
 
 ```
-mig status [--dir|-d /path/to/project]
+mig status [--dir|-d /path/to/project] [--assembly|-a /path/to/App.dll] [--module|-m Db]
 ```
 
 Shows the current migration state:
 
 - Uses the current directory as project root (override with `--dir` / `-d`)
+- Without `--assembly`, infers the new DB from `Schema.fs`
+- In compiled mode, resolves the new DB from `DbFile` in the generated module loaded from `--assembly` and `--module`
 - Auto-detects source DB as exactly one `<dir>/<dir-name>-<old-hash>.sqlite` file (excluding inferred new target when present)
-- Infers new DB as `<dir>/<dir-name>-<schema-hash>.sqlite` from `<dir>/schema.fsx` and includes it only when that file exists
+- Includes the inferred new DB only when that file exists
 - If old DB cannot be inferred but inferred new DB exists, status falls back to new-only inspection (pending replay/old marker metrics become unavailable)
 
 - Marker status in old database (recording, draining, or no marker)
@@ -284,8 +289,8 @@ MigLib in the new service checks the `_migration_status` table before running ea
 
 | Command | What it does | Who reacts |
 |---|---|---|
-| `mig init` | Creates a schema-matched database from `schema.fsx` + seed data (no source DB) | — |
-| `mig codegen` | Generates F# query helpers from `schema.fsx` into a source file | — |
+| `mig init` | Creates a schema-matched database from a compiled generated module + seed data (no source DB) | — |
+| `mig codegen` | Generates `Db.fs` and query helpers from `Schema.fs` plus a compiled schema module | — |
 | `mig offline` | Creates a fully copied target DB in one step without hot-migration tables | — |
 | `mig plan` | Prints dry-run migration plan and prerequisites without mutating DBs | — |
 | `mig migrate` | Creates new DB, copies data, exits | Old service starts recording writes |

@@ -474,7 +474,7 @@ module WebRuntime =
     (applyCustomEffect: HttpContext -> 'custom -> Task<Result<unit, WebError<'appError>>>)
     : WebRuntime<'env, 'appError, 'custom> =
     { Env = env
-      JsonOptions = JsonSerializerOptions(JsonSerializerDefaults.Web)
+      JsonOptions = JsonSerializerOptions JsonSerializerDefaults.Web
       ApplyCustomEffect = applyCustomEffect }
 
   let withJsonOptions

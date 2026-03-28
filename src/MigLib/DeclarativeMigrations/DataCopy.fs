@@ -3,9 +3,9 @@ module Mig.DeclarativeMigrations.DataCopy
 open System
 open System.Collections.Generic
 open System.Globalization
-open FsToolkit.ErrorHandling
 open Mig.DeclarativeMigrations.SchemaDiff
 open Mig.DeclarativeMigrations.Types
+open MigLib.Util
 
 type internal ForeignKeyMapping =
   { fkColumns: string list
@@ -68,15 +68,6 @@ let private getAutoincrementPrimaryKeyColumn (table: CreateTable) : string optio
       |> List.tryPick (function
         | PrimaryKey pk when pk.isAutoincrement -> Some column.name
         | _ -> None))
-
-let private defaultExpr (columnType: SqlType) =
-  match columnType with
-  | SqlInteger -> Integer 0
-  | SqlText -> String ""
-  | SqlReal -> Real 0.0
-  | SqlTimestamp -> String ""
-  | SqlString -> String ""
-  | SqlFlexible -> String ""
 
 let private identityPart (value: Expr) =
   match value with
@@ -302,7 +293,7 @@ let private orderByDependencies (steps: TableCopyStep list) : TableCopyStep list
 
 let internal buildBulkCopyPlan (source: SqlFile) (target: SqlFile) : Result<BulkCopyPlan, string> =
   result {
-    let schemaPlan = buildSchemaCopyPlan source target
+    let! schemaPlan = buildSchemaCopyPlan source target
 
     let sourceTablesByName =
       source.tables |> List.map (fun table -> table.name, table) |> Map.ofList
@@ -427,7 +418,6 @@ let internal projectRowForInsert
               | SourceColumn columnName ->
                 getColumnValue sourceRow columnName $"source table '{step.mapping.sourceTable}'"
               | DefaultExpr expr -> Ok expr
-              | TypeDefault columnType -> Ok(defaultExpr columnType)
 
             return row.Add(mapping.targetColumn, value)
           })

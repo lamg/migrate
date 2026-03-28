@@ -4,10 +4,10 @@ open System
 open System.Globalization
 open System.Text.Json.Nodes
 open System.Threading.Tasks
-open FsToolkit.ErrorHandling
 open Microsoft.Data.Sqlite
 open Mig.DeclarativeMigrations.DataCopy
 open Mig.DeclarativeMigrations.Types
+open MigLib.Util
 
 type internal ReplayOperation =
   | Insert
@@ -485,17 +485,23 @@ let internal replayDrainEntries
   : Task<Result<IdMappingStore, SqliteException>> =
   task {
     let groups = groupEntriesByTransaction entries
+
+    let isOk =
+      function
+      | Ok _ -> true
+      | Error _ -> false
+
     let mutable mappings = initialIdMappings
     let mutable result: Result<IdMappingStore, SqliteException> = Ok mappings
     let mutable index = 0
 
-    while index < groups.Length && result.IsOk do
+    while index < groups.Length && isOk result do
       let _, groupEntries = groups[index]
       use tx = connection.BeginTransaction()
       let mutable groupResult: Result<IdMappingStore, SqliteException> = Ok mappings
       let mutable opIndex = 0
 
-      while opIndex < groupEntries.Length && groupResult.IsOk do
+      while opIndex < groupEntries.Length && isOk groupResult do
         let entry = groupEntries[opIndex]
         let! replayResult = executeReplayEntry bulkPlan entry tx mappings
         groupResult <- replayResult

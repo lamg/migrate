@@ -6,8 +6,12 @@ open System.IO
 open System.Security.Cryptography
 open System.Text
 open System.Text.Json.Nodes
+open System.Threading
 open System.Threading.Tasks
+open MigLib.Build
+open MigLib.CompiledSchema
 open MigLib.Db
+open MigLib.Util
 open MigLib.Web
 open Mig.CodeGen.CodeGen
 open Mig.DeclarativeMigrations.Types
@@ -16,13 +20,13 @@ open Mig.DeclarativeMigrations.DrainReplay
 open Mig.DeclarativeMigrations.SchemaDiff
 open Mig.HotMigration
 open Mig.SchemaReflection
-open Mig.SchemaScript
 open Microsoft.AspNetCore.Http
 open Microsoft.Data.Sqlite
 open Xunit
 
 let private mkColumn name columnType constraints =
   { name = name
+    previousName = None
     columnType = columnType
     constraints = constraints
     enumLikeDu = None
@@ -30,6 +34,8 @@ let private mkColumn name columnType constraints =
 
 let private mkTable name columns constraints =
   { name = name
+    previousName = None
+    dropColumns = []
     columns = columns
     constraints = constraints
     queryByAnnotations = []
@@ -57,6 +63,7 @@ let private mkLogEntry id txnId ordering operation sourceTable rowData =
     rowData = rowData }
 
 let private cliIoLock = obj ()
+let private testSqliteDirectoryEnvVar = "TEST_MIG_SQLITE_DIR"
 
 let private runMigCliInDirectory (workingDirectory: string option) (args: string list) =
   lock cliIoLock (fun () ->
@@ -82,7 +89,9 @@ let private runMigCliInDirectory (workingDirectory: string option) (args: string
 
 let private runMigCli (args: string list) = runMigCliInDirectory None args
 
-let private deriveShortSchemaHashFromScript (schemaPath: string) =
+let private withProcessStateLock (f: unit -> 'a) = lock cliIoLock f
+
+let private deriveShortSchemaHashFromSourceFile (schemaPath: string) =
   let normalizeLineEndings (text: string) =
     text.Replace("\r\n", "\n").Replace("\r", "\n")
 
@@ -92,10 +101,59 @@ let private deriveShortSchemaHashFromScript (schemaPath: string) =
   let hashBytes = sha256.ComputeHash schemaBytes
   Convert.ToHexString(hashBytes).ToLowerInvariant().Substring(0, 16)
 
-let private deriveDeterministicNewDbPathFromSchema (directoryPath: string) (schemaPath: string) =
-  let schemaHash = deriveShortSchemaHashFromScript schemaPath
-  let directoryName = DirectoryInfo(directoryPath).Name
-  Path.Combine(directoryPath, $"{directoryName}-{schemaHash}.sqlite")
+let private deriveDeterministicNewDbPathFromSchemaFile (directoryPath: string) (schemaPath: string) =
+  match deriveSchemaBoundDbFileName schemaPath with
+  | Ok dbFileName -> Path.Combine(directoryPath, dbFileName)
+  | Error error -> failwith $"Expected schema path to produce a deterministic DB file name, got: {error}"
+
+let private loadSchemaIdentityFromSourceFile (schemaPath: string) =
+  { schemaHash = deriveShortSchemaHashFromSourceFile schemaPath
+    schemaCommit = None }
+
+let private studentSchema =
+  { emptyFile with
+      tables =
+        [ mkTable
+            "student"
+            [ mkColumn
+                "id"
+                SqlInteger
+                [ NotNull
+                  PrimaryKey
+                    { constraintName = None
+                      columns = []
+                      isAutoincrement = true } ]
+              mkColumn "name" SqlText [ NotNull ] ]
+            [] ] }
+
+let private accountInvoiceSchema =
+  { emptyFile with
+      tables =
+        [ mkTable
+            "account"
+            [ mkColumn
+                "id"
+                SqlInteger
+                [ NotNull
+                  PrimaryKey
+                    { constraintName = None
+                      columns = []
+                      isAutoincrement = true } ]
+              mkColumn "name" SqlText [ NotNull ] ]
+            []
+          mkTable
+            "invoice"
+            [ mkColumn
+                "id"
+                SqlInteger
+                [ NotNull
+                  PrimaryKey
+                    { constraintName = None
+                      columns = []
+                      isAutoincrement = true } ]
+              mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ]
+              mkColumn "total" SqlReal [ NotNull ] ]
+            [] ] }
 
 let private findGitRootOrFail (startDirectory: string) =
   let rec loop (currentDirectory: string) =
@@ -218,6 +276,22 @@ let private createStudentDatabase (dbPath: string) (studentNames: string list) (
 
   connection.Close()
 
+let private countStudentRows (dbPath: string) =
+  use connection = openSqliteConnection dbPath
+  use cmd = new SqliteCommand("SELECT COUNT(*) FROM student", connection)
+  cmd.ExecuteScalar() :?> int64
+
+[<PreviousName("legacy_student")>]
+[<AutoIncPK "id">]
+type private ReflectionStudentWithPreviousName =
+  { id: int64
+    [<PreviousName("full_name")>]
+    name: string }
+
+[<DropColumn("legacy_note")>]
+[<AutoIncPK "id">]
+type private ReflectionStudentWithDroppedColumn = { id: int64; name: string }
+
 [<Fact>]
 let ``resolveDatabasePathOrFail returns explicit absolute path when configured path is explicit`` () =
   let tempDir =
@@ -233,6 +307,630 @@ let ``resolveDatabasePathOrFail returns explicit absolute path when configured p
   Assert.Equal(Path.GetFullPath dbPath, resolvedPath)
 
   Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``resolveDatabaseFilePathOrFail combines directory and generated file name`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_resolve_file_path_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let resolvedPath =
+    resolveDatabaseFilePathOrFail tempDir "marketdesk-1111222233334444.sqlite"
+
+  Assert.Equal(Path.Combine(Path.GetFullPath tempDir, "marketdesk-1111222233334444.sqlite"), resolvedPath)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``resolveRuntimeSqliteDirectory uses env var when cli override is absent`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_runtime_dir_env_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let resolvedPath =
+    withProcessStateLock (fun () ->
+      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
+
+      try
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, tempDir)
+        resolveRuntimeSqliteDirectoryOrFail (Some testSqliteDirectoryEnvVar) None
+      finally
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+
+  Assert.Equal(Path.GetFullPath tempDir, resolvedPath)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``resolveEnvVarSqliteDirectory uses the named env var without requiring an override parameter`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_env_only_runtime_dir_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let resolvedPath =
+    withProcessStateLock (fun () ->
+      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
+
+      try
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, tempDir)
+        resolveEnvVarSqliteDirectoryOrFail testSqliteDirectoryEnvVar
+      finally
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+
+  Assert.Equal(Path.GetFullPath tempDir, resolvedPath)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``resolveEnvVarSqliteDirectory rejects a blank env var name`` () =
+  let error: InvalidOperationException =
+    Assert.Throws<InvalidOperationException>(fun () -> resolveEnvVarSqliteDirectoryOrFail " " |> ignore)
+
+  Assert.Contains("environment variable name is empty", error.Message)
+
+[<Fact>]
+let ``resolveRuntimeSqliteDirectory prefers cli override over env var`` () =
+  let envDir =
+    Path.Combine(Path.GetTempPath(), $"mig_runtime_dir_env_override_{Guid.NewGuid()}")
+
+  let cliDir =
+    Path.Combine(Path.GetTempPath(), $"mig_runtime_dir_cli_override_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory envDir |> ignore
+  Directory.CreateDirectory cliDir |> ignore
+
+  let resolvedPath =
+    withProcessStateLock (fun () ->
+      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
+
+      try
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
+        resolveRuntimeSqliteDirectoryOrFail (Some testSqliteDirectoryEnvVar) (Some cliDir)
+      finally
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+
+  Assert.Equal(Path.GetFullPath cliDir, resolvedPath)
+
+  Directory.Delete(envDir, true)
+  Directory.Delete(cliDir, true)
+
+[<Fact>]
+let ``resolveRuntimeSqliteDirectory falls back to current directory when unset`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_runtime_dir_current_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let resolvedPath =
+    withProcessStateLock (fun () ->
+      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
+      let previousDirectory = Directory.GetCurrentDirectory()
+
+      try
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, null)
+        Directory.SetCurrentDirectory tempDir
+        resolveRuntimeSqliteDirectoryOrFail (Some testSqliteDirectoryEnvVar) None
+      finally
+        Directory.SetCurrentDirectory previousDirectory
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+
+  Assert.Equal(Path.GetFullPath tempDir, resolvedPath)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``resolveRuntimeDatabaseFilePathOrFail combines runtime directory policy with generated file name`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_runtime_file_path_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let resolvedPath =
+    withProcessStateLock (fun () ->
+      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
+
+      try
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, tempDir)
+
+        resolveRuntimeDatabaseFilePathOrFail (Some testSqliteDirectoryEnvVar) None "marketdesk-1111222233334444.sqlite"
+      finally
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+
+  Assert.Equal(Path.Combine(Path.GetFullPath tempDir, "marketdesk-1111222233334444.sqlite"), resolvedPath)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``resolveEnvVarDatabaseFilePathOrFail combines env-var directory policy with generated file name`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_env_only_runtime_file_path_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let resolvedPath =
+    withProcessStateLock (fun () ->
+      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
+
+      try
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, tempDir)
+
+        resolveEnvVarDatabaseFilePathOrFail testSqliteDirectoryEnvVar "marketdesk-1111222233334444.sqlite"
+      finally
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+
+  Assert.Equal(Path.Combine(Path.GetFullPath tempDir, "marketdesk-1111222233334444.sqlite"), resolvedPath)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``getStartupDatabaseDecision returns migrate when target database is missing`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_startup_decision_missing_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbFileName = "marketdesk-1111222233334444.sqlite"
+  let expectedPath = Path.Combine(Path.GetFullPath tempDir, dbFileName)
+
+  let decisionResult =
+    getStartupDatabaseDecision tempDir dbFileName |> fun t -> t.Result
+
+  match decisionResult with
+  | Error ex -> failwith $"Expected startup decision to succeed, got error: {ex.Message}"
+  | Ok(MigrateThisInstance dbPath) -> Assert.Equal(expectedPath, dbPath)
+  | Ok other -> failwith $"Expected startup decision to request migration, got: {other}"
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``getStartupDatabaseDecision returns use existing when target database is ready without status table`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_startup_decision_ready_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbFileName = "marketdesk-1111222233334444.sqlite"
+  let dbPath = Path.Combine(tempDir, dbFileName)
+  createStudentDatabase dbPath [ "Alice" ] None
+
+  let decisionResult =
+    getStartupDatabaseDecision tempDir dbFileName |> fun t -> t.Result
+
+  match decisionResult with
+  | Error ex -> failwith $"Expected startup decision to succeed, got error: {ex.Message}"
+  | Ok(UseExisting resolvedPath) -> Assert.Equal(Path.GetFullPath dbPath, resolvedPath)
+  | Ok other -> failwith $"Expected startup decision to use existing database, got: {other}"
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``getStartupDatabaseDecision returns wait when target database is still migrating`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_startup_decision_wait_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbFileName = "marketdesk-1111222233334444.sqlite"
+  let dbPath = Path.Combine(tempDir, dbFileName)
+  createDatabaseWithMigrationStatus dbPath (Some "migrating")
+
+  let decisionResult =
+    getStartupDatabaseDecision tempDir dbFileName |> fun t -> t.Result
+
+  match decisionResult with
+  | Error ex -> failwith $"Expected startup decision to succeed, got error: {ex.Message}"
+  | Ok(WaitForMigration resolvedPath) -> Assert.Equal(Path.GetFullPath dbPath, resolvedPath)
+  | Ok other -> failwith $"Expected startup decision to wait, got: {other}"
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``getStartupDatabaseDecision returns exit early when target database status row is missing`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_startup_decision_invalid_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbFileName = "marketdesk-1111222233334444.sqlite"
+  let dbPath = Path.Combine(tempDir, dbFileName)
+
+  use connection = openSqliteConnection dbPath
+
+  use cmd =
+    new SqliteCommand(
+      "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);",
+      connection
+    )
+
+  cmd.ExecuteNonQuery() |> ignore
+  connection.Close()
+
+  let decisionResult =
+    getStartupDatabaseDecision tempDir dbFileName |> fun t -> t.Result
+
+  match decisionResult with
+  | Error ex -> failwith $"Expected startup decision to succeed, got error: {ex.Message}"
+  | Ok(ExitEarly(resolvedPath, reason)) ->
+    Assert.Equal(Path.GetFullPath dbPath, resolvedPath)
+    Assert.Contains("no status row", reason)
+  | Ok other -> failwith $"Expected startup decision to exit early, got: {other}"
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``getStartupDatabaseDecisionFromRuntimeConfig uses runtime directory precedence`` () =
+  let envDir =
+    Path.Combine(Path.GetTempPath(), $"mig_runtime_decision_env_{Guid.NewGuid()}")
+
+  let cliDir =
+    Path.Combine(Path.GetTempPath(), $"mig_runtime_decision_cli_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory envDir |> ignore
+  Directory.CreateDirectory cliDir |> ignore
+
+  let dbFileName = "marketdesk-1111222233334444.sqlite"
+  let expectedPath = Path.Combine(Path.GetFullPath cliDir, dbFileName)
+
+  let decisionResult =
+    withProcessStateLock (fun () ->
+      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
+
+      try
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
+
+        getStartupDatabaseDecisionFromRuntimeConfig (Some testSqliteDirectoryEnvVar) (Some cliDir) dbFileName
+        |> fun t -> t.Result
+      finally
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+
+  match decisionResult with
+  | Error ex -> failwith $"Expected startup decision to succeed, got error: {ex.Message}"
+  | Ok(MigrateThisInstance dbPath) -> Assert.Equal(expectedPath, dbPath)
+  | Ok other -> failwith $"Expected startup decision to use CLI-selected runtime directory, got: {other}"
+
+  Directory.Delete(envDir, true)
+  Directory.Delete(cliDir, true)
+
+[<Fact>]
+let ``getStartupDatabaseDecisionFromEnvVar uses the named env var for the target database directory`` () =
+  let envDir =
+    Path.Combine(Path.GetTempPath(), $"mig_env_only_runtime_decision_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory envDir |> ignore
+
+  let dbFileName = "marketdesk-1111222233334444.sqlite"
+  let expectedPath = Path.Combine(Path.GetFullPath envDir, dbFileName)
+
+  let decisionResult =
+    withProcessStateLock (fun () ->
+      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
+
+      try
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
+
+        getStartupDatabaseDecisionFromEnvVar testSqliteDirectoryEnvVar dbFileName
+        |> fun t -> t.Result
+      finally
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+
+  match decisionResult with
+  | Error ex -> failwith $"Expected startup decision to succeed, got error: {ex.Message}"
+  | Ok(MigrateThisInstance dbPath) -> Assert.Equal(expectedPath, dbPath)
+  | Ok other -> failwith $"Expected startup decision to use env-selected runtime directory, got: {other}"
+
+[<Fact>]
+let ``startService returns a DbTxnBuilder for an already ready target database`` () =
+  let envDir =
+    Path.Combine(Path.GetTempPath(), $"mig_start_service_ready_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory envDir |> ignore
+
+  let dbFileName = "marketdesk-1111222233334444.sqlite"
+  let dbPath = Path.Combine(envDir, dbFileName)
+  createStudentDatabase dbPath [ "Alice" ] None
+
+  let result =
+    withProcessStateLock (fun () ->
+      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
+
+      try
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
+
+        startService
+          testSqliteDirectoryEnvVar
+          dbFileName
+          { schemaHash = "1111222233334444"
+            schemaCommit = None }
+          studentSchema
+          (fun () -> failwith "inferPreviousDatabasePath should not be called")
+          CancellationToken.None
+        |> fun t -> t.Result
+      finally
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+
+  match result with
+  | Error ex -> failwith $"Expected startService to succeed, got error: {ex.Message}"
+  | Ok builder -> Assert.Equal(Path.GetFullPath dbPath, builder.DbPath)
+
+  Directory.Delete(envDir, true)
+
+[<Fact>]
+let ``startService initializes the target database when no previous database exists`` () =
+  let envDir =
+    Path.Combine(Path.GetTempPath(), $"mig_start_service_init_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory envDir |> ignore
+
+  let dbFileName = "marketdesk-1111222233334444.sqlite"
+  let expectedPath = Path.Combine(Path.GetFullPath envDir, dbFileName)
+
+  let result =
+    withProcessStateLock (fun () ->
+      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
+
+      try
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
+
+        startService
+          testSqliteDirectoryEnvVar
+          dbFileName
+          { schemaHash = "1111222233334444"
+            schemaCommit = None }
+          studentSchema
+          (fun () -> Ok None)
+          CancellationToken.None
+        |> fun t -> t.Result
+      finally
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+
+  match result with
+  | Error ex -> failwith $"Expected startService to initialize the target database, got error: {ex.Message}"
+  | Ok builder ->
+    Assert.Equal(expectedPath, builder.DbPath)
+    Assert.True(File.Exists expectedPath)
+    Assert.Equal(0L, countStudentRows expectedPath)
+
+  Directory.Delete(envDir, true)
+
+[<Fact>]
+let ``startService migrates the previous database into the target database`` () =
+  let envDir =
+    Path.Combine(Path.GetTempPath(), $"mig_start_service_migrate_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory envDir |> ignore
+
+  let oldDbPath = Path.Combine(envDir, "previous.sqlite")
+  createStudentDatabase oldDbPath [ "Alice"; "Bob" ] None
+
+  let dbFileName = "marketdesk-1111222233334444.sqlite"
+  let expectedPath = Path.Combine(Path.GetFullPath envDir, dbFileName)
+
+  let result =
+    withProcessStateLock (fun () ->
+      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
+
+      try
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
+
+        startService
+          testSqliteDirectoryEnvVar
+          dbFileName
+          { schemaHash = "1111222233334444"
+            schemaCommit = None }
+          studentSchema
+          (fun () -> Ok(Some oldDbPath))
+          CancellationToken.None
+        |> fun t -> t.Result
+      finally
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+
+  match result with
+  | Error ex -> failwith $"Expected startService to migrate the previous database, got error: {ex.Message}"
+  | Ok builder ->
+    Assert.Equal(expectedPath, builder.DbPath)
+    Assert.True(File.Exists expectedPath)
+    Assert.Equal(2L, countStudentRows expectedPath)
+
+  Directory.Delete(envDir, true)
+
+[<Fact>]
+let ``waitForStartupDatabaseReady returns when migrating database becomes ready`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_startup_wait_ready_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "marketdesk-1111222233334444.sqlite")
+  createDatabaseWithMigrationStatus dbPath (Some "migrating")
+
+  let promoteTask =
+    Task.Run(fun () ->
+      task {
+        do! Task.Delay 100
+        use connection = openSqliteConnection dbPath
+
+        use cmd =
+          new SqliteCommand("UPDATE _migration_status SET status = 'ready' WHERE id = 0", connection)
+
+        cmd.ExecuteNonQuery() |> ignore
+      }
+      :> Task)
+
+  let waitResult =
+    waitForStartupDatabaseReady dbPath (TimeSpan.FromMilliseconds 10.0) CancellationToken.None
+    |> fun t -> t.Result
+
+  promoteTask.Wait()
+
+  match waitResult with
+  | Ok() -> ()
+  | Error ex -> failwith $"Expected wait for ready to succeed, got: {ex.Message}"
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``runInitWithSchema creates and seeds database without schema script input`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_runinit_with_schema_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "init.db")
+
+  let schema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "student"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              [] ]
+        inserts =
+          [ { table = "student"
+              columns = [ "name" ]
+              values = [ [ String "Alice" ]; [ String "Bob" ] ] } ] }
+
+  let initResult = runInitWithSchema schema dbPath |> fun t -> t.Result
+
+  match initResult with
+  | Error ex -> failwith $"Expected runInitWithSchema to succeed, got: {ex.Message}"
+  | Ok result ->
+    Assert.Equal(dbPath, result.newDbPath)
+    Assert.Equal(2L, result.seededRows)
+
+  use verifyConn = openSqliteConnection dbPath
+  use countCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
+  let count = countCmd.ExecuteScalar() |> Convert.ToInt64
+  Assert.Equal(2L, count)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``runMigrateWithSchema migrates data without schema script input`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_runmigrate_with_schema_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+  let newDbPath = Path.Combine(tempDir, "new.db")
+
+  use setupOldConn = openSqliteConnection oldDbPath
+
+  [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "INSERT INTO student(name) VALUES ('Alice');"
+    "INSERT INTO student(name) VALUES ('Bob');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  setupOldConn.Close()
+
+  let schema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "student"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              [] ] }
+
+  let schemaIdentity =
+    { schemaHash = "1111222233334444"
+      schemaCommit = Some "abc123" }
+
+  let migrateResult =
+    runMigrateWithSchema oldDbPath schemaIdentity schema newDbPath
+    |> fun t -> t.Result
+
+  match migrateResult with
+  | Error ex -> failwith $"Expected runMigrateWithSchema to succeed, got: {ex.Message}"
+  | Ok result ->
+    Assert.Equal(newDbPath, result.newDbPath)
+    Assert.Equal(1, result.copiedTables)
+    Assert.Equal(2L, result.copiedRows)
+
+  use verifyNewConn = openSqliteConnection newDbPath
+  use countCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyNewConn)
+  let count = countCmd.ExecuteScalar() |> Convert.ToInt64
+  Assert.Equal(2L, count)
+
+  use identityCmd =
+    new SqliteCommand("SELECT schema_hash, schema_commit FROM _schema_identity WHERE id = 0", verifyNewConn)
+
+  use reader = identityCmd.ExecuteReader()
+  Assert.True(reader.Read())
+  Assert.Equal("1111222233334444", reader.GetString 0)
+  Assert.Equal("abc123", reader.GetString 1)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``getMigratePlanWithSchema uses provided schema identity without schema script input`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_getplan_with_schema_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.db")
+  let newDbPath = Path.Combine(tempDir, "new.db")
+
+  use setupOldConn = openSqliteConnection oldDbPath
+
+  [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
+    "INSERT INTO student(name) VALUES ('Alice');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  setupOldConn.Close()
+
+  let schema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "student"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              [] ] }
+
+  let schemaIdentity =
+    { schemaHash = "abcdef0123456789"
+      schemaCommit = Some "deadbeef" }
+
+  let planResult =
+    getMigratePlanWithSchema oldDbPath schemaIdentity schema newDbPath
+    |> fun t -> t.Result
+
+  match planResult with
+  | Error ex -> failwith $"Expected getMigratePlanWithSchema to succeed, got: {ex.Message}"
+  | Ok report ->
+    Assert.Equal("abcdef0123456789", report.schemaHash)
+    Assert.Equal(Some "deadbeef", report.schemaCommit)
+    Assert.True(report.canRunMigrate)
+    Assert.Contains("student", report.plannedCopyTargets)
+    Assert.Empty report.unsupportedDifferences
 
 [<Fact>]
 let ``dbTxn rejects requests while target database status is migrating`` () =
@@ -493,7 +1191,72 @@ let ``schema reflection maps records, foreign keys, and query annotations`` () =
       | _ -> failwith "Expected ON DELETE CASCADE on reflection_user_wallet.user_id"
 
 [<Fact>]
-let ``schema diff detects renamed tables when schema matches`` () =
+let ``schema diff detects renamed tables only when target declares PreviousName`` () =
+  let sourceSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "legacy_student"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              [] ] }
+
+  let targetSchema =
+    { emptyFile with
+        tables =
+          [ { mkTable
+                "student"
+                [ mkColumn
+                    "id"
+                    SqlInteger
+                    [ PrimaryKey
+                        { constraintName = None
+                          columns = []
+                          isAutoincrement = true } ]
+                  mkColumn "name" SqlText [ NotNull ] ]
+                [] with
+                previousName = Some "legacy_student" } ] }
+
+  let diff = diffSchemas sourceSchema targetSchema
+
+  Assert.Empty diff.addedTables
+  Assert.Empty diff.removedTables
+  Assert.Equal<(string * string) list>([ "legacy_student", "student" ], diff.renamedTables)
+  Assert.Equal<(string * string) list>([ "legacy_student", "student" ], diff.matchedTables)
+
+[<Fact>]
+let ``schema reflection preserves PreviousName metadata for tables and columns`` () =
+  match buildSchemaFromTypes [ typeof<ReflectionStudentWithPreviousName> ] with
+  | Error error -> failwith $"Expected reflection to succeed, got: {error}"
+  | Ok schema ->
+    let table =
+      schema.tables
+      |> List.find (fun item -> item.name = "reflection_student_with_previous_name")
+
+    let nameColumn = table.columns |> List.find (fun column -> column.name = "name")
+
+    Assert.Equal(Some "legacy_student", table.previousName)
+    Assert.Equal(Some "full_name", nameColumn.previousName)
+
+[<Fact>]
+let ``schema reflection preserves DropColumn metadata for tables`` () =
+  match buildSchemaFromTypes [ typeof<ReflectionStudentWithDroppedColumn> ] with
+  | Error error -> failwith $"Expected schema reflection to succeed, got: {error}"
+  | Ok schema ->
+    let table =
+      schema.tables
+      |> List.find (fun item -> item.name = "reflection_student_with_dropped_column")
+
+    Assert.Equal<string list>([ "legacy_note" ], table.dropColumns)
+
+[<Fact>]
+let ``schema diff treats table name changes without PreviousName as add and remove`` () =
   let sourceSchema =
     { emptyFile with
         tables =
@@ -526,13 +1289,12 @@ let ``schema diff detects renamed tables when schema matches`` () =
 
   let diff = diffSchemas sourceSchema targetSchema
 
-  Assert.Empty diff.addedTables
-  Assert.Empty diff.removedTables
-  Assert.Equal<(string * string) list>([ "legacy_student", "student" ], diff.renamedTables)
-  Assert.Equal<(string * string) list>([ "legacy_student", "student" ], diff.matchedTables)
+  Assert.Equal<string list>([ "student" ], diff.addedTables)
+  Assert.Equal<string list>([ "legacy_student" ], diff.removedTables)
+  Assert.Empty diff.renamedTables
 
 [<Fact>]
-let ``table copy mapping infers renamed and added columns`` () =
+let ``table copy mapping uses explicit PreviousName for renamed columns and defaults for additions`` () =
   let sourceTable =
     mkTable
       "student"
@@ -558,13 +1320,17 @@ let ``table copy mapping infers renamed and added columns`` () =
               { constraintName = None
                 columns = []
                 isAutoincrement = true } ]
-        mkColumn "name" SqlText [ NotNull ]
+        { mkColumn "name" SqlText [ NotNull ] with
+            previousName = Some "full_name" }
         mkColumn "age" SqlInteger [ NotNull ]
         mkColumn "status" SqlText [ NotNull; Default(String "active") ]
-        mkColumn "score" SqlReal [ NotNull ] ]
+        mkColumn "score" SqlReal [] ]
       []
 
-  let mapping = buildTableCopyMapping sourceTable targetTable
+  let mapping =
+    match buildTableCopyMapping sourceTable targetTable with
+    | Ok value -> value
+    | Error error -> failwith $"Expected table copy mapping to succeed, got: {error}"
 
   let byTarget =
     mapping.columnMappings
@@ -584,8 +1350,8 @@ let ``table copy mapping infers renamed and added columns`` () =
   | other -> failwith $"Expected status default to be 'active', got {other}"
 
   match byTarget["score"] with
-  | TypeDefault SqlReal -> ()
-  | other -> failwith $"Expected score to use SqlReal type default, got {other}"
+  | DefaultExpr(Value "NULL") -> ()
+  | other -> failwith $"Expected score to use NULL for nullable addition, got {other}"
 
   Assert.Contains(("full_name", "name"), mapping.renamedColumns)
   Assert.Contains("status", mapping.addedTargetColumns)
@@ -593,7 +1359,114 @@ let ``table copy mapping infers renamed and added columns`` () =
   Assert.Contains("legacy_note", mapping.droppedSourceColumns)
 
 [<Fact>]
-let ``schema copy plan keeps renamed table mappings`` () =
+let ``table copy mapping fails for required added columns without defaults`` () =
+  let sourceTable =
+    mkTable
+      "student"
+      [ mkColumn
+          "id"
+          SqlInteger
+          [ PrimaryKey
+              { constraintName = None
+                columns = []
+                isAutoincrement = true } ]
+        mkColumn "name" SqlText [ NotNull ] ]
+      []
+
+  let targetTable =
+    mkTable
+      "student"
+      [ mkColumn
+          "id"
+          SqlInteger
+          [ PrimaryKey
+              { constraintName = None
+                columns = []
+                isAutoincrement = true } ]
+        mkColumn "name" SqlText [ NotNull ]
+        mkColumn "status" SqlText [ NotNull ] ]
+      []
+
+  match buildTableCopyMapping sourceTable targetTable with
+  | Ok _ -> failwith "Expected table copy mapping to fail for a new required column without a default."
+  | Error error ->
+    Assert.Contains("student.status", error)
+    Assert.Contains("new and required", error)
+
+[<Fact>]
+let ``table copy mapping allows explicitly dropped source columns`` () =
+  let sourceTable =
+    mkTable
+      "student"
+      [ mkColumn
+          "id"
+          SqlInteger
+          [ PrimaryKey
+              { constraintName = None
+                columns = []
+                isAutoincrement = true } ]
+        mkColumn "name" SqlText [ NotNull ]
+        mkColumn "legacy_note" SqlText [] ]
+      []
+
+  let targetTable =
+    { mkTable
+        "student"
+        [ mkColumn
+            "id"
+            SqlInteger
+            [ PrimaryKey
+                { constraintName = None
+                  columns = []
+                  isAutoincrement = true } ]
+          mkColumn "name" SqlText [ NotNull ] ]
+        [] with
+        dropColumns = [ "legacy_note" ] }
+
+  let mapping =
+    match buildTableCopyMapping sourceTable targetTable with
+    | Ok value -> value
+    | Error error -> failwith $"Expected table copy mapping to succeed, got: {error}"
+
+  Assert.Empty mapping.droppedSourceColumns
+  Assert.Equal<string list>([ "legacy_note" ], mapping.allowedDroppedSourceColumns)
+
+[<Fact>]
+let ``table copy mapping fails for incompatible same-name columns`` () =
+  let sourceTable =
+    mkTable
+      "student"
+      [ mkColumn
+          "id"
+          SqlInteger
+          [ PrimaryKey
+              { constraintName = None
+                columns = []
+                isAutoincrement = true } ]
+        mkColumn "score" SqlReal [] ]
+      []
+
+  let targetTable =
+    mkTable
+      "student"
+      [ mkColumn
+          "id"
+          SqlInteger
+          [ PrimaryKey
+              { constraintName = None
+                columns = []
+                isAutoincrement = true } ]
+        mkColumn "score" SqlText [] ]
+      []
+
+  match buildTableCopyMapping sourceTable targetTable with
+  | Ok _ -> failwith "Expected table copy mapping to fail for incompatible same-name columns."
+  | Error error ->
+    Assert.Contains("student.score", error)
+    Assert.Contains("not copy-compatible", error)
+
+[<Fact>]
+let ``schema copy plan keeps explicit renamed table mappings`` () =
   let sourceSchema =
     { emptyFile with
         tables =
@@ -623,8 +1496,91 @@ let ``schema copy plan keeps renamed table mappings`` () =
   let targetSchema =
     { emptyFile with
         tables =
+          [ { mkTable
+                "user"
+                [ mkColumn
+                    "id"
+                    SqlInteger
+                    [ PrimaryKey
+                        { constraintName = None
+                          columns = []
+                          isAutoincrement = true } ]
+                  { mkColumn "name" SqlText [ NotNull ] with
+                      previousName = Some "full_name" }
+                  mkColumn "status" SqlText [ NotNull; Default(String "active") ] ]
+                [] with
+                previousName = Some "legacy_user" }
+            mkTable
+              "audit_log"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "message" SqlText [ NotNull ] ]
+              [] ] }
+
+  let plan =
+    match buildSchemaCopyPlan sourceSchema targetSchema with
+    | Ok value -> value
+    | Error error -> failwith $"Expected schema copy plan to succeed, got: {error}"
+
+  Assert.Equal<(string * string) list>([ "legacy_user", "user" ], plan.diff.renamedTables)
+
+  let userTableMapping =
+    plan.tableMappings |> List.find (fun mapping -> mapping.targetTable = "user")
+
+  Assert.Equal("legacy_user", userTableMapping.sourceTable)
+  Assert.Contains(("full_name", "name"), userTableMapping.renamedColumns)
+
+[<Fact>]
+let ``schema copy plan fails when explicit PreviousName points to missing source column`` () =
+  let sourceSchema =
+    { emptyFile with
+        tables =
           [ mkTable
-              "user"
+              "student"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "full_name" SqlText [ NotNull ] ]
+              [] ] }
+
+  let targetSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "student"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                { mkColumn "name" SqlText [ NotNull ] with
+                    previousName = Some "missing_name" } ]
+              [] ] }
+
+  match buildSchemaCopyPlan sourceSchema targetSchema with
+  | Ok _ -> failwith "Expected schema copy plan to fail when PreviousName references a missing source column."
+  | Error error ->
+    Assert.Contains("PreviousName('missing_name')", error)
+    Assert.Contains("source column 'student.missing_name' does not exist", error)
+
+[<Fact>]
+let ``schema copy plan fails when target schema drops a source column`` () =
+  let sourceSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "student"
               [ mkColumn
                   "id"
                   SqlInteger
@@ -633,7 +1589,129 @@ let ``schema copy plan keeps renamed table mappings`` () =
                         columns = []
                         isAutoincrement = true } ]
                 mkColumn "name" SqlText [ NotNull ]
-                mkColumn "status" SqlText [ NotNull; Default(String "active") ] ]
+                mkColumn "legacy_note" SqlText [] ]
+              [] ] }
+
+  let targetSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "student"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              [] ] }
+
+  match buildSchemaCopyPlan sourceSchema targetSchema with
+  | Ok _ -> failwith "Expected schema copy plan to fail when a source column would be dropped."
+  | Error error ->
+    Assert.Contains("Dropping source columns is not supported", error)
+    Assert.Contains("student: legacy_note", error)
+
+[<Fact>]
+let ``schema copy plan allows explicitly dropped source columns`` () =
+  let sourceSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "student"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ]
+                mkColumn "legacy_note" SqlText [] ]
+              [] ] }
+
+  let targetSchema =
+    { emptyFile with
+        tables =
+          [ { mkTable
+                "student"
+                [ mkColumn
+                    "id"
+                    SqlInteger
+                    [ PrimaryKey
+                        { constraintName = None
+                          columns = []
+                          isAutoincrement = true } ]
+                  mkColumn "name" SqlText [ NotNull ] ]
+                [] with
+                dropColumns = [ "legacy_note" ] } ] }
+
+  let plan =
+    match buildSchemaCopyPlan sourceSchema targetSchema with
+    | Ok value -> value
+    | Error error -> failwith $"Expected schema copy plan to succeed, got: {error}"
+
+  let mapping =
+    plan.tableMappings |> List.find (fun item -> item.targetTable = "student")
+
+  Assert.Empty mapping.droppedSourceColumns
+  Assert.Equal<string list>([ "legacy_note" ], mapping.allowedDroppedSourceColumns)
+
+[<Fact>]
+let ``schema copy plan fails when DropColumn references a missing source column`` () =
+  let sourceSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "student"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              [] ] }
+
+  let targetSchema =
+    { emptyFile with
+        tables =
+          [ { mkTable
+                "student"
+                [ mkColumn
+                    "id"
+                    SqlInteger
+                    [ PrimaryKey
+                        { constraintName = None
+                          columns = []
+                          isAutoincrement = true } ]
+                  mkColumn "name" SqlText [ NotNull ] ]
+                [] with
+                dropColumns = [ "legacy_note" ] } ] }
+
+  match buildSchemaCopyPlan sourceSchema targetSchema with
+  | Ok _ -> failwith "Expected schema copy plan to fail when DropColumn references a missing source column."
+  | Error error ->
+    Assert.Contains("declares DropColumn values that do not exist", error)
+    Assert.Contains("legacy_note", error)
+
+[<Fact>]
+let ``schema copy plan fails when target schema removes a source table`` () =
+  let sourceSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "student"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
               []
             mkTable
               "audit_log"
@@ -647,15 +1725,26 @@ let ``schema copy plan keeps renamed table mappings`` () =
                 mkColumn "message" SqlText [ NotNull ] ]
               [] ] }
 
-  let plan = buildSchemaCopyPlan sourceSchema targetSchema
+  let targetSchema =
+    { emptyFile with
+        tables =
+          [ mkTable
+              "student"
+              [ mkColumn
+                  "id"
+                  SqlInteger
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = true } ]
+                mkColumn "name" SqlText [ NotNull ] ]
+              [] ] }
 
-  Assert.Equal<(string * string) list>([ "legacy_user", "user" ], plan.diff.renamedTables)
-
-  let userTableMapping =
-    plan.tableMappings |> List.find (fun mapping -> mapping.targetTable = "user")
-
-  Assert.Equal("legacy_user", userTableMapping.sourceTable)
-  Assert.Contains(("full_name", "name"), userTableMapping.renamedColumns)
+  match buildSchemaCopyPlan sourceSchema targetSchema with
+  | Ok _ -> failwith "Expected schema copy plan to fail when a source table would be removed."
+  | Error error ->
+    Assert.Contains("Removing source tables is not supported", error)
+    Assert.Contains("audit_log", error)
 
 [<Fact>]
 let ``non-table consistency report passes for valid target schema objects`` () =
@@ -679,6 +1768,7 @@ let ``non-table consistency report passes for valid target schema objects`` () =
               columns = [ "name" ] } ]
         views =
           [ { name = "student_view"
+              previousName = None
               sqlTokens = [ "CREATE VIEW student_view AS SELECT id, name FROM student;" ]
               declaredColumns = []
               dependencies = [ "student" ]
@@ -708,6 +1798,7 @@ let ``non-table consistency report flags invalid target schema objects`` () =
               columns = [ "ghost" ] } ]
         views =
           [ { name = "student_view"
+              previousName = None
               sqlTokens = [ "CREATE VIEW student_view AS SELECT id FROM student;" ]
               declaredColumns = []
               dependencies = [ "student"; "missing_table" ]
@@ -717,6 +1808,7 @@ let ``non-table consistency report flags invalid target schema objects`` () =
               insertOrIgnoreAnnotations = []
               upsertAnnotations = [] }
             { name = "student_view"
+              previousName = None
               sqlTokens = [ "CREATE VIEW student_view AS SELECT id FROM student;" ]
               declaredColumns = []
               dependencies = [ "student" ]
@@ -1039,6 +2131,38 @@ let ``dbTxn short-circuits generic Task Result errors by mapping to sqlite excep
   Directory.Delete(tempDir, true)
 
 [<Fact>]
+let ``taskResult unwraps Task Result sqlite values`` () =
+  let result =
+    taskResult {
+      let! prefix = Task.FromResult "Al"
+      let! (suffix: string) = Task.FromResult(Ok "ice": Result<string, SqliteException>)
+      return $"{prefix}{suffix}"
+    }
+    |> fun t -> t.Result
+
+  match result with
+  | Error ex -> failwith $"Expected successful taskResult bind, got error: {ex.Message}"
+  | Ok value -> Assert.Equal("Alice", value)
+
+[<Fact>]
+let ``taskResult short-circuits Result sqlite errors`` () =
+  let mutable continuationRan = false
+
+  let result =
+    taskResult {
+      let! (_: int) = Error(SqliteException("taskResult failure", 0))
+      continuationRan <- true
+      return 1
+    }
+    |> fun t -> t.Result
+
+  match result with
+  | Ok value -> failwith $"Expected Error from taskResult, got Ok {value}"
+  | Error ex ->
+    Assert.Contains("taskResult failure", ex.Message)
+    Assert.False continuationRan
+
+[<Fact>]
 let ``dbRuntime rolls back transactions on generic errors without remapping them`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_dbruntime_generic_error_{Guid.NewGuid()}")
@@ -1101,7 +2225,7 @@ let ``runSimple commits transaction and applies queued response effects`` () =
 
   let env = createTestWebEnv dbPath
   let httpContext = createTestHttpContext ()
-  let expectedNow = ((env :> IClock).UtcNowRfc3339())
+  let expectedNow = (env :> IClock).UtcNowRfc3339()
 
   let operation =
     webResult {
@@ -1476,17 +2600,18 @@ let ``bulk copy plan orders parent tables before FK dependents`` () =
   let targetSchema =
     { emptyFile with
         tables =
-          [ mkTable
-              "account"
-              [ mkColumn
-                  "id"
-                  SqlInteger
-                  [ PrimaryKey
-                      { constraintName = None
-                        columns = []
-                        isAutoincrement = true } ]
-                mkColumn "name" SqlText [ NotNull ] ]
-              []
+          [ { mkTable
+                "account"
+                [ mkColumn
+                    "id"
+                    SqlInteger
+                    [ PrimaryKey
+                        { constraintName = None
+                          columns = []
+                          isAutoincrement = true } ]
+                  mkColumn "name" SqlText [ NotNull ] ]
+                [] with
+                previousName = Some "legacy_account" }
             mkTable
               "invoice"
               [ mkColumn
@@ -1496,7 +2621,8 @@ let ``bulk copy plan orders parent tables before FK dependents`` () =
                       { constraintName = None
                         columns = []
                         isAutoincrement = true } ]
-                mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ]
+                { mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ] with
+                    previousName = Some "legacy_account_id" }
                 mkColumn "total" SqlReal [ NotNull ] ]
               [] ] }
 
@@ -1548,17 +2674,18 @@ let ``bulk copy row projection translates FK values via ID mapping`` () =
   let targetSchema =
     { emptyFile with
         tables =
-          [ mkTable
-              "account"
-              [ mkColumn
-                  "id"
-                  SqlInteger
-                  [ PrimaryKey
-                      { constraintName = None
-                        columns = []
-                        isAutoincrement = true } ]
-                mkColumn "name" SqlText [ NotNull ] ]
-              []
+          [ { mkTable
+                "account"
+                [ mkColumn
+                    "id"
+                    SqlInteger
+                    [ PrimaryKey
+                        { constraintName = None
+                          columns = []
+                          isAutoincrement = true } ]
+                  mkColumn "name" SqlText [ NotNull ] ]
+                [] with
+                previousName = Some "legacy_account" }
             mkTable
               "invoice"
               [ mkColumn
@@ -1568,7 +2695,8 @@ let ``bulk copy row projection translates FK values via ID mapping`` () =
                       { constraintName = None
                         columns = []
                         isAutoincrement = true } ]
-                mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ]
+                { mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ] with
+                    previousName = Some "legacy_account_id" }
                 mkColumn "total" SqlReal [ NotNull ] ]
               [] ] }
 
@@ -1641,17 +2769,18 @@ let ``bulk copy row projection fails when FK mapping is missing`` () =
   let targetSchema =
     { emptyFile with
         tables =
-          [ mkTable
-              "account"
-              [ mkColumn
-                  "id"
-                  SqlInteger
-                  [ PrimaryKey
-                      { constraintName = None
-                        columns = []
-                        isAutoincrement = true } ]
-                mkColumn "name" SqlText [ NotNull ] ]
-              []
+          [ { mkTable
+                "account"
+                [ mkColumn
+                    "id"
+                    SqlInteger
+                    [ PrimaryKey
+                        { constraintName = None
+                          columns = []
+                          isAutoincrement = true } ]
+                  mkColumn "name" SqlText [ NotNull ] ]
+                [] with
+                previousName = Some "legacy_account" }
             mkTable
               "invoice"
               [ mkColumn
@@ -1661,7 +2790,8 @@ let ``bulk copy row projection fails when FK mapping is missing`` () =
                       { constraintName = None
                         columns = []
                         isAutoincrement = true } ]
-                mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ]
+                { mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ] with
+                    previousName = Some "legacy_account_id" }
                 mkColumn "total" SqlReal [ NotNull ] ]
               [] ] }
 
@@ -1786,17 +2916,18 @@ let ``drain replay replays insert update and delete with id translation`` () =
   let targetSchema =
     { emptyFile with
         tables =
-          [ mkTable
-              "account"
-              [ mkColumn
-                  "id"
-                  SqlInteger
-                  [ PrimaryKey
-                      { constraintName = None
-                        columns = []
-                        isAutoincrement = true } ]
-                mkColumn "name" SqlText [ NotNull ] ]
-              []
+          [ { mkTable
+                "account"
+                [ mkColumn
+                    "id"
+                    SqlInteger
+                    [ PrimaryKey
+                        { constraintName = None
+                          columns = []
+                          isAutoincrement = true } ]
+                  mkColumn "name" SqlText [ NotNull ] ]
+                [] with
+                previousName = Some "legacy_account" }
             mkTable
               "invoice"
               [ mkColumn
@@ -1806,7 +2937,8 @@ let ``drain replay replays insert update and delete with id translation`` () =
                       { constraintName = None
                         columns = []
                         isAutoincrement = true } ]
-                mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ]
+                { mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ] with
+                    previousName = Some "legacy_account_id" }
                 mkColumn "total" SqlReal [ NotNull ] ]
               [] ] }
 
@@ -1936,17 +3068,18 @@ let ``drain replay rolls back a transaction group when one operation fails`` () 
   let targetSchema =
     { emptyFile with
         tables =
-          [ mkTable
-              "account"
-              [ mkColumn
-                  "id"
-                  SqlInteger
-                  [ PrimaryKey
-                      { constraintName = None
-                        columns = []
-                        isAutoincrement = true } ]
-                mkColumn "name" SqlText [ NotNull ] ]
-              []
+          [ { mkTable
+                "account"
+                [ mkColumn
+                    "id"
+                    SqlInteger
+                    [ PrimaryKey
+                        { constraintName = None
+                          columns = []
+                          isAutoincrement = true } ]
+                  mkColumn "name" SqlText [ NotNull ] ]
+                [] with
+                previousName = Some "legacy_account" }
             mkTable
               "invoice"
               [ mkColumn
@@ -1956,7 +3089,8 @@ let ``drain replay rolls back a transaction group when one operation fails`` () 
                       { constraintName = None
                         columns = []
                         isAutoincrement = true } ]
-                mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ]
+                { mkColumn "account_id" SqlInteger [ NotNull; mkForeignKey "account" [ "id" ] ] with
+                    previousName = Some "legacy_account_id" }
                 mkColumn "total" SqlReal [ NotNull ] ]
               [] ] }
 
@@ -1994,9 +3128,7 @@ let ``drain replay rolls back a transaction group when one operation fails`` () 
 
     match replayResult with
     | Ok _ -> failwith "Expected replay to fail when FK mapping is missing"
-    | Error ex ->
-      Assert.Contains("Missing ID mapping for FK", ex.Message)
-      Assert.Contains("invoice", ex.Message)
+    | Error ex -> Assert.Contains("Replay failed for txn 21", ex.Message)
 
     use countAccountCmd = new SqliteCommand("SELECT COUNT(*) FROM account", conn)
     let accountCount = countAccountCmd.ExecuteScalar() |> unbox<int64>
@@ -2407,21 +3539,10 @@ let ``cli status prints cutover-complete cleanup state`` () =
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-1111222233334444.sqlite")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  File.WriteAllText(schemaPath, "module Schema\n")
+  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -2467,21 +3588,10 @@ let ``cli status supports inferred new-only inspection`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  File.WriteAllText(schemaPath, "module Schema\n")
+  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
 
   use newConn = openSqliteConnection newDbPath
 
@@ -2509,6 +3619,67 @@ type Student = {{ id: int64; name: string }}
   Assert.Contains("_migration_progress: removed", stdOut)
 
   newConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli status infers new database from Schema fs`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_status_schema_fs_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-0123456789abcdef.sqlite")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
+
+  File.WriteAllText(schemaPath, "module Schema\n")
+
+  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
+
+  createStudentDatabase oldDbPath [ "Alice" ] None
+  createStudentDatabase newDbPath [ "Alice" ] (Some "ready")
+
+  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "status" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains($"Old database: {oldDbPath}", stdOut)
+  Assert.Contains($"New database: {newDbPath}", stdOut)
+  Assert.Contains("Migration status: ready", stdOut)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli status can use compiled generated module from assembly`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_status_compiled_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-0123456789abcdef.sqlite")
+  let newDbPath = Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
+
+  createStudentDatabase oldDbPath [ "Alice" ] None
+  createStudentDatabase newDbPath [ "Alice" ] (Some "ready")
+
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "status"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains($"Old database: {oldDbPath}", stdOut)
+  Assert.Contains($"New database: {newDbPath}", stdOut)
+  Assert.Contains("Migration status: ready", stdOut)
+
   Directory.Delete(tempDir, true)
 
 [<Fact>]
@@ -2546,79 +3717,194 @@ let ``cli version flag prints version`` () =
 [<Fact>]
 let ``cli subcommand help shows usage and options`` () =
   let cases: (string list * string * string list) list =
-    [ ([ "init"; "--help" ], "USAGE: mig init [--help] [--dir <path>]", [ "--dir, -d <path>" ])
+    [ ([ "init"; "--help" ],
+       "USAGE: mig init [--help] [--dir <path>] [--assembly <path>] [--module <name>]",
+       [ "--dir, -d <path>"; "--assembly, -a <path>"; "--module, -m <name>" ])
       ([ "codegen"; "--help" ],
-       "USAGE: mig codegen [--help] [--dir <path>] [--module <name>] [--output <path>]",
-       [ "--dir, -d <path>"; "--module, -m <name>"; "--output, -o <path>" ])
-      ([ "migrate"; "--help" ], "USAGE: mig migrate [--help] [--dir <path>]", [ "--dir, -d <path>" ])
-      ([ "offline"; "--help" ], "USAGE: mig offline [--help] [--dir <path>]", [ "--dir, -d <path>" ])
-      ([ "plan"; "--help" ], "USAGE: mig plan [--help] [--dir <path>]", [ "--dir, -d <path>" ])
-      ([ "drain"; "--help" ], "USAGE: mig drain [--help] [--dir <path>]", [ "--dir, -d <path>" ])
-      ([ "cutover"; "--help" ], "USAGE: mig cutover [--help] [--dir <path>]", [ "--dir, -d <path>" ])
-      ([ "archive-old"; "--help" ], "USAGE: mig archive-old [--help] [--dir <path>]", [ "--dir, -d <path>" ])
+       "USAGE: mig codegen [--help] [--dir <path>] [--assembly <path>]",
+       [ "--dir, -d <path>"
+         "--assembly, -a <path>"
+         "--schema-module, -s <name>"
+         "--module, -m <name>"
+         "--output, -o <path>" ])
+      ([ "migrate"; "--help" ],
+       "USAGE: mig migrate [--help] [--dir <path>] [--assembly <path>] [--module <name>]",
+       [ "--dir, -d <path>"; "--assembly, -a <path>"; "--module, -m <name>" ])
+      ([ "offline"; "--help" ],
+       "USAGE: mig offline [--help] [--dir <path>] [--assembly <path>] [--module <name>]",
+       [ "--dir, -d <path>"; "--assembly, -a <path>"; "--module, -m <name>" ])
+      ([ "plan"; "--help" ],
+       "USAGE: mig plan [--help] [--dir <path>] [--assembly <path>] [--module <name>]",
+       [ "--dir, -d <path>"; "--assembly, -a <path>"; "--module, -m <name>" ])
+      ([ "drain"; "--help" ],
+       "USAGE: mig drain [--help] [--dir <path>] [--assembly <path>] [--module <name>]",
+       [ "--dir, -d <path>"; "--assembly, -a <path>"; "--module, -m <name>" ])
+      ([ "cutover"; "--help" ],
+       "USAGE: mig cutover [--help] [--dir <path>] [--assembly <path>] [--module <name>]",
+       [ "--dir, -d <path>"; "--assembly, -a <path>"; "--module, -m <name>" ])
+      ([ "archive-old"; "--help" ],
+       "USAGE: mig archive-old [--help] [--dir <path>] [--assembly <path>]",
+       [ "--dir, -d <path>"; "--assembly, -a <path>"; "--module, -m <name>" ])
       ([ "reset"; "--help" ],
-       "USAGE: mig reset [--help] [--dir <path>] [--dry-run]",
-       [ "--dir, -d <path>"; "--dry-run" ])
-      ([ "status"; "--help" ], "USAGE: mig status [--help] [--dir <path>]", [ "--dir, -d <path>" ]) ]
+       "USAGE: mig reset [--help] [--dir <path>] [--assembly <path>] [--module <name>]",
+       [ "--dir, -d <path>"
+         "--assembly, -a <path>"
+         "--module, -m <name>"
+         "--dry-run" ])
+      ([ "status"; "--help" ],
+       "USAGE: mig status [--help] [--dir <path>] [--assembly <path>] [--module <name>]",
+       [ "--dir, -d <path>"; "--assembly, -a <path>"; "--module, -m <name>" ]) ]
 
   for args, expectedUsage, expectedFragments in cases do
     assertCliHelpOutput args expectedUsage expectedFragments
 
 [<Fact>]
-let ``cli codegen generates query module from schema fsx`` () =
-  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_{Guid.NewGuid()}")
+let ``cli codegen requires assembly`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_requires_assembly_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
-  let outputPath = Path.Combine(tempDir, "StudentQueries.fs")
-  let projectPath = Path.Combine(tempDir, "StudentQueries.fsproj")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  let exitCode, stdOut, stdErr = runMigCli [ "codegen"; "-d"; tempDir ]
 
-  let script =
-    $"""
-#r @"{migLibPath}"
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("codegen failed:", stdErr)
+  Assert.Contains("requires --assembly", stdErr)
 
-open MigLib.Db
+  Directory.Delete(tempDir, true)
 
-[<AutoIncPK "id">]
-[<SelectBy "name">]
-type Student = {{ id: int64; name: string }}
-"""
+[<Fact>]
+let ``cli codegen defaults to Db fs and Db module in compiled mode`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_defaults_{Guid.NewGuid()}")
 
-  File.WriteAllText(schemaPath, script.Trim())
+  Directory.CreateDirectory tempDir |> ignore
+
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
+  let outputPath = Path.Combine(tempDir, "Db.fs")
+  let assemblyPath = typeof<CompiledSchemaSourceFixture.Marker>.Assembly.Location
+
+  File.WriteAllText(
+    schemaPath,
+    "module Schema\n\nopen MigLib.Db\n\n[<AutoIncPK \"id\">]\ntype Student = { id: int64; name: string }\n"
+  )
 
   let exitCode, stdOut, stdErr =
     runMigCli
       [ "codegen"
         "-d"
         tempDir
-        "--module"
-        "StudentQueries"
-        "--output"
-        "StudentQueries.fs" ]
+        "--assembly"
+        assemblyPath
+        "--schema-module"
+        "CompiledSchemaSourceFixture" ]
 
   Assert.Equal(0, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
   Assert.Contains("Code generation complete.", stdOut)
   Assert.True(File.Exists outputPath, $"Expected generated file at: {outputPath}")
-  Assert.True(File.Exists projectPath, $"Expected generated project file at: {projectPath}")
-  Assert.Contains(outputPath, stdOut)
-  Assert.Contains(projectPath, stdOut)
 
   let generated = File.ReadAllText outputPath
-  let generatedProject = File.ReadAllText projectPath
+
+  Assert.Contains("module Db", generated)
+  Assert.Contains("let DbFile =", generated)
+  Assert.Contains("let Schema:", generated)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli codegen can generate Db module from compiled schema assembly`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_compiled_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
+  let outputPath = Path.Combine(tempDir, "Db.fs")
+  let projectPath = Path.Combine(tempDir, "Db.fsproj")
+  let assemblyPath = typeof<CompiledSchemaSourceFixture.Marker>.Assembly.Location
+
+  File.WriteAllText(
+    schemaPath,
+    "module Schema\n\nopen MigLib.Db\n\n[<AutoIncPK \"id\">]\ntype Student = { id: int64; name: string }\n"
+  )
+
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "codegen"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--schema-module"
+        "CompiledSchemaSourceFixture" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains("Code generation complete.", stdOut)
+  Assert.Contains($"Schema source: {schemaPath}", stdOut)
+  Assert.Contains($"Compiled assembly: {Path.GetFullPath assemblyPath}", stdOut)
+  Assert.Contains("Schema module: CompiledSchemaSourceFixture", stdOut)
+  Assert.Contains("Generated module: Db", stdOut)
+  Assert.Contains($"Output file: {outputPath}", stdOut)
+  Assert.True(File.Exists outputPath, $"Expected generated file at: {outputPath}")
+  Assert.False(File.Exists projectPath, $"Did not expect generated project file at: {projectPath}")
+
+  let generated = File.ReadAllText outputPath
 
   let expectedDbFile =
-    $"{DirectoryInfo(tempDir).Name}-{deriveShortSchemaHashFromScript schemaPath}.sqlite"
+    $"{DirectoryInfo(tempDir).Name}-{deriveShortSchemaHashFromSourceFile schemaPath}.sqlite"
 
-  Assert.Contains("module StudentQueries", generated)
+  Assert.Contains("module Db", generated)
   Assert.Contains("let DbFile =", generated)
+  Assert.Contains("let SchemaHash =", generated)
+  Assert.Contains("let SchemaIdentity:", generated)
+  Assert.Contains("let Schema:", generated)
   Assert.Contains(expectedDbFile, generated)
   Assert.Contains("static member SelectByName (name: string) (tx: SqliteTransaction)", generated)
-  Assert.Contains("<Compile Include=\"StudentQueries.fs\" />", generatedProject)
-  Assert.Contains("<PackageReference Include=\"MigLib\" />", generatedProject)
-  Assert.DoesNotContain("Version=", generatedProject)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli codegen rejects schema module argument without assembly`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_schema_module_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let exitCode, stdOut, stdErr =
+    runMigCli [ "codegen"; "-d"; tempDir; "--schema-module"; "CompiledSchemaSourceFixture" ]
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("codegen failed: --schema-module requires --assembly.", stdErr)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli codegen reports missing Schema fs when assembly mode is selected`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_schema_fs_only_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let assemblyPath = typeof<CompiledSchemaSourceFixture.Marker>.Assembly.Location
+
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "codegen"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--schema-module"
+        "CompiledSchemaSourceFixture" ]
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("codegen failed: Schema source file was not found:", stdErr)
+  Assert.Contains(Path.Combine(tempDir, "Schema.fs"), stdErr)
 
   Directory.Delete(tempDir, true)
 
@@ -2629,27 +3915,29 @@ let ``cli codegen rejects output paths outside schema directory`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
+  let assemblyPath = typeof<CompiledSchemaSourceFixture.Marker>.Assembly.Location
 
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
+  File.WriteAllText(
+    schemaPath,
+    "module Schema\n\nopen MigLib.Db\n\n[<AutoIncPK \"id\">]\ntype Student = { id: int64; name: string }\n"
+  )
 
   let exitCode, stdOut, stdErr =
-    runMigCli [ "codegen"; "-d"; tempDir; "--output"; "nested/Generated.fs" ]
+    runMigCli
+      [ "codegen"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--schema-module"
+        "CompiledSchemaSourceFixture"
+        "--output"
+        "nested/Generated.fs" ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
-  Assert.Contains("same directory as schema.fsx", stdErr)
+  Assert.Contains("same directory as Schema.fs", stdErr)
 
   let disallowedOutput = Path.Combine(tempDir, "nested", "Generated.fs")
   Assert.False(File.Exists disallowedOutput, $"Unexpected generated file at: {disallowedOutput}")
@@ -2663,24 +3951,28 @@ let ``cli codegen rejects invalid module names without writing output`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
   let outputPath = Path.Combine(tempDir, "Generated.fs")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  let assemblyPath = typeof<CompiledSchemaSourceFixture.Marker>.Assembly.Location
 
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
+  File.WriteAllText(
+    schemaPath,
+    "module Schema\n\nopen MigLib.Db\n\n[<AutoIncPK \"id\">]\ntype Student = { id: int64; name: string }\n"
+  )
 
   let exitCode, stdOut, stdErr =
-    runMigCli [ "codegen"; "-d"; tempDir; "--module"; "bad-name"; "--output"; "Generated.fs" ]
+    runMigCli
+      [ "codegen"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--schema-module"
+        "CompiledSchemaSourceFixture"
+        "--module"
+        "bad-name"
+        "--output"
+        "Generated.fs" ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
@@ -2696,21 +3988,10 @@ let ``cli cutover returns error when drain not complete`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  File.WriteAllText(schemaPath, "module Schema\n")
+  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
 
   use newConn = openSqliteConnection newDbPath
 
@@ -2726,7 +4007,8 @@ type Student = {{ id: int64; name: string }}
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
-  Assert.Contains("cutover failed: Drain is not complete", stdErr)
+  Assert.Contains("cutover failed:", stdErr)
+  Assert.Contains("Drain is not complete", stdErr)
 
   newConn.Close()
   Directory.Delete(tempDir, true)
@@ -2740,21 +4022,10 @@ let ``cli cutover blocks when old marker indicates replay divergence risk`` () =
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  File.WriteAllText(schemaPath, "module Schema\n")
+  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -2782,7 +4053,8 @@ type Student = {{ id: int64; name: string }}
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
-  Assert.Contains("cutover failed: Cutover blocked: old marker status is recording", stdErr)
+  Assert.Contains("cutover failed:", stdErr)
+  Assert.Contains("Cutover blocked: old marker status is recording", stdErr)
 
   Directory.Delete(tempDir, true)
 
@@ -2795,21 +4067,10 @@ let ``cli cutover blocks when old migration log has unreplayed entries beyond ch
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  File.WriteAllText(schemaPath, "module Schema\n")
+  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -2838,24 +4099,26 @@ type Student = {{ id: int64; name: string }}
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
-  Assert.Contains("cutover failed: Cutover blocked: old _migration_log has 1 unreplayed entry", stdErr)
+  Assert.Contains("cutover failed:", stdErr)
+  Assert.Contains("Cutover blocked: old _migration_log has 1 unreplayed entry", stdErr)
 
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli drain reports missing schema script clearly`` () =
+let ``cli drain reports missing schema source clearly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_drain_missing_schema_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
-  let expectedSchemaPath = Path.Combine(Path.GetFullPath tempDir, "schema.fsx")
+  let expectedSchemaFsPath = Path.Combine(Path.GetFullPath tempDir, "Schema.fs")
 
   let exitCode, stdOut, stdErr = runMigCli [ "drain"; "-d"; tempDir ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
-  Assert.Contains("drain failed: Could not infer new database automatically from schema", stdErr)
-  Assert.Contains($"Schema script was not found: {expectedSchemaPath}", stdErr)
+  Assert.Contains("drain failed: Could not infer new database automatically for `drain`.", stdErr)
+  Assert.Contains("No schema source was found.", stdErr)
+  Assert.Contains(expectedSchemaFsPath, stdErr)
 
   Directory.Delete(tempDir, true)
 
@@ -2865,22 +4128,10 @@ let ``cli drain reports non-deterministic old database names clearly`` () =
     Path.Combine(Path.GetTempPath(), $"mig_cli_drain_bad_old_name_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
   let nonDeterministicOldPath = Path.Combine(tempDir, "old.sqlite")
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
+  File.WriteAllText(schemaPath, "module Schema\n")
   use oldConn = openSqliteConnection nonDeterministicOldPath
   oldConn.Close()
 
@@ -3019,7 +4270,8 @@ let ``cli archive-old returns error while recording`` () =
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
-  Assert.Contains("archive-old failed: Old database is still in recording mode.", stdErr)
+  Assert.Contains("archive-old failed:", stdErr)
+  Assert.Contains("Old database is still in recording mode.", stdErr)
 
   use verifyConn = openSqliteConnection oldDbPath
 
@@ -3044,7 +4296,7 @@ let ``cli reset clears old migration artifacts and deletes non-ready new databas
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-1122334455667788.sqlite")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -3058,20 +4310,8 @@ let ``cli reset clears old migration artifacts and deletes non-ready new databas
 
   oldConn.Close()
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  File.WriteAllText(schemaPath, "module Schema\n")
+  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
 
   use newConn = openSqliteConnection newDbPath
 
@@ -3131,7 +4371,7 @@ let ``cli reset dry-run reports planned actions without mutating old or new data
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-0011223344556677.sqlite")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -3145,20 +4385,8 @@ let ``cli reset dry-run reports planned actions without mutating old or new data
 
   oldConn.Close()
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  File.WriteAllText(schemaPath, "module Schema\n")
+  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
 
   use newConn = openSqliteConnection newDbPath
 
@@ -3211,6 +4439,64 @@ type Student = {{ id: int64; name: string }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
+let ``cli reset dry-run can use compiled generated module from assembly`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_reset_dry_run_compiled_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-0011223344556677.sqlite")
+  let newDbPath = Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
+
+  use oldConn = openSqliteConnection oldDbPath
+
+  [ "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'recording');"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);"
+    "INSERT INTO _migration_log(txn_id, ordering, operation, table_name, row_data) VALUES (1, 1, 'insert', 'student', '{\"id\":1,\"name\":\"Alice\"}');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, oldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  oldConn.Close()
+
+  use newConn = openSqliteConnection newDbPath
+
+  [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_status(id, status) VALUES (0, 'migrating');" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, newConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  newConn.Close()
+
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "reset"
+        "--dry-run"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains("Migration reset dry run.", stdOut)
+  Assert.Contains($"Old database: {oldDbPath}", stdOut)
+  Assert.Contains($"New database: {newDbPath}", stdOut)
+  Assert.Contains("Previous new migration status: migrating", stdOut)
+  Assert.Contains("Would delete new database: yes", stdOut)
+  Assert.Contains("Reset can be applied: yes", stdOut)
+
+  Assert.True(File.Exists(newDbPath))
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
 let ``cli reset dry-run reports blocked ready target without mutating databases`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_reset_dry_run_ready_{Guid.NewGuid()}")
@@ -3219,7 +4505,7 @@ let ``cli reset dry-run reports blocked ready target without mutating databases`
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-8899aabbccddeeff.sqlite")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -3232,20 +4518,8 @@ let ``cli reset dry-run reports blocked ready target without mutating databases`
 
   oldConn.Close()
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  File.WriteAllText(schemaPath, "module Schema\n")
+  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
 
   use newConn = openSqliteConnection newDbPath
 
@@ -3300,7 +4574,7 @@ let ``cli reset refuses to delete ready new database and leaves old artifacts in
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-8899aabbccddeeff.sqlite")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -3313,20 +4587,8 @@ let ``cli reset refuses to delete ready new database and leaves old artifacts in
 
   oldConn.Close()
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let newDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  File.WriteAllText(schemaPath, "module Schema\n")
+  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
 
   use newConn = openSqliteConnection newDbPath
 
@@ -3342,7 +4604,8 @@ type Student = {{ id: int64; name: string }}
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
-  Assert.Contains("reset failed: Refusing reset because new database status is ready", stdErr)
+  Assert.Contains("reset failed:", stdErr)
+  Assert.Contains("Refusing reset because new database status is ready", stdErr)
 
   use verifyOldConn = openSqliteConnection oldDbPath
 
@@ -3370,146 +4633,48 @@ type Student = {{ id: int64; name: string }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli migrate derives deterministic new path from current directory schema hash`` () =
+let ``cli migrate requires assembly`` () =
   let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_deterministic_{Guid.NewGuid()}")
+    Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_requires_assembly_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
-
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-0123456789abcdef.sqlite")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
-
-  use setupOldConn = openSqliteConnection oldDbPath
-
-  [ "PRAGMA foreign_keys = ON;"
-    "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
-    "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
-  |> List.iter (fun sql ->
-    use cmd = new SqliteCommand(sql, setupOldConn)
-    cmd.ExecuteNonQuery() |> ignore)
-
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-
-  let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
-
-  setupOldConn.Close()
 
   let exitCode, stdOut, stdErr = runMigCli [ "migrate"; "-d"; tempDir ]
 
-  Assert.Equal(0, exitCode)
-  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
-  Assert.Contains($"New database: {expectedNewDbPath}", stdOut)
-  Assert.True(File.Exists expectedNewDbPath)
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("migrate failed:", stdErr)
+  Assert.Contains("requires --assembly", stdErr)
 
-  use verifyConn = openSqliteConnection expectedNewDbPath
-  use studentCountCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
-  let studentCount = studentCountCmd.ExecuteScalar() |> unbox<int64>
-  Assert.Equal(1L, studentCount)
-
-  verifyConn.Close()
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli init creates deterministic schema database with seed data`` () =
+let ``cli init requires assembly`` () =
   let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_cli_init_seeded_{Guid.NewGuid()}")
+    Path.Combine(Path.GetTempPath(), $"mig_cli_init_requires_assembly_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Role = {{ id: int64; name: string }}
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; role: Role; name: string }}
-
-let roles = [
-  {{ id = 1L; name = "admin" }}
-  {{ id = 2L; name = "student" }}
-]
-
-let defaultStudent = {{ id = 10L; role = {{ id = 1L; name = "admin" }}; name = "System" }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let expectedDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
-
   let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "init" ]
 
-  Assert.Equal(0, exitCode)
-  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
-  Assert.Contains("Init complete.", stdOut)
-  Assert.Contains($"Schema script: {schemaPath}", stdOut)
-  Assert.Contains($"Schema hash: {deriveShortSchemaHashFromScript schemaPath}", stdOut)
-  Assert.Contains($"Database: {expectedDbPath}", stdOut)
-  Assert.Contains("Seeded rows: 3", stdOut)
-  Assert.True(File.Exists expectedDbPath)
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("init failed:", stdErr)
+  Assert.Contains("requires --assembly", stdErr)
 
-  use verifyConn = openSqliteConnection expectedDbPath
-
-  use roleCountCmd = new SqliteCommand("SELECT COUNT(*) FROM role", verifyConn)
-  let roleCount = roleCountCmd.ExecuteScalar() |> unbox<int64>
-  Assert.Equal(2L, roleCount)
-
-  use studentCountCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
-  let studentCount = studentCountCmd.ExecuteScalar() |> unbox<int64>
-  Assert.Equal(1L, studentCount)
-
-  use migrationStatusExistsCmd =
-    new SqliteCommand(
-      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_status' LIMIT 1",
-      verifyConn
-    )
-
-  let migrationStatusExists = migrationStatusExistsCmd.ExecuteScalar()
-  Assert.True(isNull migrationStatusExists)
-
-  verifyConn.Close()
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli init skips when current-directory schema-matched database already exists`` () =
+let ``cli init skips when compiled-module database already exists`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_init_skip_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let expectedDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  let expectedDbPath =
+    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
 
   use existingConn = openSqliteConnection expectedDbPath
 
@@ -3519,7 +4684,8 @@ type Student = {{ id: int64; name: string }}
   initCmd.ExecuteNonQuery() |> ignore
   existingConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "init" ]
+  let exitCode, stdOut, stdErr =
+    runMigCliInDirectory (Some tempDir) [ "init"; "--assembly"; assemblyPath; "--module"; "CompiledSchemaFixture" ]
 
   Assert.Equal(0, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
@@ -3538,48 +4704,283 @@ type Student = {{ id: int64; name: string }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli migrate stores schema commit metadata automatically`` () =
-  let gitRoot = findGitRootOrFail (Directory.GetCurrentDirectory())
-  let repoHeadCommit = gitHeadCommitOrFail gitRoot
-
-  let tempRoot = Path.Combine(gitRoot, ".tmp_mig_tests")
-  Directory.CreateDirectory tempRoot |> ignore
-
+let ``cli init can use compiled generated module from assembly`` () =
   let tempDir =
-    Path.Combine(tempRoot, $"mig_cli_migrate_schema_commit_auto_{Guid.NewGuid()}")
+    Path.Combine(Path.GetTempPath(), $"mig_cli_init_compiled_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
+
+  let expectedDbPath =
+    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "init"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains("Init complete.", stdOut)
+  Assert.Contains($"Compiled assembly: {Path.GetFullPath assemblyPath}", stdOut)
+  Assert.Contains("Compiled module: CompiledSchemaFixture", stdOut)
+  Assert.Contains($"Database: {expectedDbPath}", stdOut)
+  Assert.True(File.Exists expectedDbPath)
+
+  use verifyConn = openSqliteConnection expectedDbPath
+
+  use tableExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'fixture_student' LIMIT 1",
+      verifyConn
+    )
+
+  let tableExists = tableExistsCmd.ExecuteScalar()
+  Assert.False(isNull tableExists)
+
+  verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli init rejects module argument without assembly`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_init_module_only_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let exitCode, stdOut, stdErr =
+    runMigCli [ "init"; "-d"; tempDir; "--module"; "CompiledSchemaFixture" ]
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("init failed: --module requires --assembly.", stdErr)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli plan requires assembly`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_plan_requires_assembly_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let exitCode, stdOut, stdErr = runMigCli [ "plan"; "-d"; tempDir ]
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("plan failed:", stdErr)
+  Assert.Contains("requires --assembly", stdErr)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli offline requires assembly`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_offline_requires_assembly_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let exitCode, stdOut, stdErr = runMigCli [ "offline"; "-d"; tempDir ]
+
+  Assert.Equal(1, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
+  Assert.Contains("offline failed:", stdErr)
+  Assert.Contains("requires --assembly", stdErr)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli migrate can use compiled generated module from assembly`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_compiled_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-fedcba9876543210.sqlite")
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
+
+  let expectedNewDbPath =
+    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+
+  use setupOldConn = openSqliteConnection oldDbPath
+
+  [ "CREATE TABLE fixture_student(id INTEGER NOT NULL);"
+    "INSERT INTO fixture_student(id) VALUES (1);"
+    "INSERT INTO fixture_student(id) VALUES (2);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  setupOldConn.Close()
+
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "migrate"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains($"Old database: {oldDbPath}", stdOut)
+  Assert.Contains($"Compiled assembly: {Path.GetFullPath assemblyPath}", stdOut)
+  Assert.Contains("Compiled module: CompiledSchemaFixture", stdOut)
+  Assert.Contains("Schema hash: 0123456789abcdef", stdOut)
+  Assert.Contains($"New database: {expectedNewDbPath}", stdOut)
+  Assert.True(File.Exists expectedNewDbPath)
+
+  use verifyConn = openSqliteConnection expectedNewDbPath
+
+  use studentCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM fixture_student", verifyConn)
+
+  let studentCount = studentCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(2L, studentCount)
+
+  verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli plan can use compiled generated module from assembly`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_plan_compiled_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-1a2b3c4d5e6f7788.sqlite")
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
+
+  let expectedNewDbPath =
+    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+
+  use setupOldConn = openSqliteConnection oldDbPath
+
+  [ "CREATE TABLE fixture_student(id INTEGER NOT NULL);"
+    "INSERT INTO fixture_student(id) VALUES (1);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  setupOldConn.Close()
+
+  let exitCode, stdOut, stdErr =
+    runMigCliInDirectory (Some tempDir) [ "plan"; "--assembly"; assemblyPath; "--module"; "CompiledSchemaFixture" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains("Migration plan.", stdOut)
+  Assert.Contains($"Old database: {oldDbPath}", stdOut)
+  Assert.Contains($"Compiled assembly: {Path.GetFullPath assemblyPath}", stdOut)
+  Assert.Contains("Compiled module: CompiledSchemaFixture", stdOut)
+  Assert.Contains("Schema hash: 0123456789abcdef", stdOut)
+  Assert.Contains("Schema commit: fixture-commit", stdOut)
+  Assert.Contains($"New database: {expectedNewDbPath}", stdOut)
+  Assert.Contains("Can run migrate now: yes", stdOut)
+  Assert.False(File.Exists expectedNewDbPath)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli offline can use compiled generated module from assembly`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_offline_compiled_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dirName = DirectoryInfo(tempDir).Name
+  let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
+
+  let expectedNewDbPath =
+    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+
+  let expectedArchivePath =
+    Path.Combine(tempDir, "archive", Path.GetFileName oldDbPath)
+
+  use setupOldConn = openSqliteConnection oldDbPath
+
+  [ "CREATE TABLE fixture_student(id INTEGER NOT NULL);"
+    "INSERT INTO fixture_student(id) VALUES (1);"
+    "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
+    "INSERT INTO _migration_marker(id, status) VALUES (0, 'draining');"
+    "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, setupOldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  setupOldConn.Close()
+
+  let exitCode, stdOut, stdErr =
+    runMigCliInDirectory (Some tempDir) [ "offline"; "--assembly"; assemblyPath; "--module"; "CompiledSchemaFixture" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains($"Old database: {oldDbPath}", stdOut)
+  Assert.Contains($"Compiled assembly: {Path.GetFullPath assemblyPath}", stdOut)
+  Assert.Contains("Compiled module: CompiledSchemaFixture", stdOut)
+  Assert.Contains("Schema hash: 0123456789abcdef", stdOut)
+  Assert.Contains($"New database: {expectedNewDbPath}", stdOut)
+  Assert.Contains("Previous old marker status: draining", stdOut)
+  Assert.Contains($"Archived database: {expectedArchivePath}", stdOut)
+  Assert.Contains("Replaced existing archive: no", stdOut)
+  Assert.False(File.Exists oldDbPath)
+  Assert.True(File.Exists expectedArchivePath)
+
+  use verifyNewConn = openSqliteConnection expectedNewDbPath
+
+  use studentCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM fixture_student", verifyNewConn)
+
+  let studentCount = studentCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(1L, studentCount)
+
+  verifyNewConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli migrate stores compiled schema commit metadata`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_schema_commit_compiled_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-1111222233334444.sqlite")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
+
+  let expectedNewDbPath =
+    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
-  [ "PRAGMA foreign_keys = ON;"
-    "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
-    "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
+  [ "CREATE TABLE fixture_student(id INTEGER NOT NULL);"
+    "INSERT INTO fixture_student(id) VALUES (1);" ]
   |> List.iter (fun sql ->
     use cmd = new SqliteCommand(sql, setupOldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
   setupOldConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCli [ "migrate"; "-d"; tempDir ]
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "migrate"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
 
   Assert.Equal(0, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
@@ -3591,13 +4992,13 @@ type Student = {{ id: int64; name: string }}
     new SqliteCommand("SELECT schema_commit FROM _schema_identity WHERE id = 0", verifyConn)
 
   let storedSchemaCommit = schemaIdentityCmd.ExecuteScalar() |> string
-  Assert.Equal(repoHeadCommit, storedSchemaCommit)
+  Assert.Equal("fixture-commit", storedSchemaCommit)
 
   verifyConn.Close()
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli migrate auto-discovers schema and old db from current directory`` () =
+let ``cli migrate auto-discovers old db from current directory with compiled module`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_auto_{Guid.NewGuid()}")
 
@@ -3605,44 +5006,37 @@ let ``cli migrate auto-discovers schema and old db from current directory`` () =
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-fedcba9876543210.sqlite")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
+
+  let expectedNewDbPath =
+    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
-  [ "PRAGMA foreign_keys = ON;"
-    "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
-    "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
+  [ "CREATE TABLE fixture_student(id INTEGER NOT NULL);"
+    "INSERT INTO fixture_student(id) VALUES (1);" ]
   |> List.iter (fun sql ->
     use cmd = new SqliteCommand(sql, setupOldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
   setupOldConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "migrate" ]
+  let exitCode, stdOut, stdErr =
+    runMigCliInDirectory (Some tempDir) [ "migrate"; "--assembly"; assemblyPath; "--module"; "CompiledSchemaFixture" ]
 
   Assert.Equal(0, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
   Assert.Contains($"Old database: {oldDbPath}", stdOut)
-  Assert.Contains($"Schema script: {schemaPath}", stdOut)
+  Assert.Contains($"Compiled assembly: {Path.GetFullPath assemblyPath}", stdOut)
+  Assert.Contains("Compiled module: CompiledSchemaFixture", stdOut)
   Assert.Contains($"New database: {expectedNewDbPath}", stdOut)
   Assert.True(File.Exists expectedNewDbPath)
 
   use verifyConn = openSqliteConnection expectedNewDbPath
-  use studentCountCmd = new SqliteCommand("SELECT COUNT(*) FROM student", verifyConn)
+
+  use studentCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM fixture_student", verifyConn)
+
   let studentCount = studentCountCmd.ExecuteScalar() |> unbox<int64>
   Assert.Equal(1L, studentCount)
 
@@ -3650,7 +5044,7 @@ type Student = {{ id: int64; name: string }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli plan prints dry-run migration plan without mutating databases`` () =
+let ``cli plan prints dry-run migration plan from compiled module without mutating databases`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_plan_dry_run_{Guid.NewGuid()}")
 
@@ -3658,44 +5052,35 @@ let ``cli plan prints dry-run migration plan without mutating databases`` () =
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-1a2b3c4d5e6f7788.sqlite")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
+
+  let expectedNewDbPath =
+    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
-  [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
-    "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
+  [ "CREATE TABLE fixture_student(id INTEGER NOT NULL);"
+    "INSERT INTO fixture_student(id) VALUES (1);" ]
   |> List.iter (fun sql ->
     use cmd = new SqliteCommand(sql, setupOldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
   setupOldConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "plan" ]
+  let exitCode, stdOut, stdErr =
+    runMigCliInDirectory (Some tempDir) [ "plan"; "--assembly"; assemblyPath; "--module"; "CompiledSchemaFixture" ]
 
   Assert.Equal(0, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
   Assert.Contains("Migration plan.", stdOut)
   Assert.Contains($"Old database: {oldDbPath}", stdOut)
-  Assert.Contains($"Schema script: {schemaPath}", stdOut)
-  Assert.Contains($"Schema hash: {deriveShortSchemaHashFromScript schemaPath}", stdOut)
+  Assert.Contains($"Compiled assembly: {Path.GetFullPath assemblyPath}", stdOut)
+  Assert.Contains("Compiled module: CompiledSchemaFixture", stdOut)
+  Assert.Contains("Schema hash: 0123456789abcdef", stdOut)
   Assert.Contains($"New database: {expectedNewDbPath}", stdOut)
   Assert.Contains("Can run migrate now: yes", stdOut)
   Assert.Contains("Planned copy targets (execution order):", stdOut)
-  Assert.Contains("  - student", stdOut)
+  Assert.Contains("  - fixture_student", stdOut)
   Assert.False(File.Exists expectedNewDbPath)
 
   use verifyOldConn = openSqliteConnection oldDbPath
@@ -3722,7 +5107,7 @@ type Student = {{ id: int64; name: string }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli plan reports blocking drift and keeps databases unchanged`` () =
+let ``cli plan reports blocking drift from compiled module and keeps databases unchanged`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_plan_blocking_{Guid.NewGuid()}")
 
@@ -3730,40 +5115,31 @@ let ``cli plan reports blocking drift and keeps databases unchanged`` () =
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-9a8b7c6d5e4f3210.sqlite")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
+
+  let expectedNewDbPath =
+    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
-  [ "CREATE TABLE student(id INTEGER NOT NULL, name TEXT NOT NULL);"
-    "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
+  [ "CREATE TABLE fixture_student(name TEXT NOT NULL);"
+    "INSERT INTO fixture_student(name) VALUES ('Alice');" ]
   |> List.iter (fun sql ->
     use cmd = new SqliteCommand(sql, setupOldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
   setupOldConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "plan" ]
+  let exitCode, stdOut, stdErr =
+    runMigCliInDirectory (Some tempDir) [ "plan"; "--assembly"; assemblyPath; "--module"; "CompiledSchemaFixture" ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
   Assert.Contains("Migration plan.", stdOut)
   Assert.Contains("Can run migrate now: no", stdOut)
   Assert.Contains("Unsupported differences:", stdOut)
-  Assert.Contains("PK mismatch", stdOut)
+  Assert.Contains("fixture_student.id", stdOut)
+  Assert.Contains("new and required", stdOut)
   Assert.False(File.Exists expectedNewDbPath)
 
   use verifyOldConn = openSqliteConnection oldDbPath
@@ -3790,7 +5166,7 @@ type Student = {{ id: int64; name: string }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli migrate failure prints recovery snapshot and guidance`` () =
+let ``cli migrate failure from compiled module prints recovery snapshot and guidance`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_recovery_guidance_{Guid.NewGuid()}")
 
@@ -3798,79 +5174,52 @@ let ``cli migrate failure prints recovery snapshot and guidance`` () =
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-2233445566778899.sqlite")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
+
+  let expectedNewDbPath =
+    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
-  [ "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
-    "INSERT INTO student(id, name) VALUES (1, 'Alice');"
-    "INSERT INTO student(id, name) VALUES (2, 'Alice');" ]
+  [ "CREATE TABLE fixture_student(name TEXT NOT NULL);"
+    "INSERT INTO fixture_student(name) VALUES ('Alice');" ]
   |> List.iter (fun sql ->
     use cmd = new SqliteCommand(sql, setupOldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-[<Unique "name">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
   setupOldConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "migrate" ]
+  let exitCode, stdOut, stdErr =
+    runMigCliInDirectory (Some tempDir) [ "migrate"; "--assembly"; assemblyPath; "--module"; "CompiledSchemaFixture" ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
   Assert.Contains("migrate failed:", stdErr)
   Assert.Contains("Recovery snapshot:", stdErr)
-  Assert.Contains("Old marker status: recording", stdErr)
-  Assert.Contains("Old _migration_log: present", stdErr)
-  Assert.Contains($"New database file: present ({expectedNewDbPath})", stdErr)
+  Assert.Contains("Old marker status: no marker", stdErr)
+  Assert.Contains("Old _migration_log: absent", stdErr)
+  Assert.Contains($"New database file: absent ({expectedNewDbPath})", stdErr)
   Assert.Contains("Recovery guidance:", stdErr)
   Assert.Contains("Run `mig plan` to confirm inferred paths and preflight status.", stdErr)
 
-  Assert.True(File.Exists expectedNewDbPath)
+  Assert.False(File.Exists expectedNewDbPath)
 
   use verifyOldConn = openSqliteConnection oldDbPath
 
-  use markerStatusCmd =
-    new SqliteCommand("SELECT status FROM _migration_marker WHERE id = 0", verifyOldConn)
-
-  let markerStatus = markerStatusCmd.ExecuteScalar() |> string
-  Assert.Equal("recording", markerStatus)
-
-  use logExistsCmd =
+  use markerExistsCmd =
     new SqliteCommand(
-      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_log' LIMIT 1",
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migration_marker' LIMIT 1",
       verifyOldConn
     )
 
-  let logExists = logExistsCmd.ExecuteScalar()
-  Assert.False(isNull logExists)
-
-  use verifyNewConn = openSqliteConnection expectedNewDbPath
-
-  use migrationStatusCmd =
-    new SqliteCommand("SELECT status FROM _migration_status WHERE id = 0", verifyNewConn)
-
-  let newMigrationStatus = migrationStatusCmd.ExecuteScalar() |> string
-  Assert.Equal("migrating", newMigrationStatus)
+  let markerExists = markerExistsCmd.ExecuteScalar()
+  Assert.True(isNull markerExists)
 
   verifyOldConn.Close()
-  verifyNewConn.Close()
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli drain cutover status and archive-old auto-discover deterministic paths from current directory`` () =
+let ``cli drain cutover status and archive-old use compiled-module target discovery`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_operational_auto_{Guid.NewGuid()}")
 
@@ -3878,39 +5227,26 @@ let ``cli drain cutover status and archive-old auto-discover deterministic paths
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedArchivePath =
     Path.Combine(tempDir, "archive", Path.GetFileName oldDbPath)
 
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let expectedNewDbPath =
+    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
-  [ "PRAGMA foreign_keys = ON;"
-    "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
-    "INSERT INTO student(id, name) VALUES (1, 'Alice');" ]
+  [ "CREATE TABLE fixture_student(id INTEGER NOT NULL);"
+    "INSERT INTO fixture_student(id) VALUES (1);" ]
   |> List.iter (fun sql ->
     use cmd = new SqliteCommand(sql, setupOldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
   setupOldConn.Close()
 
   let migrateExitCode, migrateStdOut, migrateStdErr =
-    runMigCliInDirectory (Some tempDir) [ "migrate" ]
+    runMigCliInDirectory (Some tempDir) [ "migrate"; "--assembly"; assemblyPath; "--module"; "CompiledSchemaFixture" ]
 
   Assert.Equal(0, migrateExitCode)
   Assert.True(String.IsNullOrWhiteSpace migrateStdErr, $"Expected no stderr output, got: {migrateStdErr}")
@@ -3918,7 +5254,7 @@ type Student = {{ id: int64; name: string }}
   Assert.Contains($"New database: {expectedNewDbPath}", migrateStdOut)
 
   let drainExitCode, drainStdOut, drainStdErr =
-    runMigCliInDirectory (Some tempDir) [ "drain" ]
+    runMigCliInDirectory (Some tempDir) [ "drain"; "--assembly"; assemblyPath; "--module"; "CompiledSchemaFixture" ]
 
   Assert.Equal(0, drainExitCode)
   Assert.True(String.IsNullOrWhiteSpace drainStdErr, $"Expected no stderr output, got: {drainStdErr}")
@@ -3926,7 +5262,7 @@ type Student = {{ id: int64; name: string }}
   Assert.Contains($"New database: {expectedNewDbPath}", drainStdOut)
 
   let cutoverExitCode, cutoverStdOut, cutoverStdErr =
-    runMigCliInDirectory (Some tempDir) [ "cutover" ]
+    runMigCliInDirectory (Some tempDir) [ "cutover"; "--assembly"; assemblyPath; "--module"; "CompiledSchemaFixture" ]
 
   Assert.Equal(0, cutoverExitCode)
   Assert.True(String.IsNullOrWhiteSpace cutoverStdErr, $"Expected no stderr output, got: {cutoverStdErr}")
@@ -3934,7 +5270,7 @@ type Student = {{ id: int64; name: string }}
   Assert.Contains("Current migration status: ready", cutoverStdOut)
 
   let statusExitCode, statusStdOut, statusStdErr =
-    runMigCliInDirectory (Some tempDir) [ "status" ]
+    runMigCliInDirectory (Some tempDir) [ "status"; "--assembly"; assemblyPath; "--module"; "CompiledSchemaFixture" ]
 
   Assert.Equal(0, statusExitCode)
   Assert.True(String.IsNullOrWhiteSpace statusStdErr, $"Expected no stderr output, got: {statusStdErr}")
@@ -3943,7 +5279,13 @@ type Student = {{ id: int64; name: string }}
   Assert.Contains("Migration status: ready", statusStdOut)
 
   let cleanupExitCode, cleanupStdOut, cleanupStdErr =
-    runMigCliInDirectory (Some tempDir) [ "archive-old" ]
+    runMigCliInDirectory
+      (Some tempDir)
+      [ "archive-old"
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
 
   Assert.Equal(0, cleanupExitCode)
   Assert.True(String.IsNullOrWhiteSpace cleanupStdErr, $"Expected no stderr output, got: {cleanupStdErr}")
@@ -3956,7 +5298,7 @@ type Student = {{ id: int64; name: string }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli offline auto-discovers deterministic paths and archives old database after copy`` () =
+let ``cli offline auto-discovers old db and archives after compiled-module copy`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_offline_auto_{Guid.NewGuid()}")
 
@@ -3964,17 +5306,18 @@ let ``cli offline auto-discovers deterministic paths and archives old database a
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedArchivePath =
     Path.Combine(tempDir, "archive", Path.GetFileName oldDbPath)
 
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let expectedNewDbPath =
+    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
-  [ "PRAGMA foreign_keys = ON;"
-    "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);"
-    "INSERT INTO student(id, name) VALUES (1, 'Alice');"
+  [ "CREATE TABLE fixture_student(id INTEGER NOT NULL);"
+    "INSERT INTO fixture_student(id) VALUES (1);"
     "CREATE TABLE _migration_marker(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_marker(id, status) VALUES (0, 'draining');"
     "CREATE TABLE _migration_log(id INTEGER PRIMARY KEY AUTOINCREMENT, txn_id INTEGER NOT NULL, ordering INTEGER NOT NULL, operation TEXT NOT NULL, table_name TEXT NOT NULL, row_data TEXT NOT NULL);" ]
@@ -3982,23 +5325,10 @@ let ``cli offline auto-discovers deterministic paths and archives old database a
     use cmd = new SqliteCommand(sql, setupOldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let expectedNewDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
   setupOldConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "offline" ]
+  let exitCode, stdOut, stdErr =
+    runMigCliInDirectory (Some tempDir) [ "offline"; "--assembly"; assemblyPath; "--module"; "CompiledSchemaFixture" ]
 
   Assert.Equal(0, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
@@ -4024,7 +5354,7 @@ type Student = {{ id: int64; name: string }}
   Assert.True(isNull newStatusExists)
 
   use studentCountCmd =
-    new SqliteCommand("SELECT COUNT(*) FROM student", verifyNewConn)
+    new SqliteCommand("SELECT COUNT(*) FROM fixture_student", verifyNewConn)
 
   let studentCount = studentCountCmd.ExecuteScalar() |> unbox<int64>
   Assert.Equal(1L, studentCount)
@@ -4033,28 +5363,16 @@ type Student = {{ id: int64; name: string }}
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli migrate skips when current-directory schema-matched database already exists`` () =
+let ``cli migrate skips when compiled-module database already exists`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_skip_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-
-  let expectedDbPath = deriveDeterministicNewDbPathFromSchema tempDir schemaPath
+  let expectedDbPath =
+    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
 
   use existingConn = openSqliteConnection expectedDbPath
 
@@ -4064,7 +5382,8 @@ type Student = {{ id: int64; name: string }}
   initCmd.ExecuteNonQuery() |> ignore
   existingConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "migrate" ]
+  let exitCode, stdOut, stdErr =
+    runMigCliInDirectory (Some tempDir) [ "migrate"; "--assembly"; assemblyPath; "--module"; "CompiledSchemaFixture" ]
 
   Assert.Equal(0, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
@@ -4090,7 +5409,7 @@ let ``migrate creates new database, copies rows, and sets recording markers`` ()
 
   let oldDbPath = Path.Combine(tempDir, "old.db")
   let newDbPath = Path.Combine(tempDir, "new.db")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
   use setupOldConn = openSqliteConnection oldDbPath
 
@@ -4103,25 +5422,14 @@ let ``migrate creates new database, copies rows, and sets recording markers`` ()
     use cmd = new SqliteCommand(sql, setupOldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  File.WriteAllText(schemaPath, "module Schema\n")
+  let expectedSchemaHash = deriveShortSchemaHashFromSourceFile schemaPath
+  let schemaIdentity = loadSchemaIdentityFromSourceFile schemaPath
+  let targetSchema = accountInvoiceSchema
 
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Account = {{ id: int64; name: string }}
-
-[<AutoIncPK "id">]
-type Invoice = {{ id: int64; account: Account; total: float }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let expectedSchemaHash = deriveShortSchemaHashFromScript schemaPath
-
-  let migrateResult = runMigrate oldDbPath schemaPath newDbPath |> fun t -> t.Result
+  let migrateResult =
+    runMigrateWithSchema oldDbPath schemaIdentity targetSchema newDbPath
+    |> fun t -> t.Result
 
   match migrateResult with
   | Error ex -> failwith $"Expected migrate to succeed, got {ex.Message}"
@@ -4201,7 +5509,7 @@ let ``offline migrate creates new database without hot migration coordination ta
 
   let oldDbPath = Path.Combine(tempDir, "old.db")
   let newDbPath = Path.Combine(tempDir, "new.db")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
   use setupOldConn = openSqliteConnection oldDbPath
 
@@ -4214,26 +5522,14 @@ let ``offline migrate creates new database without hot migration coordination ta
     use cmd = new SqliteCommand(sql, setupOldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Account = {{ id: int64; name: string }}
-
-[<AutoIncPK "id">]
-type Invoice = {{ id: int64; account: Account; total: float }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-  let expectedSchemaHash = deriveShortSchemaHashFromScript schemaPath
+  File.WriteAllText(schemaPath, "module Schema\n")
+  let expectedSchemaHash = deriveShortSchemaHashFromSourceFile schemaPath
+  let schemaIdentity = loadSchemaIdentityFromSourceFile schemaPath
+  let targetSchema = accountInvoiceSchema
 
   let migrateResult =
-    runOfflineMigrate oldDbPath schemaPath newDbPath |> fun t -> t.Result
+    runOfflineMigrateWithSchema oldDbPath schemaIdentity targetSchema newDbPath
+    |> fun t -> t.Result
 
   match migrateResult with
   | Error ex -> failwith $"Expected offline migrate to succeed, got {ex.Message}"
@@ -4323,7 +5619,7 @@ let ``migrate preflight reports unsupported drift before creating migration side
 
   let oldDbPath = Path.Combine(tempDir, "old.db")
   let newDbPath = Path.Combine(tempDir, "new.db")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
   use setupOldConn = openSqliteConnection oldDbPath
 
@@ -4333,22 +5629,14 @@ let ``migrate preflight reports unsupported drift before creating migration side
     use cmd = new SqliteCommand(sql, setupOldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
+  File.WriteAllText(schemaPath, "module Schema\n")
+  let schemaIdentity = loadSchemaIdentityFromSourceFile schemaPath
+  let targetSchema = studentSchema
   setupOldConn.Close()
 
-  let migrateResult = runMigrate oldDbPath schemaPath newDbPath |> fun t -> t.Result
+  let migrateResult =
+    runMigrateWithSchema oldDbPath schemaIdentity targetSchema newDbPath
+    |> fun t -> t.Result
 
   match migrateResult with
   | Ok _ -> failwith "Expected migrate to fail during preflight drift validation."
@@ -4356,7 +5644,8 @@ type Student = {{ id: int64; name: string }}
     Assert.Contains("Schema preflight report:", ex.Message)
     Assert.Contains("Supported differences:", ex.Message)
     Assert.Contains("Unsupported differences:", ex.Message)
-    Assert.Contains("PK mismatch", ex.Message)
+    Assert.Contains("student.id", ex.Message)
+    Assert.Contains("not copy-compatible", ex.Message)
 
   Assert.False(File.Exists newDbPath)
 
@@ -4391,7 +5680,7 @@ let ``drain replays accumulated log entries and records replay checkpoint`` () =
 
   let oldDbPath = Path.Combine(tempDir, "old.db")
   let newDbPath = Path.Combine(tempDir, "new.db")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
   use setupOldConn = openSqliteConnection oldDbPath
 
@@ -4404,24 +5693,13 @@ let ``drain replays accumulated log entries and records replay checkpoint`` () =
     use cmd = new SqliteCommand(sql, setupOldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  File.WriteAllText(schemaPath, "module Schema\n")
+  let schemaIdentity = loadSchemaIdentityFromSourceFile schemaPath
+  let targetSchema = accountInvoiceSchema
 
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Account = {{ id: int64; name: string }}
-
-[<AutoIncPK "id">]
-type Invoice = {{ id: int64; account: Account; total: float }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-
-  let migrateResult = runMigrate oldDbPath schemaPath newDbPath |> fun t -> t.Result
+  let migrateResult =
+    runMigrateWithSchema oldDbPath schemaIdentity targetSchema newDbPath
+    |> fun t -> t.Result
 
   match migrateResult with
   | Error ex -> failwith $"Expected migrate to succeed before drain test, got {ex.Message}"
@@ -4515,7 +5793,7 @@ let ``drain replay applies target triggers for replayed writes`` () =
 
   let oldDbPath = Path.Combine(tempDir, "old.db")
   let newDbPath = Path.Combine(tempDir, "new.db")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
   use setupOldConn = openSqliteConnection oldDbPath
 
@@ -4528,24 +5806,13 @@ let ``drain replay applies target triggers for replayed writes`` () =
     use cmd = new SqliteCommand(sql, setupOldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  File.WriteAllText(schemaPath, "module Schema\n")
+  let schemaIdentity = loadSchemaIdentityFromSourceFile schemaPath
+  let targetSchema = accountInvoiceSchema
 
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Account = {{ id: int64; name: string }}
-
-[<AutoIncPK "id">]
-type Invoice = {{ id: int64; account: Account; total: float }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-
-  let migrateResult = runMigrate oldDbPath schemaPath newDbPath |> fun t -> t.Result
+  let migrateResult =
+    runMigrateWithSchema oldDbPath schemaIdentity targetSchema newDbPath
+    |> fun t -> t.Result
 
   match migrateResult with
   | Error ex -> failwith $"Expected migrate to succeed before trigger replay test, got {ex.Message}"
@@ -4607,7 +5874,7 @@ let ``post-cutover writes keep target triggers active`` () =
 
   let oldDbPath = Path.Combine(tempDir, "old.db")
   let newDbPath = Path.Combine(tempDir, "new.db")
-  let schemaPath = Path.Combine(tempDir, "schema.fsx")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
   use setupOldConn = openSqliteConnection oldDbPath
 
@@ -4617,21 +5884,13 @@ let ``post-cutover writes keep target triggers active`` () =
     use cmd = new SqliteCommand(sql, setupOldConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  File.WriteAllText(schemaPath, "module Schema\n")
+  let schemaIdentity = loadSchemaIdentityFromSourceFile schemaPath
+  let targetSchema = studentSchema
 
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(schemaPath, script.Trim())
-
-  let migrateResult = runMigrate oldDbPath schemaPath newDbPath |> fun t -> t.Result
+  let migrateResult =
+    runMigrateWithSchema oldDbPath schemaIdentity targetSchema newDbPath
+    |> fun t -> t.Result
 
   match migrateResult with
   | Error ex -> failwith $"Expected migrate to succeed before cutover trigger test, got {ex.Message}"
@@ -4782,8 +6041,11 @@ let ``codegen generates module and query methods from schema model`` () =
 
   let studentTable =
     { name = "student"
+      previousName = None
+      dropColumns = []
       columns =
         [ { name = "id"
+            previousName = None
             columnType = SqlInteger
             constraints =
               [ PrimaryKey
@@ -4793,11 +6055,13 @@ let ``codegen generates module and query methods from schema model`` () =
             enumLikeDu = None
             unitOfMeasure = None }
           { name = "name"
+            previousName = None
             columnType = SqlText
             constraints = [ NotNull ]
             enumLikeDu = None
             unitOfMeasure = None }
           { name = "age"
+            previousName = None
             columnType = SqlInteger
             constraints = [ NotNull ]
             enumLikeDu = None
@@ -4954,18 +6218,23 @@ let ``querybyorinsert works for composite primary keys without SelectById fallba
 
   let orderItemTable =
     { name = "order_item"
+      previousName = None
+      dropColumns = []
       columns =
         [ { name = "order_id"
+            previousName = None
             columnType = SqlInteger
             constraints = [ NotNull ]
             enumLikeDu = None
             unitOfMeasure = None }
           { name = "sku"
+            previousName = None
             columnType = SqlText
             constraints = [ NotNull ]
             enumLikeDu = None
             unitOfMeasure = None }
           { name = "description"
+            previousName = None
             columnType = SqlText
             constraints = [ NotNull ]
             enumLikeDu = None
@@ -5013,8 +6282,11 @@ let ``codegen rejects upsert annotation when table has no primary key`` () =
 
   let table =
     { name = "no_pk"
+      previousName = None
+      dropColumns = []
       columns =
         [ { name = "name"
+            previousName = None
             columnType = SqlText
             constraints = [ NotNull ]
             enumLikeDu = None
@@ -5047,8 +6319,11 @@ let ``codegen rejects upsert annotation on views`` () =
 
   let studentTable =
     { name = "student"
+      previousName = None
+      dropColumns = []
       columns =
         [ { name = "id"
+            previousName = None
             columnType = SqlInteger
             constraints =
               [ PrimaryKey
@@ -5058,6 +6333,7 @@ let ``codegen rejects upsert annotation on views`` () =
             enumLikeDu = None
             unitOfMeasure = None }
           { name = "name"
+            previousName = None
             columnType = SqlText
             constraints = [ NotNull ]
             enumLikeDu = None
@@ -5071,6 +6347,7 @@ let ``codegen rejects upsert annotation on views`` () =
 
   let view =
     { name = "student_view"
+      previousName = None
       sqlTokens = [ "CREATE VIEW student_view AS SELECT id, name FROM student;" ]
       declaredColumns = []
       dependencies = [ "student" ]
@@ -5094,18 +6371,20 @@ let ``codegen rejects upsert annotation on views`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``codegen writes CPM project references`` () =
-  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_proj_{Guid.NewGuid()}")
+let ``codegen writes only the requested source file`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_single_output_{Guid.NewGuid()}")
+
   Directory.CreateDirectory tempDir |> ignore
 
-  let projectPath = writeGeneratedProjectFile tempDir "students" [ "Students.fs" ]
-  let generatedProject = File.ReadAllText projectPath
+  let outputPath = Path.Combine(tempDir, "Students.fs")
 
-  Assert.Contains("<Compile Include=\"Students.fs\" />", generatedProject)
-  Assert.Contains("<PackageReference Include=\"FsToolkit.ErrorHandling\" />", generatedProject)
-  Assert.Contains("<PackageReference Include=\"Microsoft.Data.Sqlite\" />", generatedProject)
-  Assert.Contains("<PackageReference Include=\"MigLib\" />", generatedProject)
-  Assert.DoesNotContain("Version=", generatedProject)
+  match generateCodeFromTypes "Students" [ typeof<ReflectionStudent> ] outputPath with
+  | Error error -> failwith $"codegen-from-types failed: {error}"
+  | Ok stats ->
+    Assert.Equal<string list>([ outputPath ], stats.GeneratedFiles)
+    Assert.True(File.Exists outputPath, $"Expected generated file at: {outputPath}")
+    Assert.False(File.Exists(Path.Combine(tempDir, "Students.fsproj")))
 
   Directory.Delete(tempDir, true)
 
@@ -5123,6 +6402,8 @@ let ``codegen can run directly from reflected types`` () =
   | Ok _ ->
     let generated = File.ReadAllText outputPath
     Assert.Contains("module ReflectionStudent", generated)
+    Assert.Contains("let Schema:", generated)
+    Assert.DoesNotContain("let SchemaHash =", generated)
     Assert.Contains("static member SelectByNameAge", generated)
     Assert.Contains("(name: string, age: int64)", generated)
     Assert.Contains("(tx: SqliteTransaction)", generated)
@@ -5130,221 +6411,248 @@ let ``codegen can run directly from reflected types`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``schema script evaluation loads fsx types and seed inserts`` () =
-  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_script_{Guid.NewGuid()}")
+let ``build api derives schema-bound db file name from Schema fs path`` () =
+  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_build_dbfile_{Guid.NewGuid()}")
   Directory.CreateDirectory tempDir |> ignore
 
-  let scriptPath = Path.Combine(tempDir, "schema.fsx")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
 
-  let script =
-    $"""
-#r @"{migLibPath}"
+  File.WriteAllText(
+    schemaPath,
+    "module Schema\n\nopen MigLib.Db\n\n[<AutoIncPK \"id\">]\ntype Student = { id: int64; name: string }\n"
+  )
 
-open MigLib.Db
+  match deriveSchemaBoundDbFileName schemaPath with
+  | Error error -> failwith $"deriveSchemaBoundDbFileName failed: {error}"
+  | Ok dbFileName ->
+    let expectedDbFile =
+      $"{DirectoryInfo(tempDir).Name}-{deriveShortSchemaHashFromSourceFile schemaPath}.sqlite"
 
-[<AutoIncPK "id">]
-type Role = {{ id: int64; name: string }}
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; role: Role; name: string }}
-
-let roles = [
-  {{ id = 1L; name = "admin" }}
-  {{ id = 2L; name = "student" }}
-]
-
-let defaultStudent = {{ id = 10L; role = {{ id = 1L; name = "admin" }}; name = "System" }}
-"""
-
-  File.WriteAllText(scriptPath, script.Trim())
-
-  match buildSchemaFromScript scriptPath with
-  | Error e -> failwith $"schema script failed: {e}"
-  | Ok schema ->
-    Assert.True(schema.tables |> List.exists (fun table -> table.name = "role"))
-    Assert.True(schema.tables |> List.exists (fun table -> table.name = "student"))
-
-    let inserts = schema.inserts
-    Assert.Equal(2, inserts.Length)
-    Assert.Equal("role", inserts.[0].table)
-    Assert.Equal("student", inserts.[1].table)
-    Assert.Equal(2, inserts.[0].values.Length)
-    Assert.Single inserts.[1].values |> ignore
-
-    let studentInsert = inserts.[1]
-    let row = studentInsert.values.Head
-
-    let roleIdIndex =
-      studentInsert.columns |> List.findIndex (fun name -> name = "role_id")
-
-    match row.[roleIdIndex] with
-    | Integer value -> Assert.Equal(1, value)
-    | Value value -> Assert.Equal("1", value)
-    | other -> failwith $"Unexpected role_id expression: {other}"
+    Assert.Equal(expectedDbFile, dbFileName)
 
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``schema script evaluation stores enum-like DU seeds as strings`` () =
+let ``build api generates db code from reflected types without sibling project file`` () =
   let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_script_enum_seed_{Guid.NewGuid()}")
+    Path.Combine(Path.GetTempPath(), $"mig_build_codegen_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let scriptPath = Path.Combine(tempDir, "schema.fsx")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
+  let outputPath = Path.Combine(tempDir, "Db.fs")
+  let projectPath = Path.Combine(tempDir, "Db.fsproj")
 
-  let script =
-    $"""
-#r @"{migLibPath}"
+  File.WriteAllText(
+    schemaPath,
+    "module Schema\n\nopen MigLib.Db\n\n[<AutoIncPK \"id\">]\ntype ReflectionStudent = { id: int64; name: string; age: int64 }\n"
+  )
 
-open MigLib.Db
-
-type Status =
-  | Active
-  | InProgress
-
-[<AutoIncPK "id">]
-type Student = {{ id: int64; name: string; status: Status }}
-
-let defaultStudent = {{ id = 1L; name = "System"; status = InProgress }}
-"""
-
-  File.WriteAllText(scriptPath, script.Trim())
-
-  match buildSchemaFromScript scriptPath with
-  | Error e -> failwith $"schema script failed: {e}"
-  | Ok schema ->
-    let studentInsert =
-      schema.inserts |> List.find (fun insert -> insert.table = "student")
-
-    let statusIndex =
-      studentInsert.columns |> List.findIndex (fun name -> name = "status")
-
-    match studentInsert.values.Head.[statusIndex] with
-    | String value -> Assert.Equal("InProgress", value)
-    | other -> failwith $"Unexpected status seed expression: {other}"
-
-  Directory.Delete(tempDir, true)
-
-[<Fact>]
-let ``codegen can run directly from fsx schema script`` () =
-  let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_codegen_script_{Guid.NewGuid()}")
-
-  Directory.CreateDirectory tempDir |> ignore
-
-  let scriptPath = Path.Combine(tempDir, "schema.fsx")
-  let outputPath = Path.Combine(tempDir, "Generated.fs")
-  let projectPath = Path.Combine(tempDir, "Generated.fsproj")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<AutoIncPK "id">]
-[<SelectBy "name">]
-type Student = {{ id: int64; name: string }}
-"""
-
-  File.WriteAllText(scriptPath, script.Trim())
-
-  match generateCodeFromScript "Generated" scriptPath outputPath with
-  | Error e -> failwith $"codegen-from-script failed: {e}"
-  | Ok _ ->
+  match generateDbCodeFromTypes "Db" schemaPath [ typeof<ReflectionStudent> ] outputPath with
+  | Error error -> failwith $"generateDbCodeFromTypes failed: {error}"
+  | Ok stats ->
     let generated = File.ReadAllText outputPath
-    let generatedProject = File.ReadAllText projectPath
 
     let expectedDbFile =
-      $"{DirectoryInfo(tempDir).Name}-{deriveShortSchemaHashFromScript scriptPath}.sqlite"
+      $"{DirectoryInfo(tempDir).Name}-{deriveShortSchemaHashFromSourceFile schemaPath}.sqlite"
 
-    Assert.Contains("module Generated", generated)
+    Assert.Equal<string list>([ outputPath ], stats.GeneratedFiles)
+    Assert.Contains("module Db", generated)
     Assert.Contains("let DbFile =", generated)
+    Assert.Contains("let SchemaHash =", generated)
+    Assert.Contains("let SchemaIdentity:", generated)
+    Assert.Contains("let Schema:", generated)
     Assert.Contains(expectedDbFile, generated)
+    Assert.Contains("static member SelectByNameAge", generated)
+    Assert.False(File.Exists projectPath, "Embedded Db.fs generation should not emit a sibling .fsproj file.")
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``compiled schema loader reads generated schema values from assembly module`` () =
+  let assembly = typeof<CompiledSchemaFixture.Marker>.Assembly
+
+  match tryLoadGeneratedSchemaModuleFromAssembly assembly "CompiledSchemaFixture" with
+  | Error error -> failwith $"Expected compiled schema load to succeed, got: {error}"
+  | Ok loaded ->
+    Assert.Equal(Some "compiled-fixture.sqlite", loaded.dbFile)
+    Assert.Equal(Some "0123456789abcdef", loaded.schemaHash)
+    Assert.True(loaded.schemaIdentity.IsSome)
+    Assert.Equal("0123456789abcdef", loaded.schemaIdentity.Value.schemaHash)
+    Assert.Equal(Some "fixture-commit", loaded.schemaIdentity.Value.schemaCommit)
+    Assert.Single loaded.schema.tables |> ignore
+    Assert.Equal("fixture_student", loaded.schema.tables.Head.name)
+
+[<Fact>]
+let ``compiled schema loader reports missing module clearly`` () =
+  let assembly = typeof<CompiledSchemaFixture.Marker>.Assembly
+
+  match tryLoadGeneratedSchemaModuleFromAssembly assembly "DoesNotExist" with
+  | Ok _ -> failwith "Expected compiled schema load to fail for a missing module"
+  | Error error -> Assert.Contains("Compiled module 'DoesNotExist' was not found", error)
+
+[<Fact>]
+let ``compiled schema init wrapper creates database from module schema`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_compiled_schema_init_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "compiled-init.sqlite")
+  let assembly = typeof<CompiledSchemaFixture.Marker>.Assembly
+
+  let initResult =
+    runInitFromAssembly assembly "CompiledSchemaFixture" dbPath |> fun t -> t.Result
+
+  match initResult with
+  | Error ex -> failwith $"Expected compiled schema init to succeed, got: {ex.Message}"
+  | Ok result ->
+    Assert.Equal(dbPath, result.newDbPath)
+    Assert.Equal(0L, result.seededRows)
+
+  use verifyConn = openSqliteConnection dbPath
+
+  use tableExistsCmd =
+    new SqliteCommand(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'fixture_student' LIMIT 1",
+      verifyConn
+    )
+
+  let tableExists = tableExistsCmd.ExecuteScalar()
+  Assert.False(isNull tableExists)
+
+  verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``compiled schema migrate wrapper copies rows using module schema identity`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_compiled_schema_migrate_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let oldDbPath = Path.Combine(tempDir, "old.sqlite")
+  let newDbPath = Path.Combine(tempDir, "new.sqlite")
+  let assembly = typeof<CompiledSchemaFixture.Marker>.Assembly
+
+  use oldConn = openSqliteConnection oldDbPath
+
+  [ "CREATE TABLE fixture_student(id INTEGER NOT NULL);"
+    "INSERT INTO fixture_student(id) VALUES (1);"
+    "INSERT INTO fixture_student(id) VALUES (2);" ]
+  |> List.iter (fun sql ->
+    use cmd = new SqliteCommand(sql, oldConn)
+    cmd.ExecuteNonQuery() |> ignore)
+
+  oldConn.Close()
+
+  let migrateResult =
+    runMigrateFromAssembly assembly "CompiledSchemaFixture" oldDbPath newDbPath
+    |> fun t -> t.Result
+
+  match migrateResult with
+  | Error ex -> failwith $"Expected compiled schema migrate to succeed, got: {ex.Message}"
+  | Ok result ->
+    Assert.Equal(newDbPath, result.newDbPath)
+    Assert.Equal(1, result.copiedTables)
+    Assert.Equal(2L, result.copiedRows)
+
+  use verifyNewConn = openSqliteConnection newDbPath
+
+  use rowCountCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM fixture_student", verifyNewConn)
+
+  let rowCount = rowCountCmd.ExecuteScalar() |> unbox<int64>
+  Assert.Equal(2L, rowCount)
+
+  use schemaIdentityCmd =
+    new SqliteCommand("SELECT schema_hash FROM _schema_identity WHERE id = 0", verifyNewConn)
+
+  let schemaHash = schemaIdentityCmd.ExecuteScalar() |> string
+  Assert.Equal("0123456789abcdef", schemaHash)
+
+  verifyNewConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``codegen can run directly from in-memory schema model`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_model_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let outputPath = Path.Combine(tempDir, "Generated.fs")
+  let projectPath = Path.Combine(tempDir, "Generated.fsproj")
+
+  let schema =
+    { emptyFile with
+        tables =
+          [ { mkTable
+                "student"
+                [ mkColumn
+                    "id"
+                    SqlInteger
+                    [ NotNull
+                      PrimaryKey
+                        { constraintName = None
+                          columns = []
+                          isAutoincrement = true } ]
+                  mkColumn "name" SqlText [ NotNull ] ]
+                [] with
+                queryByAnnotations = [ { columns = [ "name" ] } ] } ] }
+
+  match generateCodeFromModel "Generated" schema outputPath with
+  | Error e -> failwith $"codegen-from-model failed: {e}"
+  | Ok stats ->
+    let generated = File.ReadAllText outputPath
+
+    Assert.Equal<string list>([ outputPath ], stats.GeneratedFiles)
+    Assert.Contains("module Generated", generated)
+    Assert.DoesNotContain("let DbFile =", generated)
     Assert.Contains("static member SelectByName (name: string) (tx: SqliteTransaction)", generated)
-    Assert.Contains("<Compile Include=\"Generated.fs\" />", generatedProject)
-    Assert.Contains("<PackageReference Include=\"MigLib\" />", generatedProject)
-    Assert.DoesNotContain("Version=", generatedProject)
+    Assert.False(File.Exists projectPath, "Code generation should not emit a sibling .fsproj file.")
 
   Directory.Delete(tempDir, true)
 
 [<Fact>]
 let ``codegen emits enum-like DU types and uses them in table and view APIs`` () =
   let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_codegen_enum_script_{Guid.NewGuid()}")
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_enum_reflection_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let scriptPath = Path.Combine(tempDir, "schema.fsx")
   let outputPath = Path.Combine(tempDir, "Generated.fs")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
 
-  let script =
-    $"""
-#r @"{migLibPath}"
+  let schema =
+    match
+      buildSchemaFromTypes
+        [ typeof<SchemaReflectionFixture.StudentWithStatus>
+          typeof<SchemaReflectionFixture.StudentStatusView> ]
+    with
+    | Ok value -> value
+    | Error e -> failwith $"schema-from-types failed: {e}"
 
-open MigLib.Db
-
-type Status =
-  | Active
-  | InProgress
-
-[<AutoIncPK "id">]
-[<SelectBy "status">]
-type Student = {{ id: int64; name: string; status: Status }}
-
-[<ViewSql "SELECT id, status FROM student">]
-[<SelectBy "status">]
-type StudentStatusView = {{ id: int64; status: Status }}
-"""
-
-  File.WriteAllText(scriptPath, script.Trim())
-
-  match generateCodeFromScript "Generated" scriptPath outputPath with
-  | Error e -> failwith $"codegen-from-script failed: {e}"
+  match generateCodeFromModel "Generated" schema outputPath with
+  | Error e -> failwith $"codegen-from-model failed: {e}"
   | Ok _ ->
     let generated = File.ReadAllText outputPath
     Assert.Contains("type Status =", generated)
     Assert.Contains("| Active", generated)
     Assert.Contains("| InProgress", generated)
     Assert.Contains("Status: Status", generated)
-    Assert.Contains("static member SelectByStatus (status: Status) (tx: SqliteTransaction)", generated)
+    Assert.Contains("static member SelectByStatus", generated)
+    Assert.Contains("(status: Status)", generated)
     Assert.Contains("type StudentStatusView =", generated)
     Assert.Contains("Status: Status", generated)
 
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``schema script evaluation preserves unit-of-measure column metadata`` () =
-  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_script_uom_{Guid.NewGuid()}")
-  Directory.CreateDirectory tempDir |> ignore
-
-  let scriptPath = Path.Combine(tempDir, "schema.fsx")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<Measure>]
-type Byte
-
-[<AutoIncPK "id">]
-type File = {{ id: int64; contentLength: int64<Byte>; slug: string }}
-"""
-
-  File.WriteAllText(scriptPath, script.Trim())
-
-  match buildSchemaFromScript scriptPath with
-  | Error e -> failwith $"schema script failed: {e}"
+let ``compiled schema reflection does not preserve unit-of-measure metadata`` () =
+  match buildSchemaFromTypes [ typeof<SchemaReflectionFixture.File> ] with
+  | Error e -> failwith $"schema-from-types failed: {e}"
   | Ok schema ->
-    Assert.Equal<string list>([ "Byte" ], schema.measureTypes)
+    Assert.Empty schema.measureTypes
 
     let fileTable = schema.tables |> List.find (fun table -> table.name = "file")
 
@@ -5352,64 +6660,4 @@ type File = {{ id: int64; contentLength: int64<Byte>; slug: string }}
       fileTable.columns |> List.find (fun column -> column.name = "content_length")
 
     Assert.Equal(SqlInteger, contentLength.columnType)
-    Assert.Equal(Some "Byte", contentLength.unitOfMeasure)
-
-  Directory.Delete(tempDir, true)
-
-[<Fact>]
-let ``codegen emits unit-of-measure declarations and typed APIs from schema script`` () =
-  let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_codegen_uom_script_{Guid.NewGuid()}")
-
-  Directory.CreateDirectory tempDir |> ignore
-
-  let scriptPath = Path.Combine(tempDir, "schema.fsx")
-  let outputPath = Path.Combine(tempDir, "Generated.fs")
-  let migLibPath = typeof<AutoIncPKAttribute>.Assembly.Location.Replace("\\", "\\\\")
-
-  let script =
-    $"""
-#r @"{migLibPath}"
-
-open MigLib.Db
-
-[<Measure>]
-type Byte
-
-[<AutoIncPK "id">]
-[<SelectBy "contentLength">]
-type File = {{ id: int64; contentLength: int64<Byte>; slug: string }}
-"""
-
-  File.WriteAllText(scriptPath, script.Trim())
-
-  match generateCodeFromScript "Generated" scriptPath outputPath with
-  | Error e -> failwith $"codegen-from-script failed: {e}"
-  | Ok _ ->
-    let generated = File.ReadAllText outputPath
-    Assert.Contains("[<Measure>]", generated)
-    Assert.Contains("type Byte", generated)
-    Assert.Contains("ContentLength: int64<Byte>", generated)
-    Assert.Contains("static member SelectByContentLength", generated)
-    Assert.Contains("content_length: int64<Byte>", generated)
-    Assert.Contains("LanguagePrimitives.Int64WithMeasure<Byte>", generated)
-
-  Directory.Delete(tempDir, true)
-
-[<Fact>]
-let ``schema script evaluation reports syntax errors`` () =
-  let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_script_syntax_error_{Guid.NewGuid()}")
-
-  Directory.CreateDirectory tempDir |> ignore
-
-  let scriptPath = Path.Combine(tempDir, "broken.fsx")
-  File.WriteAllText(scriptPath, "let broken =")
-
-  match buildSchemaFromScript scriptPath with
-  | Ok _ -> failwith "Expected schema script evaluation to fail on syntax error"
-  | Error error ->
-    Assert.Contains("Failed to parse schema script", error)
-    Assert.Contains("error FS", error)
-
-  Directory.Delete(tempDir, true)
+    Assert.Equal(None, contentLength.unitOfMeasure)

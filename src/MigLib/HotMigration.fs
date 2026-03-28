@@ -2,19 +2,18 @@ module Mig.HotMigration
 
 open System
 open System.Collections.Generic
-open System.Diagnostics
 open System.Globalization
 open System.IO
-open System.Security.Cryptography
 open System.Text
+open System.Threading
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 open MigLib.Db
+open MigLib.Util
 open DeclarativeMigrations.DataCopy
 open DeclarativeMigrations.DrainReplay
 open DeclarativeMigrations.SchemaDiff
 open DeclarativeMigrations.Types
-open SchemaScript
 
 type MigrationStatusReport =
   { oldMarkerStatus: string option
@@ -52,6 +51,10 @@ type MigrateResult =
 
 type InitResult =
   { newDbPath: string; seededRows: int64 }
+
+type SchemaIdentity =
+  { schemaHash: string
+    schemaCommit: string option }
 
 type MigratePlanReport =
   { schemaHash: string
@@ -141,59 +144,6 @@ let private createCommand
 let private quoteIdentifier (name: string) =
   let escaped = name.Replace("\"", "\"\"")
   $"\"{escaped}\""
-
-let private normalizeLineEndings (text: string) =
-  text.Replace("\r\n", "\n").Replace("\r", "\n")
-
-let private computeSchemaHashFromScriptPath (schemaPath: string) : Result<string, SqliteException> =
-  try
-    let normalizedSchema = File.ReadAllText schemaPath |> normalizeLineEndings
-    use sha256 = SHA256.Create()
-    let schemaBytes = Encoding.UTF8.GetBytes normalizedSchema
-    let hashBytes = sha256.ComputeHash schemaBytes
-    Ok(Convert.ToHexString(hashBytes).ToLowerInvariant().Substring(0, 16))
-  with ex ->
-    Error(toSqliteError $"Could not compute schema hash from script '{schemaPath}': {ex.Message}")
-
-let private tryResolveSchemaCommitFromGit (schemaPath: string) : string option =
-  try
-    let fullSchemaPath = Path.GetFullPath schemaPath
-    let schemaDirectory = Path.GetDirectoryName fullSchemaPath
-
-    if String.IsNullOrWhiteSpace schemaDirectory then
-      None
-    else
-      let startInfo = ProcessStartInfo()
-      startInfo.FileName <- "git"
-      startInfo.UseShellExecute <- false
-      startInfo.RedirectStandardOutput <- true
-      startInfo.RedirectStandardError <- true
-      startInfo.CreateNoWindow <- true
-      startInfo.ArgumentList.Add "-C"
-      startInfo.ArgumentList.Add schemaDirectory
-      startInfo.ArgumentList.Add "rev-parse"
-      startInfo.ArgumentList.Add "HEAD"
-
-      use proc = Process.Start startInfo
-
-      if isNull proc then
-        None
-      else
-        let output = proc.StandardOutput.ReadToEnd()
-        let _ = proc.StandardError.ReadToEnd()
-        let exited = proc.WaitForExit 2000
-
-        if exited && proc.ExitCode = 0 then
-          let commit = output.Trim()
-
-          if String.IsNullOrWhiteSpace commit then
-            None
-          else
-            Some commit
-        else
-          None
-  with _ ->
-    None
 
 let private exprToInt64 (expr: Expr) : int64 option =
   match expr with
@@ -1035,6 +985,7 @@ let private buildTableDefinition
       | _ -> ()
 
       { name = row.name
+        previousName = None
         columnType = parseSqlType row.declaredType
         constraints = constraints |> Seq.toList
         enumLikeDu = None
@@ -1071,6 +1022,8 @@ let private buildTableDefinition
       []
 
   { name = tableName
+    previousName = None
+    dropColumns = []
     columns = columns
     constraints = tablePrimaryKeyConstraint @ tableConstraints
     queryByAnnotations = []
@@ -1090,10 +1043,16 @@ let private loadSchemaFromDatabase
     | Error ex -> return Error ex
     | Ok tableList ->
       let tables = ResizeArray<CreateTable>()
+
+      let isOk =
+        function
+        | Ok _ -> true
+        | Error _ -> false
+
       let mutable index = 0
       let mutable result: Result<SqlFile, SqliteException> = Ok emptyFile
 
-      while index < tableList.Length && result.IsOk do
+      while index < tableList.Length && isOk result do
         let tableName, createSql = tableList[index]
         let! tableInfoResult = readTableInfoRows connection tableName
 
@@ -1264,10 +1223,15 @@ let private copyTableRows
       let mutable copiedRows = 0L
       let mutable keepReading = true
 
+      let isOk =
+        function
+        | Ok _ -> true
+        | Error _ -> false
+
       let mutable result: Result<IdMappingStore * int64, SqliteException> =
         Ok(mappings, copiedRows)
 
-      while keepReading && result.IsOk do
+      while keepReading && isOk result do
         let! hasRow = reader.ReadAsync()
 
         if hasRow then
@@ -1325,10 +1289,15 @@ let private executeBulkCopy
       let mutable totalRows = 0L
       let mutable stepIndex = 0
 
+      let isOk =
+        function
+        | Ok _ -> true
+        | Error _ -> false
+
       let mutable result: Result<IdMappingStore * int64, SqliteException> =
         Ok(mappings, totalRows)
 
-      while stepIndex < plan.steps.Length && result.IsOk do
+      while stepIndex < plan.steps.Length && isOk result do
         let step = plan.steps[stepIndex]
         let! tableResult = copyTableRows oldConnection tx step mappings persistIdMappings
 
@@ -1350,11 +1319,6 @@ let private executeBulkCopy
     with :? SqliteException as ex ->
       return Error ex
   }
-
-let private parseSchemaFromScript (schemaPath: string) : Result<SqlFile, SqliteException> =
-  match buildSchemaFromScript schemaPath with
-  | Ok schema -> Ok schema
-  | Error message -> Error(toSqliteError message)
 
 let private joinOrNone (items: string list) =
   match items with
@@ -1581,119 +1545,118 @@ let private renderPreflightReport (supported: string list) (unsupported: string 
   |> String.concat Environment.NewLine
 
 let private buildCopyPlan (sourceSchema: SqlFile) (targetSchema: SqlFile) : Result<BulkCopyPlan, SqliteException> =
-  let schemaPlan = buildSchemaCopyPlan sourceSchema targetSchema
-  let tableDifferences = describeSupportedDifferences schemaPlan
   let nonTableConsistency = analyzeNonTableConsistency targetSchema
-  let supportedDifferences = tableDifferences @ nonTableConsistency.supportedLines
 
-  match buildBulkCopyPlan sourceSchema targetSchema with
-  | Ok plan ->
-    if nonTableConsistency.unsupportedLines.IsEmpty then
-      Ok plan
-    else
-      let report =
-        renderPreflightReport supportedDifferences nonTableConsistency.unsupportedLines
-
-      Error(toSqliteError report)
+  match buildSchemaCopyPlan sourceSchema targetSchema with
   | Error message ->
-    let unsupported = nonTableConsistency.unsupportedLines @ [ message ]
-    let report = renderPreflightReport supportedDifferences unsupported
-    Error(toSqliteError report)
+    let report =
+      renderPreflightReport nonTableConsistency.supportedLines (nonTableConsistency.unsupportedLines @ [ message ])
 
-let getMigratePlan
+    Error(toSqliteError report)
+  | Ok schemaPlan ->
+    let tableDifferences = describeSupportedDifferences schemaPlan
+    let supportedDifferences = tableDifferences @ nonTableConsistency.supportedLines
+
+    match buildBulkCopyPlan sourceSchema targetSchema with
+    | Ok plan ->
+      if nonTableConsistency.unsupportedLines.IsEmpty then
+        Ok plan
+      else
+        let report =
+          renderPreflightReport supportedDifferences nonTableConsistency.unsupportedLines
+
+        Error(toSqliteError report)
+    | Error message ->
+      let unsupported = nonTableConsistency.unsupportedLines @ [ message ]
+      let report = renderPreflightReport supportedDifferences unsupported
+      Error(toSqliteError report)
+
+let getMigratePlanWithSchema
   (oldDbPath: string)
-  (schemaPath: string)
+  (schemaIdentity: SchemaIdentity)
+  (targetSchema: SqlFile)
   (newDbPath: string)
   : Task<Result<MigratePlanReport, SqliteException>> =
-  task {
+  taskResult {
     try
       if not (File.Exists oldDbPath) then
-        return Error(toSqliteError $"Old database was not found: {oldDbPath}")
+        return! Error(toSqliteError $"Old database was not found: {oldDbPath}")
       else
-        let schemaHashResult = computeSchemaHashFromScriptPath schemaPath
+        use oldConnection = openSqliteConnection oldDbPath
 
-        match schemaHashResult with
-        | Error ex -> return Error ex
-        | Ok schemaHash ->
-          let schemaCommit = tryResolveSchemaCommitFromGit schemaPath
+        let! sourceSchema = loadSchemaFromDatabase oldConnection migrationTables
+        let nonTableConsistency = analyzeNonTableConsistency targetSchema
+        let schemaPlanResult = buildSchemaCopyPlan sourceSchema targetSchema
 
-          let targetSchemaResult =
-            match parseSchemaFromScript schemaPath with
-            | Ok schema -> Ok schema
-            | Error ex -> Error ex
+        let tableDifferences =
+          match schemaPlanResult with
+          | Ok schemaPlan -> describeSupportedDifferences schemaPlan
+          | Error _ -> []
 
-          match targetSchemaResult with
-          | Error ex -> return Error ex
-          | Ok targetSchema ->
-            use oldConnection = openSqliteConnection oldDbPath
+        let supportedDifferences = tableDifferences @ nonTableConsistency.supportedLines
 
-            let! sourceSchemaResult = loadSchemaFromDatabase oldConnection migrationTables
+        let plannerResult = buildBulkCopyPlan sourceSchema targetSchema
 
-            match sourceSchemaResult with
-            | Error ex -> return Error ex
-            | Ok sourceSchema ->
-              let schemaPlan = buildSchemaCopyPlan sourceSchema targetSchema
-              let tableDifferences = describeSupportedDifferences schemaPlan
-              let nonTableConsistency = analyzeNonTableConsistency targetSchema
-              let supportedDifferences = tableDifferences @ nonTableConsistency.supportedLines
+        let plannedCopyTargets, plannerUnsupported =
+          match plannerResult with
+          | Ok plan -> plan.steps |> List.map _.mapping.targetTable, []
+          | Error message -> [], [ message ]
 
-              let plannerResult = buildBulkCopyPlan sourceSchema targetSchema
+        let schemaPlanUnsupported =
+          match schemaPlanResult with
+          | Ok _ -> []
+          | Error message -> [ message ]
 
-              let plannedCopyTargets, plannerUnsupported =
-                match plannerResult with
-                | Ok plan -> plan.steps |> List.map _.mapping.targetTable, []
-                | Error message -> [], [ message ]
+        let unsupportedDifferences =
+          nonTableConsistency.unsupportedLines
+          @ schemaPlanUnsupported
+          @ plannerUnsupported
 
-              let unsupportedDifferences =
-                nonTableConsistency.unsupportedLines @ plannerUnsupported
+        let! oldMarkerStatus = readMarkerStatus oldConnection None "_migration_marker"
+        let! oldMigrationLogTablePresent = tableExists oldConnection None "_migration_log"
+        let! oldMigrationLogEntries = countRowsIfTableExists oldConnection None "_migration_log"
 
-              let! oldMarkerStatus = readMarkerStatus oldConnection None "_migration_marker"
-              let! oldMigrationLogTablePresent = tableExists oldConnection None "_migration_log"
-              let! oldMigrationLogEntries = countRowsIfTableExists oldConnection None "_migration_log"
+        let markerPrerequisite =
+          match oldMarkerStatus with
+          | Some status -> $"_migration_marker is present with status '{status}' (migrate will set it to recording)."
+          | None -> "_migration_marker is absent (migrate will create it in recording mode)."
 
-              let markerPrerequisite =
-                match oldMarkerStatus with
-                | Some status ->
-                  $"_migration_marker is present with status '{status}' (migrate will set it to recording)."
-                | None -> "_migration_marker is absent (migrate will create it in recording mode)."
+        let logPrerequisite =
+          if oldMigrationLogTablePresent then
+            $"_migration_log is present with {oldMigrationLogEntries} entries (migrate will recreate it)."
+          else
+            "_migration_log is absent (migrate will create it)."
 
-              let logPrerequisite =
-                if oldMigrationLogTablePresent then
-                  $"_migration_log is present with {oldMigrationLogEntries} entries (migrate will recreate it)."
-                else
-                  "_migration_log is absent (migrate will create it)."
+        let newDatabaseAlreadyExists = File.Exists newDbPath
 
-              let newDatabaseAlreadyExists = File.Exists newDbPath
+        let targetPrerequisite =
+          if newDatabaseAlreadyExists then
+            $"target database already exists: {newDbPath}"
+          else
+            $"target database path is available: {newDbPath}"
 
-              let targetPrerequisite =
-                if newDatabaseAlreadyExists then
-                  $"target database already exists: {newDbPath}"
-                else
-                  $"target database path is available: {newDbPath}"
+        let driftPrerequisite =
+          if unsupportedDifferences.IsEmpty then
+            "schema preflight checks pass."
+          else
+            $"schema preflight has {unsupportedDifferences.Length} blocking issue(s)."
 
-              let driftPrerequisite =
-                if unsupportedDifferences.IsEmpty then
-                  "schema preflight checks pass."
-                else
-                  $"schema preflight has {unsupportedDifferences.Length} blocking issue(s)."
+        let replayPrerequisites =
+          [ markerPrerequisite; logPrerequisite; targetPrerequisite; driftPrerequisite ]
 
-              let replayPrerequisites =
-                [ markerPrerequisite; logPrerequisite; targetPrerequisite; driftPrerequisite ]
+        let canRunMigrate = not newDatabaseAlreadyExists && unsupportedDifferences.IsEmpty
 
-              let canRunMigrate = not newDatabaseAlreadyExists && unsupportedDifferences.IsEmpty
-
-              return
-                Ok
-                  { schemaHash = schemaHash
-                    schemaCommit = schemaCommit
-                    supportedDifferences = supportedDifferences
-                    unsupportedDifferences = unsupportedDifferences
-                    plannedCopyTargets = plannedCopyTargets
-                    replayPrerequisites = replayPrerequisites
-                    canRunMigrate = canRunMigrate }
+        return
+          { schemaHash = schemaIdentity.schemaHash
+            schemaCommit = schemaIdentity.schemaCommit
+            supportedDifferences = supportedDifferences
+            unsupportedDifferences = unsupportedDifferences
+            plannedCopyTargets = plannedCopyTargets
+            replayPrerequisites = replayPrerequisites
+            canRunMigrate = canRunMigrate }
     with
-    | :? SqliteException as ex -> return Error ex
-    | ex -> return Error(toSqliteError ex.Message)
+    | :? SqliteException as ex -> return! Error ex
+    | ex -> return! Error(toSqliteError ex.Message)
   }
 
 let getStatus (oldDbPath: string) (newDbPath: string option) : Task<Result<MigrationStatusReport, SqliteException>> =
@@ -1817,221 +1780,212 @@ let getOldDatabaseStatus (oldDbPath: string) : Task<Result<OldDatabaseStatusRepo
 
 let private runMigrateInternal
   (oldDbPath: string)
-  (schemaPath: string)
+  (schemaIdentity: SchemaIdentity)
+  (targetSchema: SqlFile)
   (newDbPath: string)
-  (schemaCommit: string option)
   (prepareOldDatabase: SqliteConnection -> Task<Result<unit, SqliteException>>)
   (initializeTargetDatabase:
     SqliteConnection -> SqlFile -> string -> string option -> Task<Result<unit, SqliteException>>)
   (persistIdMappings: bool)
   : Task<Result<MigrateResult, SqliteException>> =
-  task {
+  taskResult {
     try
       if not (File.Exists oldDbPath) then
-        return Error(toSqliteError $"Old database was not found: {oldDbPath}")
+        return! Error(toSqliteError $"Old database was not found: {oldDbPath}")
       elif File.Exists newDbPath then
-        return Error(toSqliteError $"New database already exists: {newDbPath}")
+        return! Error(toSqliteError $"New database already exists: {newDbPath}")
       else
-        let schemaHashResult = computeSchemaHashFromScriptPath schemaPath
+        use oldConnection = openSqliteConnection oldDbPath
+        let! sourceSchema = loadSchemaFromDatabase oldConnection migrationTables
+        let! copyPlan = buildCopyPlan sourceSchema targetSchema
+        do! prepareOldDatabase oldConnection
 
-        match schemaHashResult with
-        | Error ex -> return Error ex
-        | Ok schemaHash ->
-          let! targetSchema =
-            match parseSchemaFromScript schemaPath with
-            | Ok schema -> Task.FromResult(Ok schema)
-            | Error ex -> Task.FromResult(Error ex)
+        let newDirectory = Path.GetDirectoryName newDbPath
 
-          match targetSchema with
-          | Error ex -> return Error ex
-          | Ok expectedSchema ->
-            use oldConnection = openSqliteConnection oldDbPath
+        if not (String.IsNullOrWhiteSpace newDirectory) then
+          Directory.CreateDirectory newDirectory |> ignore
 
-            let! sourceSchemaResult = loadSchemaFromDatabase oldConnection migrationTables
+        use newConnection = openSqliteConnection newDbPath
 
-            match sourceSchemaResult with
-            | Error ex -> return Error ex
-            | Ok sourceSchema ->
-              let! copyPlan =
-                match buildCopyPlan sourceSchema expectedSchema with
-                | Ok plan -> Task.FromResult(Ok plan)
-                | Error ex -> Task.FromResult(Error ex)
+        do! initializeTargetDatabase newConnection targetSchema schemaIdentity.schemaHash schemaIdentity.schemaCommit
 
-              match copyPlan with
-              | Error ex -> return Error ex
-              | Ok plan ->
-                let! oldSetupResult = prepareOldDatabase oldConnection
+        let! _, copiedRows = executeBulkCopy oldConnection newConnection copyPlan persistIdMappings
 
-                match oldSetupResult with
-                | Error ex -> return Error ex
-                | Ok() ->
-                  let newDirectory = Path.GetDirectoryName newDbPath
-
-                  if not (String.IsNullOrWhiteSpace newDirectory) then
-                    Directory.CreateDirectory newDirectory |> ignore
-
-                  use newConnection = openSqliteConnection newDbPath
-
-                  let! initResult = initializeTargetDatabase newConnection expectedSchema schemaHash schemaCommit
-
-                  match initResult with
-                  | Error ex -> return Error ex
-                  | Ok() ->
-                    let! copyResult = executeBulkCopy oldConnection newConnection plan persistIdMappings
-
-                    match copyResult with
-                    | Error ex -> return Error ex
-                    | Ok(_, copiedRows) ->
-                      return
-                        Ok
-                          { newDbPath = newDbPath
-                            copiedTables = plan.steps.Length
-                            copiedRows = copiedRows }
+        return
+          { newDbPath = newDbPath
+            copiedTables = copyPlan.steps.Length
+            copiedRows = copiedRows }
     with
-    | :? SqliteException as ex -> return Error ex
-    | ex -> return Error(toSqliteError ex.Message)
+    | :? SqliteException as ex -> return! Error ex
+    | ex -> return! Error(toSqliteError ex.Message)
   }
 
-let runMigrate
+let runMigrateWithSchema
   (oldDbPath: string)
-  (schemaPath: string)
+  (schemaIdentity: SchemaIdentity)
+  (targetSchema: SqlFile)
   (newDbPath: string)
   : Task<Result<MigrateResult, SqliteException>> =
-  let schemaCommit = tryResolveSchemaCommitFromGit schemaPath
-  runMigrateInternal oldDbPath schemaPath newDbPath schemaCommit ensureOldRecordingTables initializeNewDatabase true
+  runMigrateInternal oldDbPath schemaIdentity targetSchema newDbPath ensureOldRecordingTables initializeNewDatabase true
 
-let runOfflineMigrate
+let runOfflineMigrateWithSchema
   (oldDbPath: string)
-  (schemaPath: string)
+  (schemaIdentity: SchemaIdentity)
+  (targetSchema: SqlFile)
   (newDbPath: string)
   : Task<Result<MigrateResult, SqliteException>> =
-  let schemaCommit = tryResolveSchemaCommitFromGit schemaPath
-
   runMigrateInternal
     oldDbPath
-    schemaPath
+    schemaIdentity
+    targetSchema
     newDbPath
-    schemaCommit
     (fun _ -> Task.FromResult(Ok()))
     initializeOfflineDatabase
     false
 
-let runInit (schemaPath: string) (newDbPath: string) : Task<Result<InitResult, SqliteException>> =
+let runInitWithSchema (targetSchema: SqlFile) (newDbPath: string) : Task<Result<InitResult, SqliteException>> =
   task {
     try
       if File.Exists newDbPath then
         return Error(toSqliteError $"Database already exists: {newDbPath}")
       else
-        let! targetSchema =
-          match parseSchemaFromScript schemaPath with
-          | Ok schema -> Task.FromResult(Ok schema)
-          | Error ex -> Task.FromResult(Error ex)
+        let newDirectory = Path.GetDirectoryName newDbPath
 
-        match targetSchema with
+        if not (String.IsNullOrWhiteSpace newDirectory) then
+          Directory.CreateDirectory newDirectory |> ignore
+
+        use newConnection = openSqliteConnection newDbPath
+
+        let! initResult = initializeDatabaseFromSchemaOnly newConnection targetSchema
+
+        match initResult with
         | Error ex -> return Error ex
-        | Ok schema ->
-          let newDirectory = Path.GetDirectoryName newDbPath
-
-          if not (String.IsNullOrWhiteSpace newDirectory) then
-            Directory.CreateDirectory newDirectory |> ignore
-
-          use newConnection = openSqliteConnection newDbPath
-
-          let! initResult = initializeDatabaseFromSchemaOnly newConnection schema
-
-          match initResult with
-          | Error ex -> return Error ex
-          | Ok seededRows ->
-            return
-              Ok
-                { newDbPath = newDbPath
-                  seededRows = seededRows }
+        | Ok seededRows ->
+          return
+            Ok
+              { newDbPath = newDbPath
+                seededRows = seededRows }
     with
     | :? SqliteException as ex -> return Error ex
     | ex -> return Error(toSqliteError ex.Message)
   }
 
+let startServiceWithPolling
+  (sqliteDirectoryEnvVarName: string)
+  (dbFileName: string)
+  (schemaIdentity: SchemaIdentity)
+  (targetSchema: SqlFile)
+  (inferPreviousDatabasePath: unit -> Result<string option, SqliteException>)
+  (pollInterval: TimeSpan)
+  (cancellationToken: CancellationToken)
+  : Task<Result<DbTxnBuilder, SqliteException>> =
+  taskResult {
+    let! decision = getStartupDatabaseDecisionFromEnvVar sqliteDirectoryEnvVarName dbFileName
+
+    match decision with
+    | UseExisting dbPath -> return dbTxn dbPath
+    | WaitForMigration dbPath ->
+      do! waitForStartupDatabaseReady dbPath pollInterval cancellationToken
+      return dbTxn dbPath
+    | MigrateThisInstance newDbPath ->
+      let! oldDbPath = inferPreviousDatabasePath ()
+
+      match oldDbPath with
+      | None ->
+        let! (_: InitResult) = (runInitWithSchema targetSchema newDbPath: Task<Result<InitResult, SqliteException>>)
+
+        return dbTxn newDbPath
+      | Some oldDbPath ->
+        let! (_: MigrateResult) =
+          (runMigrateWithSchema oldDbPath schemaIdentity targetSchema newDbPath
+          : Task<Result<MigrateResult, SqliteException>>)
+
+        return dbTxn newDbPath
+    | ExitEarly(_, reason) -> return! Error(SqliteException(reason, 0))
+  }
+
+let startService
+  (sqliteDirectoryEnvVarName: string)
+  (dbFileName: string)
+  (schemaIdentity: SchemaIdentity)
+  (targetSchema: SqlFile)
+  (inferPreviousDatabasePath: unit -> Result<string option, SqliteException>)
+  (cancellationToken: CancellationToken)
+  : Task<Result<DbTxnBuilder, SqliteException>> =
+  startServiceWithPolling
+    sqliteDirectoryEnvVarName
+    dbFileName
+    schemaIdentity
+    targetSchema
+    inferPreviousDatabasePath
+    (TimeSpan.FromSeconds 1.0)
+    cancellationToken
+
 let runDrain (oldDbPath: string) (newDbPath: string) : Task<Result<DrainResult, SqliteException>> =
-  task {
+  taskResult {
     try
       if not (File.Exists oldDbPath) then
-        return Error(toSqliteError $"Old database was not found: {oldDbPath}")
+        return! Error(toSqliteError $"Old database was not found: {oldDbPath}")
       elif not (File.Exists newDbPath) then
-        return Error(toSqliteError $"New database was not found: {newDbPath}")
+        return! Error(toSqliteError $"New database was not found: {newDbPath}")
       else
         use oldConnection = openSqliteConnection oldDbPath
 
         use newConnection = openSqliteConnection newDbPath
 
-        let! setDrainResult = setOldMarkerToDraining oldConnection
+        do! setOldMarkerToDraining oldConnection
+        let! sourceSchema = loadSchemaFromDatabase oldConnection migrationTables
+        let! targetSchema = loadSchemaFromDatabase newConnection migrationTables
+        let! plan = buildCopyPlan sourceSchema targetSchema
+        let! initialMappings = loadIdMappings newConnection
+        let! progressRow = ensureMigrationProgressRow newConnection None
+        let mutable mappings = initialMappings
+        let mutable replayedEntries = 0
+        let mutable lastConsumedLogId = progressRow.lastReplayedLogId
+        let mutable keepDraining = true
 
-        match setDrainResult with
-        | Error ex -> return Error ex
-        | Ok() ->
-          let! sourceSchemaResult = loadSchemaFromDatabase oldConnection migrationTables
-          let! targetSchemaResult = loadSchemaFromDatabase newConnection migrationTables
+        let isOk =
+          function
+          | Ok _ -> true
+          | Error _ -> false
 
-          match sourceSchemaResult, targetSchemaResult with
-          | Error ex, _ -> return Error ex
-          | _, Error ex -> return Error ex
-          | Ok sourceSchema, Ok targetSchema ->
-            let! planResult =
-              match buildCopyPlan sourceSchema targetSchema with
-              | Ok plan -> Task.FromResult(Ok plan)
-              | Error ex -> Task.FromResult(Error ex)
+        let mutable result: Result<DrainResult, SqliteException> =
+          Ok
+            { replayedEntries = 0
+              remainingEntries = 0L }
 
-            match planResult with
-            | Error ex -> return Error ex
-            | Ok plan ->
-              let! initialMappingsResult = loadIdMappings newConnection
+        while keepDraining && isOk result do
+          let! batchResult = readMigrationLogEntries oldConnection lastConsumedLogId
 
-              match initialMappingsResult with
-              | Error ex -> return Error ex
-              | Ok initialMappings ->
-                let! progressRow = ensureMigrationProgressRow newConnection None
-                let mutable mappings = initialMappings
-                let mutable replayedEntries = 0
-                let mutable lastConsumedLogId = progressRow.lastReplayedLogId
-                let mutable keepDraining = true
+          match batchResult with
+          | Error ex -> result <- Error ex
+          | Ok [] -> keepDraining <- false
+          | Ok entries ->
+            let! replayResult = replayDrainEntries newConnection plan entries mappings
 
-                let mutable result: Result<DrainResult, SqliteException> =
-                  Ok
-                    { replayedEntries = 0
-                      remainingEntries = 0L }
+            match replayResult with
+            | Error ex -> result <- Error ex
+            | Ok updatedMappings ->
+              mappings <- updatedMappings
+              replayedEntries <- replayedEntries + entries.Length
 
-                while keepDraining && result.IsOk do
-                  let! batchResult = readMigrationLogEntries oldConnection lastConsumedLogId
+              let batchMaxLogId = entries |> List.map _.id |> List.max
+              lastConsumedLogId <- batchMaxLogId
+              do! upsertMigrationProgress newConnection None lastConsumedLogId false
 
-                  match batchResult with
-                  | Error ex -> result <- Error ex
-                  | Ok [] -> keepDraining <- false
-                  | Ok entries ->
-                    let! replayResult = replayDrainEntries newConnection plan entries mappings
+        match result with
+        | Error ex -> return! Error ex
+        | Ok _ ->
+          let! remainingEntries = countPendingLogEntries oldConnection None lastConsumedLogId
 
-                    match replayResult with
-                    | Error ex -> result <- Error ex
-                    | Ok updatedMappings ->
-                      mappings <- updatedMappings
-                      replayedEntries <- replayedEntries + entries.Length
+          do! upsertMigrationProgress newConnection None lastConsumedLogId (remainingEntries = 0L)
 
-                      let batchMaxLogId = entries |> List.map _.id |> List.max
-                      lastConsumedLogId <- batchMaxLogId
-                      do! upsertMigrationProgress newConnection None lastConsumedLogId false
-
-                match result with
-                | Error ex -> return Error ex
-                | Ok _ ->
-                  let! remainingEntries = countPendingLogEntries oldConnection None lastConsumedLogId
-
-                  do! upsertMigrationProgress newConnection None lastConsumedLogId (remainingEntries = 0L)
-
-                  return
-                    Ok
-                      { replayedEntries = replayedEntries
-                        remainingEntries = remainingEntries }
+          return
+            { replayedEntries = replayedEntries
+              remainingEntries = remainingEntries }
     with
-    | :? SqliteException as ex -> return Error ex
-    | ex -> return Error(toSqliteError ex.Message)
+    | :? SqliteException as ex -> return! Error ex
+    | ex -> return! Error(toSqliteError ex.Message)
   }
 
 let runArchiveOld (projectDirectory: string) (oldDbPath: string) : Task<Result<ArchiveOldResult, SqliteException>> =
@@ -2094,130 +2048,120 @@ let runArchiveOld (projectDirectory: string) (oldDbPath: string) : Task<Result<A
   }
 
 let getResetMigrationPlan (oldDbPath: string) (newDbPath: string) : Task<Result<ResetMigrationPlan, SqliteException>> =
-  task {
+  taskResult {
     try
       if not (File.Exists oldDbPath) then
-        return Error(toSqliteError $"Old database was not found: {oldDbPath}")
+        return! Error(toSqliteError $"Old database was not found: {oldDbPath}")
       else
         let newDatabaseExisted = File.Exists newDbPath
 
-        let! previousNewStatusResult =
+        let! (previousNewStatus: string option) =
           if newDatabaseExisted then
-            task {
+            taskResult {
               try
                 use newConnection = openSqliteConnection newDbPath
-                let! status = readMarkerStatus newConnection None "_migration_status"
-                return Ok status
+                return! readMarkerStatus newConnection None "_migration_status"
               with
-              | :? SqliteException as ex -> return Error ex
-              | ex -> return Error(toSqliteError ex.Message)
+              | :? SqliteException as ex -> return! Error ex
+              | ex -> return! Error(toSqliteError ex.Message)
             }
           else
             Task.FromResult(Ok None)
 
-        match previousNewStatusResult with
-        | Error ex -> return Error ex
-        | Ok previousNewStatus ->
-          use oldConnection = openSqliteConnection oldDbPath
+        use oldConnection = openSqliteConnection oldDbPath
 
-          let! previousOldMarkerStatus = readMarkerStatus oldConnection None "_migration_marker"
-          let! oldHasMarker = tableExists oldConnection None "_migration_marker"
-          let! oldHasLog = tableExists oldConnection None "_migration_log"
+        let! previousOldMarkerStatus = readMarkerStatus oldConnection None "_migration_marker"
+        let! oldHasMarker = tableExists oldConnection None "_migration_marker"
+        let! oldHasLog = tableExists oldConnection None "_migration_log"
 
-          let newIsReady =
-            previousNewStatus
-            |> Option.exists (fun status -> status.Equals("ready", StringComparison.OrdinalIgnoreCase))
+        let newIsReady =
+          previousNewStatus
+          |> Option.exists (fun status -> status.Equals("ready", StringComparison.OrdinalIgnoreCase))
 
-          let blockedReason =
-            if newIsReady then
-              Some(readyResetBlockedMessage newDbPath)
-            else
-              None
+        let blockedReason =
+          if newIsReady then
+            Some(readyResetBlockedMessage newDbPath)
+          else
+            None
 
-          let canApplyReset = blockedReason.IsNone
+        let canApplyReset = blockedReason.IsNone
 
-          return
-            Ok
-              { previousOldMarkerStatus = previousOldMarkerStatus
-                oldMarkerPresent = oldHasMarker
-                oldLogPresent = oldHasLog
-                previousNewStatus = previousNewStatus
-                newDatabaseExisted = newDatabaseExisted
-                willDropOldMarker = oldHasMarker
-                willDropOldLog = oldHasLog
-                willDeleteNewDatabase = newDatabaseExisted && canApplyReset
-                canApplyReset = canApplyReset
-                blockedReason = blockedReason }
+        return
+          { previousOldMarkerStatus = previousOldMarkerStatus
+            oldMarkerPresent = oldHasMarker
+            oldLogPresent = oldHasLog
+            previousNewStatus = previousNewStatus
+            newDatabaseExisted = newDatabaseExisted
+            willDropOldMarker = oldHasMarker
+            willDropOldLog = oldHasLog
+            willDeleteNewDatabase = newDatabaseExisted && canApplyReset
+            canApplyReset = canApplyReset
+            blockedReason = blockedReason }
     with
-    | :? SqliteException as ex -> return Error ex
-    | ex -> return Error(toSqliteError ex.Message)
+    | :? SqliteException as ex -> return! Error ex
+    | ex -> return! Error(toSqliteError ex.Message)
   }
 
 let runResetMigration (oldDbPath: string) (newDbPath: string) : Task<Result<ResetMigrationResult, SqliteException>> =
-  task {
+  taskResult {
     try
-      let! planResult = getResetMigrationPlan oldDbPath newDbPath
+      let! plan = getResetMigrationPlan oldDbPath newDbPath
 
-      match planResult with
-      | Error ex -> return Error ex
-      | Ok plan ->
-        if not plan.canApplyReset then
-          let message = plan.blockedReason |> Option.defaultValue "Reset cannot be applied."
-          return Error(toSqliteError message)
-        else
-          use oldConnection = openSqliteConnection oldDbPath
+      if not plan.canApplyReset then
+        let message = plan.blockedReason |> Option.defaultValue "Reset cannot be applied."
+        return! Error(toSqliteError message)
+      else
+        use oldConnection = openSqliteConnection oldDbPath
 
-          use transaction = oldConnection.BeginTransaction()
-          let! previousOldMarkerStatus = readMarkerStatus oldConnection (Some transaction) "_migration_marker"
-          let! oldHasMarker = tableExists oldConnection (Some transaction) "_migration_marker"
-          let! oldHasLog = tableExists oldConnection (Some transaction) "_migration_log"
+        use transaction = oldConnection.BeginTransaction()
+        let! previousOldMarkerStatus = readMarkerStatus oldConnection (Some transaction) "_migration_marker"
+        let! oldHasMarker = tableExists oldConnection (Some transaction) "_migration_marker"
+        let! oldHasLog = tableExists oldConnection (Some transaction) "_migration_log"
 
-          if oldHasMarker then
-            use dropMarkerCmd =
-              createCommand oldConnection (Some transaction) "DROP TABLE _migration_marker"
+        if oldHasMarker then
+          use dropMarkerCmd =
+            createCommand oldConnection (Some transaction) "DROP TABLE _migration_marker"
 
-            let! _ = dropMarkerCmd.ExecuteNonQueryAsync()
-            ()
+          let! _ = dropMarkerCmd.ExecuteNonQueryAsync()
+          ()
 
-          if oldHasLog then
-            use dropLogCmd =
-              createCommand oldConnection (Some transaction) "DROP TABLE _migration_log"
+        if oldHasLog then
+          use dropLogCmd =
+            createCommand oldConnection (Some transaction) "DROP TABLE _migration_log"
 
-            let! _ = dropLogCmd.ExecuteNonQueryAsync()
-            ()
+          let! _ = dropLogCmd.ExecuteNonQueryAsync()
+          ()
 
-          transaction.Commit()
+        transaction.Commit()
 
-          let newDatabaseDeleted =
-            if plan.newDatabaseExisted then
-              File.Delete newDbPath
-              true
-            else
-              false
+        let newDatabaseDeleted =
+          if plan.newDatabaseExisted then
+            File.Delete newDbPath
+            true
+          else
+            false
 
-          return
-            Ok
-              { previousOldMarkerStatus = previousOldMarkerStatus
-                oldMarkerDropped = oldHasMarker
-                oldLogDropped = oldHasLog
-                previousNewStatus = plan.previousNewStatus
-                newDatabaseExisted = plan.newDatabaseExisted
-                newDatabaseDeleted = newDatabaseDeleted }
+        return
+          { previousOldMarkerStatus = previousOldMarkerStatus
+            oldMarkerDropped = oldHasMarker
+            oldLogDropped = oldHasLog
+            previousNewStatus = plan.previousNewStatus
+            newDatabaseExisted = plan.newDatabaseExisted
+            newDatabaseDeleted = newDatabaseDeleted }
     with
-    | :? SqliteException as ex -> return Error ex
-    | ex -> return Error(toSqliteError ex.Message)
+    | :? SqliteException as ex -> return! Error ex
+    | ex -> return! Error(toSqliteError ex.Message)
   }
 
 let private ensureOldStateSafeForCutover (oldDbPath: string) (newDbPath: string) : Task<Result<unit, SqliteException>> =
-  task {
+  taskResult {
     try
       if not (File.Exists oldDbPath) then
-        return Error(toSqliteError $"Old database was not found: {oldDbPath}")
+        return! Error(toSqliteError $"Old database was not found: {oldDbPath}")
       elif not (File.Exists newDbPath) then
-        return Error(toSqliteError $"New database was not found: {newDbPath}")
+        return! Error(toSqliteError $"New database was not found: {newDbPath}")
       else
         use newConnection = openSqliteConnection newDbPath
-
         let! newMigrationStatus = readMarkerStatus newConnection None "_migration_status"
 
         let newIsMigrating =
@@ -2225,31 +2169,30 @@ let private ensureOldStateSafeForCutover (oldDbPath: string) (newDbPath: string)
           |> Option.exists (fun status -> status.Equals("migrating", StringComparison.OrdinalIgnoreCase))
 
         if not newIsMigrating then
-          return Ok()
+          return ()
         else
           let! progress = readMigrationProgress newConnection None
 
           match progress with
           | None ->
-            return
+            return!
               Error(
                 toSqliteError
                   "_migration_progress is missing in the new database. Run `mig drain` before `mig cutover`."
               )
           | Some progressRow when not progressRow.drainCompleted ->
-            return
+            return!
               Error(
                 toSqliteError
                   "Drain is not complete. Pending replay entries still exist. Run `mig drain` again before `mig cutover`."
               )
           | Some progressRow ->
             use oldConnection = openSqliteConnection oldDbPath
-
             let! oldMarkerStatus = readMarkerStatus oldConnection None "_migration_marker"
             let! hasMigrationLog = tableExists oldConnection None "_migration_log"
 
             if not hasMigrationLog then
-              return
+              return!
                 Error(
                   toSqliteError
                     "Cutover blocked: _migration_log is missing in the old database. Replay divergence risk cannot be ruled out."
@@ -2257,13 +2200,13 @@ let private ensureOldStateSafeForCutover (oldDbPath: string) (newDbPath: string)
             else
               match oldMarkerStatus with
               | None ->
-                return
+                return!
                   Error(
                     toSqliteError
                       "Cutover blocked: _migration_marker is missing in the old database. Replay divergence risk cannot be ruled out."
                   )
               | Some markerStatus when markerStatus.Equals("recording", StringComparison.OrdinalIgnoreCase) ->
-                return
+                return!
                   Error(
                     toSqliteError
                       "Cutover blocked: old marker status is recording, so new writes may still be accumulating in _migration_log. Run `mig drain` again before `mig cutover`."
@@ -2274,22 +2217,22 @@ let private ensureOldStateSafeForCutover (oldDbPath: string) (newDbPath: string)
                 if pendingEntries > 0L then
                   let entryNoun = if pendingEntries = 1L then "entry" else "entries"
 
-                  return
+                  return!
                     Error(
                       toSqliteError
                         $"Cutover blocked: old _migration_log has {pendingEntries} unreplayed {entryNoun} beyond checkpoint {progressRow.lastReplayedLogId}. Run `mig drain` again before `mig cutover`."
                     )
                 else
-                  return Ok()
+                  return ()
               | Some markerStatus ->
-                return
+                return!
                   Error(
                     toSqliteError
                       $"Cutover blocked: old marker status is '{markerStatus}'. Expected 'draining' before cutover to avoid replay divergence."
                   )
     with
-    | :? SqliteException as ex -> return Error ex
-    | ex -> return Error(toSqliteError ex.Message)
+    | :? SqliteException as ex -> return! Error ex
+    | ex -> return! Error(toSqliteError ex.Message)
   }
 
 let runCutover (newDbPath: string) : Task<Result<CutoverResult, SqliteException>> =
@@ -2397,10 +2340,8 @@ let runCutover (newDbPath: string) : Task<Result<CutoverResult, SqliteException>
   }
 
 let runCutoverWithOldSafety (oldDbPath: string) (newDbPath: string) : Task<Result<CutoverResult, SqliteException>> =
-  task {
-    let! safetyCheck = ensureOldStateSafeForCutover oldDbPath newDbPath
-
-    match safetyCheck with
-    | Error ex -> return Error ex
-    | Ok() -> return! runCutover newDbPath
+  taskResult {
+    do! ensureOldStateSafeForCutover oldDbPath newDbPath
+    let! (cutoverResult: CutoverResult) = runCutover newDbPath
+    return cutoverResult
   }

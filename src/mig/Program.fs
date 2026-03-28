@@ -3,106 +3,149 @@ module Mig.Program
 open Argu
 open System
 open System.IO
-open System.Security.Cryptography
-open System.Text
-open CodeGen.CodeGen
-open HotMigration
+open MigLib.Build
+open MigLib.CompiledSchema
+open MigLib.Db
+open MigLib.Util
+open Mig.CodeGen.CodeGen
+open Mig.HotMigration
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type MigrateArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
+  | [<AltCommandLine("-a")>] Assembly of path: string
+  | [<AltCommandLine("-m")>] Module of name: string
 
   interface IArgParserTemplate with
     member this.Usage =
       match this with
-      | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
+      | Dir _ -> "directory that contains existing sqlite files for the migration (default: current directory)"
+      | Assembly _ -> "compiled assembly that contains a generated Db-style module"
+      | Module _ -> "compiled module name when using --assembly (default: Db)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type OfflineArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
+  | [<AltCommandLine("-a")>] Assembly of path: string
+  | [<AltCommandLine("-m")>] Module of name: string
 
   interface IArgParserTemplate with
     member this.Usage =
       match this with
-      | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
+      | Dir _ -> "directory that contains existing sqlite files for the migration (default: current directory)"
+      | Assembly _ -> "compiled assembly that contains a generated Db-style module"
+      | Module _ -> "compiled module name when using --assembly (default: Db)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type InitArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
+  | [<AltCommandLine("-a")>] Assembly of path: string
+  | [<AltCommandLine("-m")>] Module of name: string
 
   interface IArgParserTemplate with
     member this.Usage =
       match this with
-      | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
+      | Dir _ ->
+        "directory that contains the target sqlite location for the generated Db module (default: current directory)"
+      | Assembly _ -> "compiled assembly that contains a generated Db-style module"
+      | Module _ -> "compiled module name when using --assembly (default: Db)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type PlanArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
+  | [<AltCommandLine("-a")>] Assembly of path: string
+  | [<AltCommandLine("-m")>] Module of name: string
 
   interface IArgParserTemplate with
     member this.Usage =
       match this with
-      | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
+      | Dir _ -> "directory that contains existing sqlite files for the migration (default: current directory)"
+      | Assembly _ -> "compiled assembly that contains a generated Db-style module"
+      | Module _ -> "compiled module name when using --assembly (default: Db)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type DrainArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
+  | [<AltCommandLine("-a")>] Assembly of path: string
+  | [<AltCommandLine("-m")>] Module of name: string
 
   interface IArgParserTemplate with
     member this.Usage =
       match this with
-      | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
+      | Dir _ -> "directory that contains Schema.fs and <dir>-<hash>.sqlite files (default: current directory)"
+      | Assembly _ -> "compiled assembly that contains a generated Db-style module"
+      | Module _ -> "compiled module name when using --assembly (default: Db)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type CutoverArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
+  | [<AltCommandLine("-a")>] Assembly of path: string
+  | [<AltCommandLine("-m")>] Module of name: string
 
   interface IArgParserTemplate with
     member this.Usage =
       match this with
-      | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
+      | Dir _ -> "directory that contains Schema.fs and <dir>-<hash>.sqlite files (default: current directory)"
+      | Assembly _ -> "compiled assembly that contains a generated Db-style module"
+      | Module _ -> "compiled module name when using --assembly (default: Db)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type ArchiveOldArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
+  | [<AltCommandLine("-a")>] Assembly of path: string
+  | [<AltCommandLine("-m")>] Module of name: string
 
   interface IArgParserTemplate with
     member this.Usage =
       match this with
-      | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
+      | Dir _ -> "directory that contains Schema.fs and <dir>-<hash>.sqlite files (default: current directory)"
+      | Assembly _ -> "compiled assembly that contains a generated Db-style module"
+      | Module _ -> "compiled module name when using --assembly (default: Db)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type ResetArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
+  | [<AltCommandLine("-a")>] Assembly of path: string
+  | [<AltCommandLine("-m")>] Module of name: string
   | Dry_Run
 
   interface IArgParserTemplate with
     member this.Usage =
       match this with
-      | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
+      | Dir _ -> "directory that contains Schema.fs and <dir>-<hash>.sqlite files (default: current directory)"
+      | Assembly _ -> "compiled assembly that contains a generated Db-style module"
+      | Module _ -> "compiled module name when using --assembly (default: Db)"
       | Dry_Run -> "print reset impact without dropping old migration tables or deleting the new database"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type StatusArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
+  | [<AltCommandLine("-a")>] Assembly of path: string
+  | [<AltCommandLine("-m")>] Module of name: string
 
   interface IArgParserTemplate with
     member this.Usage =
       match this with
-      | Dir _ -> "directory that contains schema.fsx and <dir>-<hash>.sqlite files (default: current directory)"
+      | Dir _ -> "directory that contains Schema.fs and <dir>-<hash>.sqlite files (default: current directory)"
+      | Assembly _ -> "compiled assembly that contains a generated Db-style module"
+      | Module _ -> "compiled module name when using --assembly (default: Db)"
 
 [<CliPrefix(CliPrefix.DoubleDash)>]
 type CodegenArgs =
   | [<AltCommandLine("-d")>] Dir of path: string
+  | [<AltCommandLine("-a")>] Assembly of path: string
+  | [<AltCommandLine("-s")>] Schema_Module of name: string
   | [<AltCommandLine("-m")>] Module of name: string
   | [<AltCommandLine("-o")>] Output of path: string
 
   interface IArgParserTemplate with
     member this.Usage =
       match this with
-      | Dir _ -> "directory that contains schema.fsx and generated source files (default: current directory)"
-      | Module _ -> "module name for generated F# code (default: Schema)"
-      | Output _ -> "output file name in the schema directory (default: Schema.fs)"
+      | Dir _ -> "directory that contains Schema.fs and generated source files (default: current directory)"
+      | Assembly _ -> "compiled assembly that contains schema types for generated Db.fs code"
+      | Schema_Module _ -> "compiled schema module name when using --assembly (default: Schema)"
+      | Module _ -> "module name for generated F# code (default: Db)"
+      | Output _ -> "output file name in the schema directory (default: Db.fs)"
 
 type Command =
   | [<AltCommandLine("-v")>] Version
@@ -121,11 +164,11 @@ type Command =
     member this.Usage =
       match this with
       | Version -> "print mig version"
-      | Init _ -> "initialize a schema-matched database from schema.fsx without requiring a source database"
-      | Codegen _ -> "generate F# query helpers from schema.fsx"
-      | Migrate _ -> "create new database and copy data from old"
-      | Offline _ -> "run a one-shot offline migration without hot-migration coordination tables"
-      | Plan _ -> "show dry-run migration plan without mutating databases"
+      | Init _ -> "initialize a schema-matched database from a compiled generated module"
+      | Codegen _ -> "generate Db.fs and query helpers from Schema.fs plus compiled schema types"
+      | Migrate _ -> "create new database and copy data from old using a compiled generated module"
+      | Offline _ -> "run a one-shot offline migration using a compiled generated module"
+      | Plan _ -> "show a dry-run migration plan using a compiled generated module"
       | Drain _ -> "stop writes on old database and replay accumulated changes"
       | Cutover _ -> "mark new database as ready for serving"
       | ArchiveOld _ -> "archive the old database after cutover"
@@ -155,7 +198,7 @@ let private formatExceptionDetails (ex: exn) =
       loop current.InnerException (rendered :: acc)
 
   let chain = loop ex [] |> String.concat " --> "
-  let debugValue = Environment.GetEnvironmentVariable("MIG_DEBUG")
+  let debugValue = Environment.GetEnvironmentVariable "MIG_DEBUG"
 
   if
     String.Equals(debugValue, "1", StringComparison.Ordinal)
@@ -165,32 +208,14 @@ let private formatExceptionDetails (ex: exn) =
   else
     chain
 
-type private DeterministicNewDbPath =
-  { schemaPath: string
-    schemaHash: string
-    path: string }
+type private ResolvedCompiledModule =
+  { assemblyPath: string
+    moduleName: string
+    generatedModule: GeneratedSchemaModule
+    newDbPath: string }
 
-let private normalizeLineEndings (text: string) =
-  text.Replace("\r\n", "\n").Replace("\r", "\n")
-
-let private computeShortSchemaHash (schemaPath: string) : Result<string, string> =
-  try
-    let normalizedSchema = File.ReadAllText schemaPath |> normalizeLineEndings
-    use sha256 = SHA256.Create()
-    let schemaBytes = Encoding.UTF8.GetBytes normalizedSchema
-    let hashBytes = sha256.ComputeHash schemaBytes
-    Ok(Convert.ToHexString(hashBytes).ToLowerInvariant().Substring(0, 16))
-  with ex ->
-    Error ex.Message
-
-let private defaultSchemaPathForCurrentDirectory (currentDirectory: string) =
-  Path.Combine(currentDirectory, "schema.fsx")
-
-let private ensureSchemaScriptExists (schemaPath: string) : Result<unit, string> =
-  if File.Exists schemaPath then
-    Ok()
-  else
-    Error($"Schema script was not found: {schemaPath}")
+let private defaultSchemaFsPathForCurrentDirectory (currentDirectory: string) =
+  Path.Combine(currentDirectory, "Schema.fs")
 
 let private resolveCommandDirectory (commandName: string) (candidate: string option) : Result<string, string> =
   let targetDirectory =
@@ -201,23 +226,7 @@ let private resolveCommandDirectory (commandName: string) (candidate: string opt
   if Directory.Exists targetDirectory then
     Ok targetDirectory
   else
-    Error($"Directory does not exist for `{commandName}`: {targetDirectory}")
-
-let private resolveDeterministicNewDbPath
-  (currentDirectory: string)
-  (directoryName: string)
-  (schemaPath: string)
-  : Result<DeterministicNewDbPath, string> =
-  match ensureSchemaScriptExists schemaPath with
-  | Error message -> Error message
-  | Ok() ->
-    match computeShortSchemaHash schemaPath with
-    | Error message -> Error message
-    | Ok schemaHash ->
-      Ok
-        { schemaPath = schemaPath
-          schemaHash = schemaHash
-          path = Path.Combine(currentDirectory, $"{directoryName}-{schemaHash}.sqlite") }
+    Error $"Directory does not exist for `{commandName}`: {targetDirectory}"
 
 let private isHexHashSegment (value: string) =
   value.Length = 16 && value |> Seq.forall Uri.IsHexDigit
@@ -230,7 +239,7 @@ let private isDirectoryHashNamedSqlite (directoryName: string) (path: string) =
     let prefix = $"{directoryName}-"
 
     if fileStem.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) then
-      let hashSegment = fileStem.Substring(prefix.Length)
+      let hashSegment = fileStem.Substring prefix.Length
       isHexHashSegment hashSegment
     else
       false
@@ -258,31 +267,55 @@ let private inferOldDbFromCurrentDirectory
   elif candidates.Length > 1 then
     let candidateList = String.concat ", " candidates
 
-    Error(
+    Error
       $"Could not infer old database automatically. Found multiple candidates matching '{directoryName}-<old-hash>.sqlite': {candidateList}."
-    )
   elif sqliteFiles.Length > 0 then
     let discoveredList = String.concat ", " sqliteFiles
 
-    Error(
+    Error
       $"Could not infer old database automatically. Found sqlite files that do not match '{directoryName}-<old-hash>.sqlite': {discoveredList}."
-    )
   else
-    Error(
+    Error
       $"Could not infer old database automatically. Expected exactly one source matching '{directoryName}-<old-hash>.sqlite' in {currentDirectory}."
-    )
 
-let private resolveDefaultNewDbFromCurrentSchema
+type private SchemaBoundDbPath =
+  { schemaSourcePath: string
+    path: string }
+
+let private getSchemaSourceCandidates (currentDirectory: string) =
+  [ Path.Combine(currentDirectory, "Schema.fs") ]
+
+let private resolveSchemaBoundDbPathFromKnownSource
   (commandName: string)
   (currentDirectory: string)
-  (directoryName: string)
-  : Result<DeterministicNewDbPath, string> =
-  let schemaPath = defaultSchemaPathForCurrentDirectory currentDirectory
-
-  match resolveDeterministicNewDbPath currentDirectory directoryName schemaPath with
-  | Ok resolved -> Ok resolved
+  (schemaSourcePath: string)
+  : Result<SchemaBoundDbPath, string> =
+  match deriveSchemaBoundDbFileName schemaSourcePath with
   | Error message ->
-    Error($"Could not infer new database automatically from schema '{schemaPath}' for `{commandName}`: {message}.")
+    Error
+      $"Could not infer new database automatically from schema source '{schemaSourcePath}' for `{commandName}`: {message}."
+  | Ok dbFileName ->
+    Ok
+      { schemaSourcePath = schemaSourcePath
+        path = Path.Combine(currentDirectory, dbFileName) }
+
+let private resolveDefaultSchemaBoundDbPath
+  (commandName: string)
+  (currentDirectory: string)
+  : Result<SchemaBoundDbPath, string> =
+  let existingSchemaSource =
+    getSchemaSourceCandidates currentDirectory |> List.tryFind File.Exists
+
+  match existingSchemaSource with
+  | Some schemaSourcePath -> resolveSchemaBoundDbPathFromKnownSource commandName currentDirectory schemaSourcePath
+  | None ->
+    let lookedFor =
+      getSchemaSourceCandidates currentDirectory
+      |> List.map Path.GetFullPath
+      |> String.concat ", "
+
+    Error
+      $"Could not infer new database automatically for `{commandName}`. No schema source was found. Looked for: {lookedFor}."
 
 let private printMigrateRecoveryGuidance (oldDbPath: string) (newDbPath: string) =
   let oldSnapshot = getOldDatabaseStatus oldDbPath |> fun t -> t.Result
@@ -375,280 +408,471 @@ let private printMigrateRecoveryGuidance (oldDbPath: string) (newDbPath: string)
 
   guidance |> Seq.iteri (fun index line -> eprintfn $"  {index + 1}. {line}")
 
-let private resolveCodegenOutputPath (currentDirectory: string) (candidate: string option) : Result<string, string> =
-  let outputFileName = candidate |> Option.defaultValue "Schema.fs"
+let private resolveCodegenOutputPath
+  (currentDirectory: string)
+  (schemaSourceLabel: string)
+  (defaultOutputFileName: string)
+  (candidate: string option)
+  : Result<string, string> =
+  let outputFileName = candidate |> Option.defaultValue defaultOutputFileName
 
   if String.IsNullOrWhiteSpace outputFileName then
     Error "Output file name for `codegen` cannot be empty."
   elif Path.IsPathRooted outputFileName then
     Error "Output file for `codegen` must be a file name, not an absolute path."
   elif not (outputFileName.Equals(Path.GetFileName outputFileName, StringComparison.Ordinal)) then
-    Error "Output file for `codegen` must be in the same directory as schema.fsx (no subdirectories)."
+    Error $"Output file for `codegen` must be in the same directory as {schemaSourceLabel} (no subdirectories)."
   else
     Ok(Path.Combine(currentDirectory, outputFileName))
 
-let codegen (args: ParseResults<CodegenArgs>) =
-  match resolveCommandDirectory "codegen" (args.TryGetResult CodegenArgs.Dir) with
+let private resolveCompiledModuleName (candidate: string option) : Result<string, string> =
+  let moduleName = candidate |> Option.defaultValue "Db"
+
+  if String.IsNullOrWhiteSpace moduleName then
+    Error "Compiled module name cannot be empty."
+  else
+    Ok moduleName
+
+let private resolveCompiledMode
+  (assemblyPath: string option)
+  (moduleName: string option)
+  : Result<(string * string) option, string> =
+  match assemblyPath with
+  | Some assemblyPath ->
+    match resolveCompiledModuleName moduleName with
+    | Ok resolvedModuleName -> Ok(Some(assemblyPath, resolvedModuleName))
+    | Error message -> Error message
+  | None ->
+    match moduleName with
+    | Some _ -> Error "--module requires --assembly."
+    | None -> Ok None
+
+let private resolveRequiredCompiledMode
+  (commandName: string)
+  (assemblyPath: string option)
+  (moduleName: string option)
+  : Result<string * string, string> =
+  resolveCompiledMode assemblyPath moduleName
+  |> Result.bind (
+    ResultEx.requireSomeWith (fun () ->
+      $"`{commandName}` requires --assembly pointing to a compiled generated Db module. Use --module to override the default module name `Db`.")
+  )
+
+let private resolveCodegenGeneratedModuleName (candidate: string option) : Result<string, string> =
+  let defaultModuleName = "Db"
+  let moduleName = candidate |> Option.defaultValue defaultModuleName
+
+  if String.IsNullOrWhiteSpace moduleName then
+    Error "codegen failed: module name cannot be empty."
+  else
+    Ok moduleName
+
+let private resolveCodegenCompiledInput
+  (assemblyPath: string option)
+  (schemaModuleName: string option)
+  : Result<(string * string) option, string> =
+  match assemblyPath with
+  | Some assemblyPath ->
+    let resolvedSchemaModuleName = schemaModuleName |> Option.defaultValue "Schema"
+
+    if String.IsNullOrWhiteSpace resolvedSchemaModuleName then
+      Error "codegen failed: compiled schema module name cannot be empty."
+    else
+      Ok(Some(assemblyPath, resolvedSchemaModuleName))
+  | None ->
+    match schemaModuleName with
+    | Some _ -> Error "codegen failed: --schema-module requires --assembly."
+    | None -> Ok None
+
+let private resolveRequiredCodegenCompiledInput
+  (assemblyPath: string option)
+  (schemaModuleName: string option)
+  : Result<string * string, string> =
+  resolveCodegenCompiledInput assemblyPath schemaModuleName
+  |> Result.bind (
+    ResultEx.requireSome
+      "codegen failed: `codegen` requires --assembly pointing to compiled schema types. Use --schema-module to override the default schema module name `Schema`."
+  )
+
+let private resolveCompiledModuleForCommand
+  (commandName: string)
+  (currentDirectory: string)
+  (assemblyPath: string)
+  (moduleName: string)
+  : Result<ResolvedCompiledModule, string> =
+  result {
+    let fullAssemblyPath = Path.GetFullPath assemblyPath
+
+    let! generatedModule =
+      tryLoadGeneratedSchemaModuleFromAssemblyPath assemblyPath moduleName
+      |> Result.mapError (fun message ->
+        $"Could not load compiled generated module '{moduleName}' from '{assemblyPath}' for `{commandName}`: {message}")
+
+    let! dbFileName =
+      generatedModule.dbFile
+      |> ResultEx.requireSomeWith (fun () ->
+        $"Compiled generated module '{moduleName}' from '{assemblyPath}' does not define DbFile for `{commandName}`.")
+
+    let! dbPath =
+      resolveDatabaseFilePath currentDirectory dbFileName
+      |> Result.mapError (fun message -> $"Could not resolve DbFile '{dbFileName}' for `{commandName}`: {message}")
+
+    return
+      { assemblyPath = fullAssemblyPath
+        moduleName = moduleName
+        generatedModule = generatedModule
+        newDbPath = dbPath }
+  }
+
+let private resolveRequiredCompiledModuleForCommand
+  (commandName: string)
+  (currentDirectory: string)
+  (assemblyPath: string option)
+  (moduleName: string option)
+  : Result<ResolvedCompiledModule, string> =
+  result {
+    let! assemblyPath, moduleName = resolveRequiredCompiledMode commandName assemblyPath moduleName
+    return! resolveCompiledModuleForCommand commandName currentDirectory assemblyPath moduleName
+  }
+
+let private printCompiledModuleInfo (compiledModule: ResolvedCompiledModule) =
+  printfn $"Compiled assembly: {compiledModule.assemblyPath}"
+  printfn $"Compiled module: {compiledModule.moduleName}"
+
+  match compiledModule.generatedModule.schemaHash with
+  | Some schemaHash -> printfn $"Schema hash: {schemaHash}"
+  | None -> ()
+
+let private resolveTargetDbPathForCommand
+  (commandName: string)
+  (currentDirectory: string)
+  (compiledMode: Result<(string * string) option, string>)
+  : Result<string, string> =
+  match compiledMode with
+  | Error message -> Error message
+  | Ok(Some(assemblyPath, moduleName)) ->
+    resolveCompiledModuleForCommand commandName currentDirectory assemblyPath moduleName
+    |> Result.map _.newDbPath
+  | Ok None ->
+    resolveDefaultSchemaBoundDbPath commandName currentDirectory
+    |> Result.map _.path
+
+let private inferOldDbWithExcludedTarget
+  (currentDirectory: string)
+  (directoryName: string)
+  (newDb: string)
+  : Result<string, string> =
+  inferOldDbFromCurrentDirectory currentDirectory directoryName (Some newDb)
+  |> Result.mapError (fun message -> $"{message} Excluding target '{newDb}'. Use `-d` to select a different directory.")
+
+let private resolveMigrationSourceDb
+  (currentDirectory: string)
+  (directoryName: string)
+  (newDb: string)
+  : Result<string option, string> =
+  match inferOldDbWithExcludedTarget currentDirectory directoryName newDb with
+  | Ok old -> Ok(Some old)
+  | Error _ when File.Exists newDb -> Ok None
+  | Error message -> Error message
+
+let private resolveOptionalTargetDbPathForCommand
+  (commandName: string)
+  (currentDirectory: string)
+  (compiledMode: (string * string) option)
+  : Result<string option, string> =
+  result {
+    match compiledMode with
+    | Some _ ->
+      let! inferredTarget = resolveTargetDbPathForCommand commandName currentDirectory (Ok compiledMode)
+      return Some inferredTarget
+    | None ->
+      match resolveDefaultSchemaBoundDbPath commandName currentDirectory with
+      | Ok inferredTarget -> return Some inferredTarget.path
+      | Error _ -> return None
+  }
+
+let private resolveCompiledModeTargetDbPathForCommand
+  (commandName: string)
+  (currentDirectory: string)
+  (assemblyPath: string option)
+  (moduleName: string option)
+  : Result<string, string> =
+  resolveTargetDbPathForCommand commandName currentDirectory (resolveCompiledMode assemblyPath moduleName)
+
+let private resolveOptionalCompiledModeTargetDbPathForCommand
+  (commandName: string)
+  (currentDirectory: string)
+  (assemblyPath: string option)
+  (moduleName: string option)
+  : Result<string option, string> =
+  result {
+    let! compiledMode = resolveCompiledMode assemblyPath moduleName
+    return! resolveOptionalTargetDbPathForCommand commandName currentDirectory compiledMode
+  }
+
+let private finishCommand (commandName: string) (result: Result<int, string>) =
+  match result with
+  | Ok exitCode -> exitCode
   | Error message ->
-    eprintfn $"codegen failed: {message}"
+    eprintfn $"{commandName} failed: {message}"
     1
-  | Ok currentDirectory ->
-    let schemaPath = defaultSchemaPathForCurrentDirectory currentDirectory
 
-    match ensureSchemaScriptExists schemaPath with
-    | Error message ->
-      eprintfn $"codegen failed: {message}"
-      1
-    | Ok() ->
-      let moduleName =
-        args.TryGetResult CodegenArgs.Module |> Option.defaultValue "Schema"
+let codegen (args: ParseResults<CodegenArgs>) =
+  let result =
+    result {
+      let! currentDirectory = resolveCommandDirectory "codegen" (args.TryGetResult CodegenArgs.Dir)
 
-      if String.IsNullOrWhiteSpace moduleName then
-        eprintfn "codegen failed: module name cannot be empty."
-        1
-      else
-        match resolveCodegenOutputPath currentDirectory (args.TryGetResult CodegenArgs.Output) with
-        | Error message ->
-          eprintfn $"codegen failed: {message}"
-          1
-        | Ok outputPath ->
-          match generateCodeFromScript moduleName schemaPath outputPath with
-          | Error message ->
-            eprintfn $"codegen failed: {message}"
-            1
-          | Ok stats ->
-            printfn "Code generation complete."
-            printfn $"Schema script: {schemaPath}"
-            printfn $"Module: {moduleName}"
-            printfn $"Output file: {outputPath}"
-            printfn $"Normalized tables (DU): {stats.NormalizedTables}"
-            printfn $"Regular tables (records): {stats.RegularTables}"
-            printfn $"Views: {stats.Views}"
-            printfn "Generated files:"
-            stats.GeneratedFiles |> List.iter (fun file -> printfn $"  {file}")
-            0
+      let! assemblyPath, schemaModuleName =
+        resolveRequiredCodegenCompiledInput
+          (args.TryGetResult CodegenArgs.Assembly)
+          (args.TryGetResult CodegenArgs.Schema_Module)
+
+      let schemaPath = defaultSchemaFsPathForCurrentDirectory currentDirectory
+
+      do!
+        if File.Exists schemaPath then
+          Ok()
+        else
+          Error $"Schema source file was not found: {schemaPath}"
+
+      let! generatedModuleName = resolveCodegenGeneratedModuleName (args.TryGetResult CodegenArgs.Module)
+
+      let! outputPath =
+        resolveCodegenOutputPath currentDirectory "Schema.fs" "Db.fs" (args.TryGetResult CodegenArgs.Output)
+
+      let! stats =
+        generateDbCodeFromAssemblyModulePath generatedModuleName schemaPath assemblyPath schemaModuleName outputPath
+
+      printfn "Code generation complete."
+      printfn $"Schema source: {schemaPath}"
+      printfn $"Compiled assembly: {Path.GetFullPath assemblyPath}"
+      printfn $"Schema module: {schemaModuleName}"
+      printfn $"Generated module: {generatedModuleName}"
+      printfn $"Output file: {outputPath}"
+      printfn $"Normalized tables (DU): {stats.NormalizedTables}"
+      printfn $"Regular tables (records): {stats.RegularTables}"
+      printfn $"Views: {stats.Views}"
+      printfn "Generated files:"
+      stats.GeneratedFiles |> List.iter (fun file -> printfn $"  {file}")
+      return 0
+    }
+
+  finishCommand "codegen" result
 
 let migrate (args: ParseResults<MigrateArgs>) =
-  match resolveCommandDirectory "migrate" (args.TryGetResult MigrateArgs.Dir) with
-  | Error message ->
-    eprintfn $"migrate failed: {message}"
-    1
-  | Ok currentDirectory ->
-    let directoryName = DirectoryInfo(currentDirectory).Name
+  let result =
+    result {
+      let! currentDirectory = resolveCommandDirectory "migrate" (args.TryGetResult MigrateArgs.Dir)
+      let directoryName = DirectoryInfo(currentDirectory).Name
 
-    let schemaPath = defaultSchemaPathForCurrentDirectory currentDirectory
+      let! compiledModule =
+        resolveRequiredCompiledModuleForCommand
+          "migrate"
+          currentDirectory
+          (args.TryGetResult MigrateArgs.Assembly)
+          (args.TryGetResult MigrateArgs.Module)
 
-    match resolveDeterministicNewDbPath currentDirectory directoryName schemaPath with
-    | Error message ->
-      eprintfn
-        $"migrate failed: Could not resolve deterministic new database path from schema '{schemaPath}': {message}"
+      let newDb = compiledModule.newDbPath
+      let! sourceDb = resolveMigrationSourceDb currentDirectory directoryName newDb
 
-      1
-    | Ok resolvedNew ->
-      let newDb = resolvedNew.path
-
-      let oldResult =
-        match inferOldDbFromCurrentDirectory currentDirectory directoryName (Some newDb) with
-        | Ok inferredOld -> Ok(Some inferredOld)
-        | Error _ when File.Exists newDb -> Ok None
-        | Error message -> Error($"{message} Excluding target '{newDb}'. Use `-d` to select a different directory.")
-
-      match oldResult with
-      | Error message ->
-        eprintfn $"migrate failed: {message}"
-        1
-      | Ok None ->
+      match sourceDb with
+      | None ->
         printfn "Migrate skipped."
-        printfn $"Schema script: {schemaPath}"
-        printfn $"Schema hash: {resolvedNew.schemaHash}"
+        printCompiledModuleInfo compiledModule
         printfn $"Database already present for current schema: {newDb}"
-        0
-      | Ok(Some old) ->
-        match runMigrate old schemaPath newDb |> fun t -> t.Result with
-        | Ok result ->
-          printfn "Migrate complete."
-          printfn $"Old database: {old}"
-          printfn $"Schema script: {schemaPath}"
-          printfn $"Schema hash: {resolvedNew.schemaHash}"
-          printfn $"New database: {result.newDbPath}"
-          printfn $"Copied tables: {result.copiedTables}"
-          printfn $"Copied rows: {result.copiedRows}"
-          0
-        | Error ex ->
-          eprintfn $"migrate failed: {formatExceptionDetails ex}"
+        return 0
+      | Some old ->
+        let! migrateResult =
+          runMigrateFromAssemblyPath compiledModule.assemblyPath compiledModule.moduleName old newDb
+          |> fun t -> t.Result
+          |> Result.mapError formatExceptionDetails
+
+        printfn "Migrate complete."
+        printfn $"Old database: {old}"
+        printCompiledModuleInfo compiledModule
+        printfn $"New database: {migrateResult.newDbPath}"
+        printfn $"Copied tables: {migrateResult.copiedTables}"
+        printfn $"Copied rows: {migrateResult.copiedRows}"
+        return 0
+    }
+
+  match result with
+  | Error message ->
+    let currentDirectoryResult =
+      resolveCommandDirectory "migrate" (args.TryGetResult MigrateArgs.Dir)
+
+    match currentDirectoryResult with
+    | Ok currentDirectory ->
+      let directoryName = DirectoryInfo(currentDirectory).Name
+
+      match
+        resolveRequiredCompiledModuleForCommand
+          "migrate"
+          currentDirectory
+          (args.TryGetResult MigrateArgs.Assembly)
+          (args.TryGetResult MigrateArgs.Module)
+      with
+      | Ok compiledModule ->
+        let newDb = compiledModule.newDbPath
+
+        match resolveMigrationSourceDb currentDirectory directoryName newDb with
+        | Ok(Some old) ->
           printMigrateRecoveryGuidance old newDb
-          1
+          finishCommand "migrate" (Error message)
+        | _ -> finishCommand "migrate" (Error message)
+      | Error _ -> finishCommand "migrate" (Error message)
+    | Error _ -> finishCommand "migrate" (Error message)
+  | Ok exitCode -> exitCode
 
 let offline (args: ParseResults<OfflineArgs>) =
-  match resolveCommandDirectory "offline" (args.TryGetResult OfflineArgs.Dir) with
-  | Error message ->
-    eprintfn $"offline failed: {message}"
-    1
-  | Ok currentDirectory ->
-    let directoryName = DirectoryInfo(currentDirectory).Name
+  let result =
+    result {
+      let! currentDirectory = resolveCommandDirectory "offline" (args.TryGetResult OfflineArgs.Dir)
+      let directoryName = DirectoryInfo(currentDirectory).Name
 
-    let schemaPath = defaultSchemaPathForCurrentDirectory currentDirectory
+      let! compiledModule =
+        resolveRequiredCompiledModuleForCommand
+          "offline"
+          currentDirectory
+          (args.TryGetResult OfflineArgs.Assembly)
+          (args.TryGetResult OfflineArgs.Module)
 
-    match resolveDeterministicNewDbPath currentDirectory directoryName schemaPath with
-    | Error message ->
-      eprintfn
-        $"offline failed: Could not resolve deterministic new database path from schema '{schemaPath}': {message}"
+      let newDb = compiledModule.newDbPath
+      let! sourceDb = resolveMigrationSourceDb currentDirectory directoryName newDb
 
-      1
-    | Ok resolvedNew ->
-      let newDb = resolvedNew.path
-
-      let oldResult =
-        match inferOldDbFromCurrentDirectory currentDirectory directoryName (Some newDb) with
-        | Ok inferredOld -> Ok(Some inferredOld)
-        | Error _ when File.Exists newDb -> Ok None
-        | Error message -> Error($"{message} Excluding target '{newDb}'. Use `-d` to select a different directory.")
-
-      match oldResult with
-      | Error message ->
-        eprintfn $"offline failed: {message}"
-        1
-      | Ok None ->
+      match sourceDb with
+      | None ->
         printfn "Offline migration skipped."
-        printfn $"Schema script: {schemaPath}"
-        printfn $"Schema hash: {resolvedNew.schemaHash}"
+        printCompiledModuleInfo compiledModule
         printfn $"Database already present for current schema: {newDb}"
-        0
-      | Ok(Some old) ->
-        match runOfflineMigrate old schemaPath newDb |> fun t -> t.Result with
-        | Error ex ->
-          eprintfn $"offline failed: {formatExceptionDetails ex}"
-          1
-        | Ok result ->
-          match runArchiveOld currentDirectory old |> fun t -> t.Result with
-          | Error ex ->
-            eprintfn $"offline failed after creating new database: {formatExceptionDetails ex}"
-            1
-          | Ok cleanupResult ->
-            let previousMarkerStatus =
-              cleanupResult.previousMarkerStatus |> Option.defaultValue "no marker"
+        return 0
+      | Some old ->
+        let! migrateResult =
+          runOfflineMigrateFromAssemblyPath compiledModule.assemblyPath compiledModule.moduleName old newDb
+          |> _.Result
+          |> Result.mapError formatExceptionDetails
 
-            let replacedExistingArchive =
-              if cleanupResult.replacedExistingArchive then
-                "yes"
-              else
-                "no"
+        let! cleanupResult =
+          runArchiveOld currentDirectory old
+          |> _.Result
+          |> Result.mapError (fun ex -> $"after creating new database: {formatExceptionDetails ex}")
 
-            printfn "Offline migration complete."
-            printfn $"Old database: {old}"
-            printfn $"Schema script: {schemaPath}"
-            printfn $"Schema hash: {resolvedNew.schemaHash}"
-            printfn $"New database: {result.newDbPath}"
-            printfn $"Copied tables: {result.copiedTables}"
-            printfn $"Copied rows: {result.copiedRows}"
-            printfn $"Previous old marker status: {previousMarkerStatus}"
-            printfn $"Archived database: {cleanupResult.archivePath}"
-            printfn $"Replaced existing archive: {replacedExistingArchive}"
-            printfn "Hot-migration tables were not created."
-            0
+        let previousMarkerStatus =
+          cleanupResult.previousMarkerStatus |> Option.defaultValue "no marker"
+
+        let replacedExistingArchive =
+          if cleanupResult.replacedExistingArchive then
+            "yes"
+          else
+            "no"
+
+        printfn "Offline migration complete."
+        printfn $"Old database: {old}"
+        printCompiledModuleInfo compiledModule
+        printfn $"New database: {migrateResult.newDbPath}"
+        printfn $"Copied tables: {migrateResult.copiedTables}"
+        printfn $"Copied rows: {migrateResult.copiedRows}"
+        printfn $"Previous old marker status: {previousMarkerStatus}"
+        printfn $"Archived database: {cleanupResult.archivePath}"
+        printfn $"Replaced existing archive: {replacedExistingArchive}"
+        printfn "Hot-migration tables were not created."
+        return 0
+    }
+
+  finishCommand "offline" result
 
 let init (args: ParseResults<InitArgs>) =
-  match resolveCommandDirectory "init" (args.TryGetResult InitArgs.Dir) with
-  | Error message ->
-    eprintfn $"init failed: {message}"
-    1
-  | Ok currentDirectory ->
-    let directoryName = DirectoryInfo(currentDirectory).Name
-    let schemaPath = defaultSchemaPathForCurrentDirectory currentDirectory
+  let result =
+    result {
+      let! currentDirectory = resolveCommandDirectory "init" (args.TryGetResult InitArgs.Dir)
 
-    match resolveDeterministicNewDbPath currentDirectory directoryName schemaPath with
-    | Error message ->
-      eprintfn $"init failed: Could not resolve deterministic new database path from schema '{schemaPath}': {message}"
+      let! compiledModule =
+        resolveRequiredCompiledModuleForCommand
+          "init"
+          currentDirectory
+          (args.TryGetResult InitArgs.Assembly)
+          (args.TryGetResult InitArgs.Module)
 
-      1
-    | Ok resolvedNew ->
-      let newDb = resolvedNew.path
+      let newDb = compiledModule.newDbPath
 
       if File.Exists newDb then
         printfn "Init skipped."
-        printfn $"Schema script: {schemaPath}"
-        printfn $"Schema hash: {resolvedNew.schemaHash}"
+        printCompiledModuleInfo compiledModule
         printfn $"Database already present for current schema: {newDb}"
-        0
+        return 0
       else
-        match runInit schemaPath newDb |> fun t -> t.Result with
-        | Ok result ->
-          printfn "Init complete."
-          printfn $"Schema script: {schemaPath}"
-          printfn $"Schema hash: {resolvedNew.schemaHash}"
-          printfn $"Database: {result.newDbPath}"
-          printfn $"Seeded rows: {result.seededRows}"
-          0
-        | Error ex ->
-          eprintfn $"init failed: {formatExceptionDetails ex}"
-          1
+        let! initResult =
+          runInitFromAssemblyPath compiledModule.assemblyPath compiledModule.moduleName newDb
+          |> fun t -> t.Result
+          |> Result.mapError formatExceptionDetails
+
+        printfn "Init complete."
+        printCompiledModuleInfo compiledModule
+        printfn $"Database: {initResult.newDbPath}"
+        printfn $"Seeded rows: {initResult.seededRows}"
+        return 0
+    }
+
+  finishCommand "init" result
 
 let plan (args: ParseResults<PlanArgs>) =
-  match resolveCommandDirectory "plan" (args.TryGetResult PlanArgs.Dir) with
-  | Error message ->
-    eprintfn $"plan failed: {message}"
-    1
-  | Ok currentDirectory ->
-    let directoryName = DirectoryInfo(currentDirectory).Name
-    let schemaPath = defaultSchemaPathForCurrentDirectory currentDirectory
+  let printLines header lines =
+    printfn $"{header}"
 
-    match resolveDeterministicNewDbPath currentDirectory directoryName schemaPath with
-    | Error message ->
-      eprintfn $"plan failed: Could not resolve deterministic new database path from schema '{schemaPath}': {message}"
+    match lines with
+    | [] -> printfn "  - none"
+    | values -> values |> List.iter (fun line -> printfn $"  - {line}")
 
-      1
-    | Ok resolvedNew ->
-      let newDb = resolvedNew.path
+  let result =
+    result {
+      let! currentDirectory = resolveCommandDirectory "plan" (args.TryGetResult PlanArgs.Dir)
+      let directoryName = DirectoryInfo(currentDirectory).Name
 
-      let oldResult =
-        match inferOldDbFromCurrentDirectory currentDirectory directoryName (Some newDb) with
-        | Ok inferredOld -> Ok(Some inferredOld)
-        | Error _ when File.Exists newDb -> Ok None
-        | Error message -> Error($"{message} Excluding target '{newDb}'. Use `-d` to select a different directory.")
+      let! compiledModule =
+        resolveRequiredCompiledModuleForCommand
+          "plan"
+          currentDirectory
+          (args.TryGetResult PlanArgs.Assembly)
+          (args.TryGetResult PlanArgs.Module)
 
-      match oldResult with
-      | Error message ->
-        eprintfn $"plan failed: {message}"
-        1
-      | Ok None ->
+      let newDb = compiledModule.newDbPath
+      let! sourceDb = resolveMigrationSourceDb currentDirectory directoryName newDb
+
+      match sourceDb with
+      | None ->
         printfn "Plan skipped."
-        printfn $"Schema script: {schemaPath}"
-        printfn $"Schema hash: {resolvedNew.schemaHash}"
+        printCompiledModuleInfo compiledModule
         printfn $"Database already present for current schema: {newDb}"
-        0
-      | Ok(Some old) ->
-        match getMigratePlan old schemaPath newDb |> fun t -> t.Result with
-        | Error ex ->
-          eprintfn $"plan failed: {formatExceptionDetails ex}"
-          1
-        | Ok report ->
-          let canRunMigrate = if report.canRunMigrate then "yes" else "no"
+        return 0
+      | Some old ->
+        let! report =
+          getMigratePlanFromAssemblyPath compiledModule.assemblyPath compiledModule.moduleName old newDb
+          |> fun t -> t.Result
+          |> Result.mapError formatExceptionDetails
 
-          let printLines header lines =
-            printfn $"{header}"
+        let canRunMigrate = if report.canRunMigrate then "yes" else "no"
 
-            match lines with
-            | [] -> printfn "  - none"
-            | values -> values |> List.iter (fun line -> printfn $"  - {line}")
+        printfn "Migration plan."
+        printfn $"Old database: {old}"
+        printCompiledModuleInfo compiledModule
+        printfn $"Schema hash: {report.schemaHash}"
 
-          printfn "Migration plan."
-          printfn $"Old database: {old}"
-          printfn $"Schema script: {schemaPath}"
-          printfn $"Schema hash: {report.schemaHash}"
+        match report.schemaCommit with
+        | Some schemaCommit -> printfn $"Schema commit: {schemaCommit}"
+        | None -> ()
 
-          match report.schemaCommit with
-          | Some schemaCommit -> printfn $"Schema commit: {schemaCommit}"
-          | None -> ()
+        printfn $"New database: {newDb}"
+        printfn $"Can run migrate now: {canRunMigrate}"
 
-          printfn $"New database: {newDb}"
-          printfn $"Can run migrate now: {canRunMigrate}"
+        printLines "Planned copy targets (execution order):" report.plannedCopyTargets
+        printLines "Supported differences:" report.supportedDifferences
+        printLines "Unsupported differences:" report.unsupportedDifferences
+        printLines "Replay prerequisites:" report.replayPrerequisites
 
-          printLines "Planned copy targets (execution order):" report.plannedCopyTargets
-          printLines "Supported differences:" report.supportedDifferences
-          printLines "Unsupported differences:" report.unsupportedDifferences
-          printLines "Replay prerequisites:" report.replayPrerequisites
+        return if report.canRunMigrate then 0 else 1
+    }
 
-          if report.canRunMigrate then 0 else 1
+  finishCommand "plan" result
 
 let drain (args: ParseResults<DrainArgs>) =
   match resolveCommandDirectory "drain" (args.TryGetResult DrainArgs.Dir) with
@@ -658,80 +882,78 @@ let drain (args: ParseResults<DrainArgs>) =
   | Ok currentDirectory ->
     let directoryName = DirectoryInfo(currentDirectory).Name
 
-    let newResult =
-      resolveDefaultNewDbFromCurrentSchema "drain" currentDirectory directoryName
-      |> Result.map _.path
+    let setupResult =
+      result {
+        let! newDb =
+          resolveCompiledModeTargetDbPathForCommand
+            "drain"
+            currentDirectory
+            (args.TryGetResult DrainArgs.Assembly)
+            (args.TryGetResult DrainArgs.Module)
 
-    match newResult with
+        let! old = inferOldDbWithExcludedTarget currentDirectory directoryName newDb
+        return old, newDb
+      }
+
+    match setupResult with
     | Error message ->
       eprintfn $"drain failed: {message}"
       1
-    | Ok newDb ->
-      let oldResult =
-        inferOldDbFromCurrentDirectory currentDirectory directoryName (Some newDb)
-        |> Result.mapError (fun message ->
-          $"{message} Excluding target '{newDb}'. Use `-d` to select a different directory.")
-
-      match oldResult with
-      | Error message ->
-        eprintfn $"drain failed: {message}"
-        1
-      | Ok old ->
-        match runDrain old newDb |> fun t -> t.Result with
-        | Ok result ->
-          printfn "Drain complete."
-          printfn $"Old database: {old}"
-          printfn $"New database: {newDb}"
-          printfn $"Replayed entries: {result.replayedEntries}"
-          printfn $"Remaining log entries: {result.remainingEntries}"
-          printfn "Run `mig cutover` when ready."
-          0
-        | Error ex ->
-          eprintfn $"drain failed: {formatExceptionDetails ex}"
-          1
-
-let cutover (args: ParseResults<CutoverArgs>) =
-  match resolveCommandDirectory "cutover" (args.TryGetResult CutoverArgs.Dir) with
-  | Error message ->
-    eprintfn $"cutover failed: {message}"
-    1
-  | Ok currentDirectory ->
-    let directoryName = DirectoryInfo(currentDirectory).Name
-
-    let newResult =
-      resolveDefaultNewDbFromCurrentSchema "cutover" currentDirectory directoryName
-      |> Result.map _.path
-
-    match newResult with
-    | Error message ->
-      eprintfn $"cutover failed: {message}"
-      1
-    | Ok newDb ->
-      let oldResult =
-        inferOldDbFromCurrentDirectory currentDirectory directoryName (Some newDb)
-
-      let cutoverResult =
-        match oldResult with
-        | Ok oldDb -> runCutoverWithOldSafety oldDb newDb |> fun t -> t.Result
-        | Error _ -> runCutover newDb |> fun t -> t.Result
-
-      match cutoverResult with
+    | Ok(old, newDb) ->
+      match runDrain old newDb |> fun t -> t.Result with
       | Ok result ->
-        let droppedIdMapping = if result.idMappingDropped then "yes" else "no"
-
-        let droppedMigrationProgress =
-          if result.migrationProgressDropped then "yes" else "no"
-
-        printfn "Cutover complete."
+        printfn "Drain complete."
+        printfn $"Old database: {old}"
         printfn $"New database: {newDb}"
-        printfn $"Previous migration status: {result.previousStatus}"
-        printfn "Current migration status: ready"
-        printfn $"Dropped _id_mapping: {droppedIdMapping}"
-        printfn $"Dropped _migration_progress: {droppedMigrationProgress}"
+        printfn $"Replayed entries: {result.replayedEntries}"
+        printfn $"Remaining log entries: {result.remainingEntries}"
+        printfn "Run `mig cutover` when ready."
         0
       | Error ex ->
-        eprintfn $"cutover failed: {formatExceptionDetails ex}"
+        eprintfn $"drain failed: {formatExceptionDetails ex}"
         1
+
+let cutover (args: ParseResults<CutoverArgs>) =
+  let result =
+    result {
+      let! currentDirectory = resolveCommandDirectory "cutover" (args.TryGetResult CutoverArgs.Dir)
+      let directoryName = DirectoryInfo(currentDirectory).Name
+
+      let! newDb =
+        resolveCompiledModeTargetDbPathForCommand
+          "cutover"
+          currentDirectory
+          (args.TryGetResult CutoverArgs.Assembly)
+          (args.TryGetResult CutoverArgs.Module)
+
+      let oldDb =
+        inferOldDbFromCurrentDirectory currentDirectory directoryName (Some newDb)
+        |> Result.toOption
+
+      let! cutoverResult =
+        match oldDb with
+        | Some oldDb -> runCutoverWithOldSafety oldDb newDb |> fun t -> t.Result
+        | None -> runCutover newDb |> fun t -> t.Result
+        |> Result.mapError formatExceptionDetails
+
+      let droppedIdMapping = if cutoverResult.idMappingDropped then "yes" else "no"
+
+      let droppedMigrationProgress =
+        if cutoverResult.migrationProgressDropped then
+          "yes"
+        else
+          "no"
+
+      printfn "Cutover complete."
+      printfn $"New database: {newDb}"
+      printfn $"Previous migration status: {cutoverResult.previousStatus}"
+      printfn "Current migration status: ready"
+      printfn $"Dropped _id_mapping: {droppedIdMapping}"
+      printfn $"Dropped _migration_progress: {droppedMigrationProgress}"
+      return 0
+    }
+
+  finishCommand "cutover" result
 
 let archiveOld (args: ParseResults<ArchiveOldArgs>) =
   match resolveCommandDirectory "archive-old" (args.TryGetResult ArchiveOldArgs.Dir) with
@@ -741,20 +963,27 @@ let archiveOld (args: ParseResults<ArchiveOldArgs>) =
   | Ok currentDirectory ->
     let directoryName = DirectoryInfo(currentDirectory).Name
 
-    let inferredNew =
-      match resolveDefaultNewDbFromCurrentSchema "archive-old" currentDirectory directoryName with
-      | Ok inferredTarget -> Some inferredTarget.path
-      | Error _ -> None
+    let setupResult =
+      result {
+        let! inferredNew =
+          resolveOptionalCompiledModeTargetDbPathForCommand
+            "archive-old"
+            currentDirectory
+            (args.TryGetResult ArchiveOldArgs.Assembly)
+            (args.TryGetResult ArchiveOldArgs.Module)
 
-    let oldResult =
-      inferOldDbFromCurrentDirectory currentDirectory directoryName inferredNew
-      |> Result.mapError (fun message ->
-        match inferredNew with
-        | Some inferredTarget ->
-          $"{message} Excluding inferred target '{inferredTarget}'. Use `-d` to select a different directory."
-        | None -> $"{message} Use `-d` to select a different directory.")
+        let! old =
+          inferOldDbFromCurrentDirectory currentDirectory directoryName inferredNew
+          |> Result.mapError (fun message ->
+            match inferredNew with
+            | Some inferredTarget ->
+              $"{message} Excluding inferred target '{inferredTarget}'. Use `-d` to select a different directory."
+            | None -> $"{message} Use `-d` to select a different directory.")
 
-    match oldResult with
+        return old
+      }
+
+    match setupResult with
     | Error message ->
       eprintfn $"archive-old failed: {message}"
       1
@@ -786,94 +1015,93 @@ let reset (args: ParseResults<ResetArgs>) =
   | Ok currentDirectory ->
     let directoryName = DirectoryInfo(currentDirectory).Name
 
-    let newResult =
-      resolveDefaultNewDbFromCurrentSchema "reset" currentDirectory directoryName
-      |> Result.map _.path
+    let setupResult =
+      result {
+        let! newDb =
+          resolveCompiledModeTargetDbPathForCommand
+            "reset"
+            currentDirectory
+            (args.TryGetResult ResetArgs.Assembly)
+            (args.TryGetResult ResetArgs.Module)
 
-    match newResult with
+        let! old = inferOldDbWithExcludedTarget currentDirectory directoryName newDb
+        return old, newDb
+      }
+
+    match setupResult with
     | Error message ->
       eprintfn $"reset failed: {message}"
       1
-    | Ok newDb ->
-      let oldResult =
-        inferOldDbFromCurrentDirectory currentDirectory directoryName (Some newDb)
-        |> Result.mapError (fun message ->
-          $"{message} Excluding target '{newDb}'. Use `-d` to select a different directory.")
+    | Ok(old, newDb) ->
+      if isDryRun then
+        match getResetMigrationPlan old newDb |> fun t -> t.Result with
+        | Error ex ->
+          eprintfn $"reset failed: {formatExceptionDetails ex}"
+          1
+        | Ok plan ->
+          let previousOldMarkerStatus =
+            plan.previousOldMarkerStatus |> Option.defaultValue "no marker"
 
-      match oldResult with
-      | Error message ->
-        eprintfn $"reset failed: {message}"
-        1
-      | Ok old ->
-        if isDryRun then
-          match getResetMigrationPlan old newDb |> fun t -> t.Result with
-          | Error ex ->
-            eprintfn $"reset failed: {formatExceptionDetails ex}"
-            1
-          | Ok plan ->
-            let previousOldMarkerStatus =
-              plan.previousOldMarkerStatus |> Option.defaultValue "no marker"
+          let wouldDropOldMarker = if plan.willDropOldMarker then "yes" else "no"
+          let wouldDropOldLog = if plan.willDropOldLog then "yes" else "no"
 
-            let wouldDropOldMarker = if plan.willDropOldMarker then "yes" else "no"
-            let wouldDropOldLog = if plan.willDropOldLog then "yes" else "no"
+          let previousNewStatus =
+            plan.previousNewStatus |> Option.defaultValue "no status marker"
 
-            let previousNewStatus =
-              plan.previousNewStatus |> Option.defaultValue "no status marker"
+          let newDatabaseExisted = if plan.newDatabaseExisted then "yes" else "no"
+          let wouldDeleteNewDatabase = if plan.willDeleteNewDatabase then "yes" else "no"
+          let resetCanApply = if plan.canApplyReset then "yes" else "no"
 
-            let newDatabaseExisted = if plan.newDatabaseExisted then "yes" else "no"
-            let wouldDeleteNewDatabase = if plan.willDeleteNewDatabase then "yes" else "no"
-            let resetCanApply = if plan.canApplyReset then "yes" else "no"
+          printfn "Migration reset dry run."
+          printfn $"Old database: {old}"
+          printfn $"Previous old marker status: {previousOldMarkerStatus}"
+          printfn $"Would drop _migration_marker: {wouldDropOldMarker}"
+          printfn $"Would drop _migration_log: {wouldDropOldLog}"
+          printfn $"New database: {newDb}"
+          printfn $"New database existed: {newDatabaseExisted}"
 
-            printfn "Migration reset dry run."
-            printfn $"Old database: {old}"
-            printfn $"Previous old marker status: {previousOldMarkerStatus}"
-            printfn $"Would drop _migration_marker: {wouldDropOldMarker}"
-            printfn $"Would drop _migration_log: {wouldDropOldLog}"
-            printfn $"New database: {newDb}"
-            printfn $"New database existed: {newDatabaseExisted}"
+          if plan.newDatabaseExisted then
+            printfn $"Previous new migration status: {previousNewStatus}"
 
-            if plan.newDatabaseExisted then
-              printfn $"Previous new migration status: {previousNewStatus}"
+          printfn $"Would delete new database: {wouldDeleteNewDatabase}"
+          printfn $"Reset can be applied: {resetCanApply}"
 
-            printfn $"Would delete new database: {wouldDeleteNewDatabase}"
-            printfn $"Reset can be applied: {resetCanApply}"
+          if not plan.canApplyReset then
+            let blockedReason = plan.blockedReason |> Option.defaultValue "Reset is blocked."
+            printfn $"Blocked reason: {blockedReason}"
 
-            if not plan.canApplyReset then
-              let blockedReason = plan.blockedReason |> Option.defaultValue "Reset is blocked."
-              printfn $"Blocked reason: {blockedReason}"
+          if plan.canApplyReset then 0 else 1
+      else
+        match runResetMigration old newDb |> fun t -> t.Result with
+        | Error ex ->
+          eprintfn $"reset failed: {formatExceptionDetails ex}"
+          1
+        | Ok result ->
+          let previousOldMarkerStatus =
+            result.previousOldMarkerStatus |> Option.defaultValue "no marker"
 
-            if plan.canApplyReset then 0 else 1
-        else
-          match runResetMigration old newDb |> fun t -> t.Result with
-          | Error ex ->
-            eprintfn $"reset failed: {formatExceptionDetails ex}"
-            1
-          | Ok result ->
-            let previousOldMarkerStatus =
-              result.previousOldMarkerStatus |> Option.defaultValue "no marker"
+          let droppedOldMarker = if result.oldMarkerDropped then "yes" else "no"
+          let droppedOldLog = if result.oldLogDropped then "yes" else "no"
 
-            let droppedOldMarker = if result.oldMarkerDropped then "yes" else "no"
-            let droppedOldLog = if result.oldLogDropped then "yes" else "no"
+          let previousNewStatus =
+            result.previousNewStatus |> Option.defaultValue "no status marker"
 
-            let previousNewStatus =
-              result.previousNewStatus |> Option.defaultValue "no status marker"
+          let newDatabaseExisted = if result.newDatabaseExisted then "yes" else "no"
+          let newDatabaseDeleted = if result.newDatabaseDeleted then "yes" else "no"
 
-            let newDatabaseExisted = if result.newDatabaseExisted then "yes" else "no"
-            let newDatabaseDeleted = if result.newDatabaseDeleted then "yes" else "no"
+          printfn "Migration reset complete."
+          printfn $"Old database: {old}"
+          printfn $"Previous old marker status: {previousOldMarkerStatus}"
+          printfn $"Dropped _migration_marker: {droppedOldMarker}"
+          printfn $"Dropped _migration_log: {droppedOldLog}"
+          printfn $"New database: {newDb}"
+          printfn $"New database existed: {newDatabaseExisted}"
 
-            printfn "Migration reset complete."
-            printfn $"Old database: {old}"
-            printfn $"Previous old marker status: {previousOldMarkerStatus}"
-            printfn $"Dropped _migration_marker: {droppedOldMarker}"
-            printfn $"Dropped _migration_log: {droppedOldLog}"
-            printfn $"New database: {newDb}"
-            printfn $"New database existed: {newDatabaseExisted}"
+          if result.newDatabaseExisted then
+            printfn $"Previous new migration status: {previousNewStatus}"
 
-            if result.newDatabaseExisted then
-              printfn $"Previous new migration status: {previousNewStatus}"
-
-            printfn $"Deleted new database: {newDatabaseDeleted}"
-            0
+          printfn $"Deleted new database: {newDatabaseDeleted}"
+          0
 
 let status (args: ParseResults<StatusArgs>) =
   match resolveCommandDirectory "status" (args.TryGetResult StatusArgs.Dir) with
@@ -883,41 +1111,95 @@ let status (args: ParseResults<StatusArgs>) =
   | Ok currentDirectory ->
     let directoryName = DirectoryInfo(currentDirectory).Name
 
-    let inferredNew =
-      match resolveDefaultNewDbFromCurrentSchema "status" currentDirectory directoryName with
-      | Ok resolvedNew when File.Exists resolvedNew.path -> Some resolvedNew.path
-      | _ -> None
+    let setupResult =
+      result {
+        let! inferredNew =
+          result {
+            let! candidate =
+              resolveOptionalCompiledModeTargetDbPathForCommand
+                "status"
+                currentDirectory
+                (args.TryGetResult StatusArgs.Assembly)
+                (args.TryGetResult StatusArgs.Module)
 
-    let inferredOld =
-      inferOldDbFromCurrentDirectory currentDirectory directoryName inferredNew
+            return candidate |> Option.filter File.Exists
+          }
 
-    match inferredOld, inferredNew with
-    | Ok oldPath, _ ->
-      match getStatus oldPath inferredNew |> fun t -> t.Result with
-      | Error ex ->
-        eprintfn $"status failed: {formatExceptionDetails ex}"
-        1
-      | Ok report ->
-        let markerStatus = report.oldMarkerStatus |> Option.defaultValue "no marker"
-        printfn $"Old database: {oldPath}"
-        printfn $"Marker status: {markerStatus}"
-        printfn $"Migration log entries: {report.migrationLogEntries}"
+        return inferredNew
+      }
 
-        match inferredNew with
-        | Some newPath ->
+    match setupResult with
+    | Error message ->
+      eprintfn $"status failed: {message}"
+      1
+    | Ok inferredNew ->
+      let inferredOld =
+        inferOldDbFromCurrentDirectory currentDirectory directoryName inferredNew
+
+      match inferredOld, inferredNew with
+      | Ok oldPath, _ ->
+        match getStatus oldPath inferredNew |> fun t -> t.Result with
+        | Error ex ->
+          eprintfn $"status failed: {formatExceptionDetails ex}"
+          1
+        | Ok report ->
+          let markerStatus = report.oldMarkerStatus |> Option.defaultValue "no marker"
+          printfn $"Old database: {oldPath}"
+          printfn $"Marker status: {markerStatus}"
+          printfn $"Migration log entries: {report.migrationLogEntries}"
+
+          match inferredNew with
+          | Some newPath ->
+            let migrationStatus =
+              report.newMigrationStatus |> Option.defaultValue "no status marker"
+
+            let isReady =
+              report.newMigrationStatus
+              |> Option.exists (fun status -> status.Equals("ready", StringComparison.OrdinalIgnoreCase))
+
+            let pendingReplayText =
+              match report.pendingReplayEntries with
+              | Some pending when isReady -> $"{pending} (cutover complete)"
+              | Some pending -> $"{pending}"
+              | None -> "n/a"
+
+            printfn $"New database: {newPath}"
+            printfn $"Migration status: {migrationStatus}"
+
+            match report.schemaIdentityHash with
+            | Some schemaHash -> printfn $"Schema hash: {schemaHash}"
+            | None -> ()
+
+            match report.schemaIdentityCommit with
+            | Some schemaCommit -> printfn $"Schema commit: {schemaCommit}"
+            | None -> ()
+
+            printfn $"Pending replay entries: {pendingReplayText}"
+
+            match report.idMappingTablePresent, report.idMappingEntries with
+            | Some false, _ -> printfn "_id_mapping: removed"
+            | Some true, Some entries -> printfn $"_id_mapping entries: {entries}"
+            | _ -> ()
+
+            match report.migrationProgressTablePresent with
+            | Some false -> printfn "_migration_progress: removed"
+            | Some true -> printfn "_migration_progress: present"
+            | None -> ()
+          | None -> ()
+
+          0
+      | Error _, Some newPath ->
+        match getNewDatabaseStatus newPath |> fun t -> t.Result with
+        | Error ex ->
+          eprintfn $"status failed: {formatExceptionDetails ex}"
+          1
+        | Ok report ->
           let migrationStatus =
             report.newMigrationStatus |> Option.defaultValue "no status marker"
 
-          let isReady =
-            report.newMigrationStatus
-            |> Option.exists (fun status -> status.Equals("ready", StringComparison.OrdinalIgnoreCase))
-
-          let pendingReplayText =
-            match report.pendingReplayEntries with
-            | Some pending when isReady -> $"{pending} (cutover complete)"
-            | Some pending -> $"{pending}"
-            | None -> "n/a"
-
+          printfn "Old database: n/a (not inferred)"
+          printfn "Marker status: n/a"
+          printfn "Migration log entries: n/a"
           printfn $"New database: {newPath}"
           printfn $"Migration status: {migrationStatus}"
 
@@ -929,57 +1211,20 @@ let status (args: ParseResults<StatusArgs>) =
           | Some schemaCommit -> printfn $"Schema commit: {schemaCommit}"
           | None -> ()
 
-          printfn $"Pending replay entries: {pendingReplayText}"
+          printfn "Pending replay entries: n/a (old database unavailable)"
 
-          match report.idMappingTablePresent, report.idMappingEntries with
-          | Some false, _ -> printfn "_id_mapping: removed"
-          | Some true, Some entries -> printfn $"_id_mapping entries: {entries}"
-          | _ -> ()
+          match report.idMappingTablePresent with
+          | false -> printfn "_id_mapping: removed"
+          | true -> printfn $"_id_mapping entries: {report.idMappingEntries}"
 
           match report.migrationProgressTablePresent with
-          | Some false -> printfn "_migration_progress: removed"
-          | Some true -> printfn "_migration_progress: present"
-          | None -> ()
-        | None -> ()
+          | false -> printfn "_migration_progress: removed"
+          | true -> printfn "_migration_progress: present"
 
-        0
-    | Error _, Some newPath ->
-      match getNewDatabaseStatus newPath |> fun t -> t.Result with
-      | Error ex ->
-        eprintfn $"status failed: {formatExceptionDetails ex}"
+          0
+      | Error message, None ->
+        eprintfn $"status failed: {message} Use `-d` to select a different directory."
         1
-      | Ok report ->
-        let migrationStatus =
-          report.newMigrationStatus |> Option.defaultValue "no status marker"
-
-        printfn "Old database: n/a (not inferred)"
-        printfn "Marker status: n/a"
-        printfn "Migration log entries: n/a"
-        printfn $"New database: {newPath}"
-        printfn $"Migration status: {migrationStatus}"
-
-        match report.schemaIdentityHash with
-        | Some schemaHash -> printfn $"Schema hash: {schemaHash}"
-        | None -> ()
-
-        match report.schemaIdentityCommit with
-        | Some schemaCommit -> printfn $"Schema commit: {schemaCommit}"
-        | None -> ()
-
-        printfn "Pending replay entries: n/a (old database unavailable)"
-
-        match report.idMappingTablePresent with
-        | false -> printfn "_id_mapping: removed"
-        | true -> printfn $"_id_mapping entries: {report.idMappingEntries}"
-
-        match report.migrationProgressTablePresent with
-        | false -> printfn "_migration_progress: removed"
-        | true -> printfn "_migration_progress: present"
-
-        0
-    | Error message, None ->
-      eprintfn $"status failed: {message} Use `-d` to select a different directory."
-      1
 
 [<EntryPoint>]
 let main argv =

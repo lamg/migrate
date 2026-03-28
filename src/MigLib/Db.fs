@@ -8,6 +8,7 @@ open System.Text.Json.Nodes
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
+open MigLib.Util
 
 [<Literal>]
 let Rfc3339UtcNow = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'utc')"
@@ -124,6 +125,16 @@ type OrderByAttribute(columns: string) =
   inherit Attribute()
   member _.Columns = columns
 
+[<AttributeUsage(AttributeTargets.Class ||| AttributeTargets.Property, AllowMultiple = false)>]
+type PreviousNameAttribute(name: string) =
+  inherit Attribute()
+  member _.Name = name
+
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type DropColumnAttribute(name: string) =
+  inherit Attribute()
+  member _.Name = name
+
 type private MigrationMode =
   | Normal
   | Recording
@@ -152,16 +163,116 @@ let openSqliteConnection (dbPath: string) =
   connection.Open()
   connection
 
+type StartupDatabaseState =
+  | Missing
+  | Ready
+  | Migrating
+  | Invalid of reason: string
+
+type StartupDatabaseDecision =
+  | UseExisting of dbPath: string
+  | WaitForMigration of dbPath: string
+  | MigrateThisInstance of dbPath: string
+  | ExitEarly of dbPath: string * reason: string
+
 let private resolveDatabasePath (configuredPath: string) : Result<string, string> =
   if String.IsNullOrWhiteSpace configuredPath then
     Error "Configured database path is empty."
   else
     Ok(Path.GetFullPath configuredPath)
 
+let resolveDatabaseFilePath (configuredDirectory: string) (dbFileName: string) : Result<string, string> =
+  match resolveDatabasePath configuredDirectory with
+  | Error message -> Error message
+  | Ok resolvedDirectory ->
+    if String.IsNullOrWhiteSpace dbFileName then
+      Error "Configured database file name is empty."
+    elif Path.IsPathRooted dbFileName || dbFileName <> Path.GetFileName dbFileName then
+      Error $"Configured database file name must be a file name only, not a path: {dbFileName}"
+    else
+      Ok(Path.Combine(resolvedDirectory, dbFileName))
+
 let resolveDatabasePathOrFail (configuredPath: string) : string =
-  match resolveDatabasePath configuredPath with
-  | Ok path -> path
-  | Error message -> invalidOp message
+  resolveDatabasePath configuredPath |> ResultEx.orFail invalidOp
+
+let resolveDatabaseFilePathOrFail (configuredDirectory: string) (dbFileName: string) : string =
+  resolveDatabaseFilePath configuredDirectory dbFileName
+  |> ResultEx.orFail invalidOp
+
+let private noneIfBlank (value: string option) =
+  value
+  |> Option.bind (fun candidate ->
+    if String.IsNullOrWhiteSpace candidate then
+      None
+    else
+      Some candidate)
+
+let private requireRuntimeEnvVarName (envVarName: string) : Result<string, string> =
+  if String.IsNullOrWhiteSpace envVarName then
+    Error "SQLite directory environment variable name is empty."
+  else
+    Ok envVarName
+
+let resolveRuntimeSqliteDirectory
+  (sqliteDirectoryEnvVarName: string option)
+  (cliDirectoryOverride: string option)
+  : Result<string, string> =
+  let envDirectory =
+    sqliteDirectoryEnvVarName
+    |> noneIfBlank
+    |> Option.bind (fun envVarName -> Environment.GetEnvironmentVariable envVarName |> Some |> noneIfBlank)
+
+  let configuredDirectory =
+    cliDirectoryOverride
+    |> noneIfBlank
+    |> Option.orElse envDirectory
+    |> Option.defaultValue (Directory.GetCurrentDirectory())
+
+  resolveDatabasePath configuredDirectory
+
+let resolveRuntimeSqliteDirectoryOrFail
+  (sqliteDirectoryEnvVarName: string option)
+  (cliDirectoryOverride: string option)
+  : string =
+  resolveRuntimeSqliteDirectory sqliteDirectoryEnvVarName cliDirectoryOverride
+  |> ResultEx.orFail invalidOp
+
+let resolveEnvVarSqliteDirectory (sqliteDirectoryEnvVarName: string) : Result<string, string> =
+  result {
+    let! sqliteDirectoryEnvVarName = requireRuntimeEnvVarName sqliteDirectoryEnvVarName
+    return! resolveRuntimeSqliteDirectory (Some sqliteDirectoryEnvVarName) None
+  }
+
+let resolveEnvVarSqliteDirectoryOrFail (sqliteDirectoryEnvVarName: string) : string =
+  resolveEnvVarSqliteDirectory sqliteDirectoryEnvVarName
+  |> ResultEx.orFail invalidOp
+
+let resolveRuntimeDatabaseFilePath
+  (sqliteDirectoryEnvVarName: string option)
+  (cliDirectoryOverride: string option)
+  (dbFileName: string)
+  : Result<string, string> =
+  match resolveRuntimeSqliteDirectory sqliteDirectoryEnvVarName cliDirectoryOverride with
+  | Error message -> Error message
+  | Ok resolvedDirectory -> resolveDatabaseFilePath resolvedDirectory dbFileName
+
+let resolveRuntimeDatabaseFilePathOrFail
+  (sqliteDirectoryEnvVarName: string option)
+  (cliDirectoryOverride: string option)
+  (dbFileName: string)
+  : string =
+  resolveRuntimeDatabaseFilePath sqliteDirectoryEnvVarName cliDirectoryOverride dbFileName
+  |> ResultEx.orFail invalidOp
+
+let resolveEnvVarDatabaseFilePath (sqliteDirectoryEnvVarName: string) (dbFileName: string) : Result<string, string> =
+  result {
+    let! sqliteDirectoryEnvVarName = requireRuntimeEnvVarName sqliteDirectoryEnvVarName
+    return! resolveRuntimeDatabaseFilePath (Some sqliteDirectoryEnvVarName) None dbFileName
+  }
+
+let resolveEnvVarDatabaseFilePathOrFail (sqliteDirectoryEnvVarName: string) (dbFileName: string) : string =
+  resolveEnvVarDatabaseFilePath sqliteDirectoryEnvVarName dbFileName
+  |> ResultEx.orFail invalidOp
 
 let private toJsonNode (value: obj) : JsonNode =
   if isNull value || Object.ReferenceEquals(value, DBNull.Value) then
@@ -193,10 +304,171 @@ let private serializeRowData (rowData: (string * obj) list) : string =
 
   json.ToJsonString()
 
+let private tableExistsInConnection (connection: SqliteConnection) (tableName: string) : Task<bool> =
+  task {
+    use cmd =
+      new SqliteCommand("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = @name LIMIT 1", connection)
+
+    cmd.Parameters.AddWithValue("@name", tableName) |> ignore
+    let! scalar = cmd.ExecuteScalarAsync()
+    return not (isNull scalar)
+  }
+
+let private tryReadStatusValueFromConnection
+  (connection: SqliteConnection)
+  (tableName: string)
+  : Task<Result<string option, SqliteException>> =
+  task {
+    try
+      let! statusTableExists = tableExistsInConnection connection tableName
+
+      if not statusTableExists then
+        return Ok None
+      else
+        use cmd =
+          new SqliteCommand($"SELECT status FROM {tableName} WHERE id = 0 LIMIT 1", connection)
+
+        let! statusObj = cmd.ExecuteScalarAsync()
+
+        if isNull statusObj then
+          return Ok None
+        else
+          return Ok(Some(string statusObj))
+    with :? SqliteException as ex ->
+      return Error ex
+  }
+
 let private getMatchingContext (tx: SqliteTransaction) : TxnContext option =
   match txnContext.Value with
   | Some context when Object.ReferenceEquals(context.tx, tx) -> Some context
   | _ -> None
+
+let getStartupDatabaseState (dbPath: string) : Task<Result<StartupDatabaseState, SqliteException>> =
+  task {
+    match resolveDatabasePath dbPath with
+    | Error message -> return Error(SqliteException(message, 0))
+    | Ok resolvedDbPath ->
+      if not (File.Exists resolvedDbPath) then
+        return Ok Missing
+      else
+        try
+          use connection = openSqliteConnection resolvedDbPath
+          let! statusResult = tryReadStatusValueFromConnection connection "_migration_status"
+
+          match statusResult with
+          | Error ex -> return Error ex
+          | Ok None ->
+            let! hasStatusTable = tableExistsInConnection connection "_migration_status"
+
+            if hasStatusTable then
+              return
+                Ok(
+                  Invalid
+                    "Target database has a _migration_status table but no status row at id = 0. Run migration again or repair the target before serving traffic."
+                )
+            else
+              return Ok Ready
+          | Ok(Some status) when status.Equals("ready", StringComparison.OrdinalIgnoreCase) -> return Ok Ready
+          | Ok(Some status) when status.Equals("migrating", StringComparison.OrdinalIgnoreCase) -> return Ok Migrating
+          | Ok(Some status) ->
+            return
+              Ok(
+                Invalid
+                  $"Unsupported _migration_status value '{status}'. Expected 'migrating' or 'ready' before serving traffic."
+              )
+        with :? SqliteException as ex ->
+          return Error ex
+  }
+
+let getStartupDatabaseDecision
+  (configuredDirectory: string)
+  (dbFileName: string)
+  : Task<Result<StartupDatabaseDecision, SqliteException>> =
+  taskResult {
+    let! dbPath =
+      (resolveDatabaseFilePath configuredDirectory dbFileName
+       |> TaskResultEx.ofResultMapError (fun message -> SqliteException(message, 0))
+      : Task<Result<string, SqliteException>>)
+
+    let! state = (getStartupDatabaseState dbPath: Task<Result<StartupDatabaseState, SqliteException>>)
+
+    return
+      match state with
+      | Missing -> MigrateThisInstance dbPath
+      | Ready -> UseExisting dbPath
+      | Migrating -> WaitForMigration dbPath
+      | Invalid reason -> ExitEarly(dbPath, reason)
+  }
+
+let getStartupDatabaseDecisionFromRuntimeConfig
+  (sqliteDirectoryEnvVarName: string option)
+  (cliDirectoryOverride: string option)
+  (dbFileName: string)
+  : Task<Result<StartupDatabaseDecision, SqliteException>> =
+  taskResult {
+    let! dbPath =
+      (resolveRuntimeDatabaseFilePath sqliteDirectoryEnvVarName cliDirectoryOverride dbFileName
+       |> TaskResultEx.ofResultMapError (fun message -> SqliteException(message, 0))
+      : Task<Result<string, SqliteException>>)
+
+    let! state = (getStartupDatabaseState dbPath: Task<Result<StartupDatabaseState, SqliteException>>)
+
+    return
+      match state with
+      | Missing -> MigrateThisInstance dbPath
+      | Ready -> UseExisting dbPath
+      | Migrating -> WaitForMigration dbPath
+      | Invalid reason -> ExitEarly(dbPath, reason)
+  }
+
+let getStartupDatabaseDecisionFromEnvVar
+  (sqliteDirectoryEnvVarName: string)
+  (dbFileName: string)
+  : Task<Result<StartupDatabaseDecision, SqliteException>> =
+  match requireRuntimeEnvVarName sqliteDirectoryEnvVarName with
+  | Error message -> Task.FromResult(Error(SqliteException(message, 0)))
+  | Ok sqliteDirectoryEnvVarName ->
+    getStartupDatabaseDecisionFromRuntimeConfig (Some sqliteDirectoryEnvVarName) None dbFileName
+
+let waitForStartupDatabaseReady
+  (dbPath: string)
+  (pollInterval: TimeSpan)
+  (cancellationToken: CancellationToken)
+  : Task<Result<unit, SqliteException>> =
+  task {
+    try
+      let interval =
+        if pollInterval <= TimeSpan.Zero then
+          TimeSpan.FromMilliseconds 100.0
+        else
+          pollInterval
+
+      let mutable keepWaiting = true
+      let mutable result = Ok()
+
+      while keepWaiting do
+        let! stateResult = getStartupDatabaseState dbPath
+
+        match stateResult with
+        | Error ex ->
+          result <- Error ex
+          keepWaiting <- false
+        | Ok Ready ->
+          result <- Ok()
+          keepWaiting <- false
+        | Ok Migrating -> do! Task.Delay(interval, cancellationToken)
+        | Ok Missing ->
+          result <- Error(SqliteException($"Target database was not found while waiting for readiness: {dbPath}", 0))
+
+          keepWaiting <- false
+        | Ok(Invalid reason) ->
+          result <- Error(SqliteException(reason, 0))
+          keepWaiting <- false
+
+      return result
+    with :? OperationCanceledException ->
+      return Error(SqliteException("Waiting for startup database readiness was canceled.", 0))
+  }
 
 let private tableExists (tx: SqliteTransaction) (tableName: string) : Task<bool> =
   task {

@@ -1,6 +1,7 @@
 # Web result CE
 
 `MigLib.Web` adds a request-oriented computation expression, `webResult`, for handlers that need a SQLite transaction plus deferred HTTP response mutation.
+It ships as a separate package on top of `MigLib`, so basic runtime consumers do not need the ASP.NET Core surface.
 It is designed for ASP.NET Core services that already use MigLib's `TxnStep`, generated query helpers, `txn`, and `DbRuntime`.
 
 ## Goals

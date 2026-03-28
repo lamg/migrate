@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [5.0.0] - 2026-03-28
+
+Changed:
+
+- **Schema Source Of Truth**: runtime migration and code generation now use compiled `Schema.fs` / generated `Db.fs` artifacts instead of `.fsx` schema scripts
+  - `mig init`, `plan`, `migrate`, `offline`, and path-oriented migration commands now work from compiled generated modules
+  - generated `Db.fs` now carries compiled schema descriptors, schema identity metadata, and the schema-bound `DbFile`
+  - `mig` and `MigLib` now treat compiled schema/module workflows as the primary model
+- **Hot Migration Safety**: automatic migration planning is now stricter and fully explicit for schema renames and source-column drops
+  - rename heuristics were removed in favor of `PreviousNameAttribute`
+  - dropping source columns on surviving tables requires `DropColumnAttribute`
+  - unsupported data-losing transitions now fail clearly during planning instead of being inferred
+- **Package Split**: `MigLib.Web` now ships as its own package/project instead of being compiled into `MigLib`
+  - `MigLib` no longer carries the ASP.NET Core framework reference
+  - consumers that only need the core transaction/runtime APIs can depend on `MigLib` without the web surface
+  - ASP.NET Core helpers remain available from the new `MigLib.Web` package
+- **Code Generation Ownership**: reusable code generation and hot-migration runtime functionality now live in `MigLib`, with `mig` acting as a CLI wrapper over that surface
+
+Added:
+
+- **Startup Coordination APIs**: `MigLib.Db` now exposes startup decision helpers for `use existing`, `wait`, `migrate this instance`, and `exit early`
+- **Compiled Schema Loading**: `MigLib.CompiledSchema` can load generated schema data from compiled modules and drive migration/init operations from assemblies
+- **Build API**: `MigLib.Build` now exposes build-facing generation helpers for schema-bound database naming and `Db.fs` generation
+
+Removed:
+
+- **Schema Script Support**: `.fsx` schema parsing/execution has been removed from runtime, code generation, and tests
+- **Generated Project Files**: `mig codegen` no longer emits sibling `.fsproj` files
+- **FsToolkit.ErrorHandling Dependency**: result and task-result utilities now live in `MigLib.Util`
+
+
 ## [4.1.4] - 2026-03-21
 
 Fixed:

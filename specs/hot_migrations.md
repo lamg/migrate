@@ -1,6 +1,6 @@
 ## Hot migrations
 
-Every migration creates a fresh database from the .fsx specification and copies data from the old one. There are no incremental schema changes applied in place, so there is no need to track migration history — the .fsx file is always the complete source of truth.
+Every migration creates a fresh database from the generated schema description derived from `Schema.fs` and copies data from the old one. There are no incremental schema changes applied in place, so there is no need to track migration history. `Schema.fs` is the complete source of truth, and runtime commands consume the compiled generated `Db` module built from it.
 
 The migration has three phases, each triggered by a `mig` CLI command (see `mig_command.md`). MigLib, embedded in both old and new services, reacts to marker tables in the databases while application code executes through `dbTxn`/`txn`.
 
@@ -63,7 +63,7 @@ CREATE TABLE _migration_log(
    - `operation`: insert, update, or delete
    - `table_name`: the target table
    - `row_data`: JSON with column-value pairs, including the assigned autoincrement ID for inserts
-4. `mig` bulk-copies data from old to new in FK dependency order. For each row copied, the mapping from old ID to new ID is recorded in `_id_mapping`. Foreign key columns are translated using `_id_mapping` for already-copied parent tables. Column mapping for schema changes (renames, additions with defaults, removals) is derived automatically from the DSL diff between the old and new .fsx specifications.
+4. `mig` bulk-copies data from old to new in FK dependency order. For each row copied, the mapping from old ID to new ID is recorded in `_id_mapping`. Foreign key columns are translated using `_id_mapping` for already-copied parent tables. Column mapping for schema changes (renames, additions with defaults, removals) is derived automatically from the old database schema and the current generated schema description.
 5. `mig` exits
 
 The old service continues operating normally while recording writes. The new service can be deployed at any time, but MigLib rejects all requests while `_migration_status='migrating'`.

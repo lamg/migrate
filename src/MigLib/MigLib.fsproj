@@ -4,7 +4,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
     <PackageId>MigLib</PackageId>
-    <Version>4.1.4</Version>
+    <Version>5.0.0</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <AssemblyName>MigLib</AssemblyName>
 
@@ -17,15 +17,31 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
+    <Compile Include="Util.fs" />
     <Compile Include="Db.fs" />
-    <Compile Include="Web.fs" />
+    <Compile Include="DeclarativeMigrations/Types.fs" />
+    <Compile Include="DeclarativeMigrations/SchemaDiff.fs" />
+    <Compile Include="DeclarativeMigrations/DataCopy.fs" />
+    <Compile Include="DeclarativeMigrations/DrainReplay.fs" />
+    <Compile Include="SchemaReflection.fs" />
+    <Compile Include="CodeGen/FabulousAstHelpers.fs" />
+    <Compile Include="CodeGen/AstExprBuilders.fs" />
+    <Compile Include="CodeGen/ViewIntrospection.fs" />
+    <Compile Include="CodeGen/TypeGenerator.fs" />
+    <Compile Include="CodeGen/NormalizedSchema.fs" />
+    <Compile Include="CodeGen/NormalizedTypeGenerator.fs" />
+    <Compile Include="CodeGen/NormalizedQueryGenerator.fs" />
+    <Compile Include="CodeGen/QueryGenerator.fs" />
+    <Compile Include="CodeGen/CodeGen.fs" />
+    <Compile Include="Build.fs" />
+    <Compile Include="HotMigration.fs" />
+    <Compile Include="CompiledSchema.fs" />
     <Content Include="../../README.md" Pack="true" PackagePath="\" />
     <Content Include="../../images/logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
-  </ItemGroup>
-  <ItemGroup>
+    <PackageReference Include="Fabulous.AST" />
+    <PackageReference Include="Fantomas.Core" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
   </ItemGroup>
 </Project>

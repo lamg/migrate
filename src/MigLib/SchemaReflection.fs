@@ -4,9 +4,9 @@ open System
 open System.Collections.Generic
 open System.Globalization
 open System.Reflection
-open FsToolkit.ErrorHandling
 open Microsoft.FSharp.Reflection
 open MigLib.Db
+open MigLib.Util
 open DeclarativeMigrations.Types
 
 type private PrimaryKeyInfo =
@@ -30,7 +30,7 @@ let internal toSnakeCase (value: string) : string =
       if
         hasPrev
         && Char.IsUpper c
-        && (Char.IsLower prev || (Char.IsUpper prev && hasNext && Char.IsLower next))
+        && (Char.IsLower prev || Char.IsUpper prev && hasNext && Char.IsLower next)
       then
         chars.Append '_' |> ignore
 
@@ -56,7 +56,7 @@ let private toCamelCaseFromSnake (value: string) : string =
           if String.IsNullOrWhiteSpace part then
             part
           else
-            (string (Char.ToUpperInvariant part.[0])) + part.[1..])
+            string (Char.ToUpperInvariant part.[0]) + part.[1..])
 
       head + String.Concat tail
 
@@ -80,7 +80,7 @@ let private tryGetEnumLikeDu (t: Type) : EnumLikeDu option =
 
     if
       unionCases.IsEmpty
-      || (unionCases |> List.exists (fun unionCase -> unionCase.GetFields().Length > 0))
+      || unionCases |> List.exists (fun unionCase -> unionCase.GetFields().Length > 0)
     then
       None
     else
@@ -103,6 +103,41 @@ let private mapPrimitiveSqlType (t: Type) : SqlType option =
 
 let private getTypeAttributes<'a when 'a :> Attribute> (t: Type) : 'a list =
   t.GetCustomAttributes(typeof<'a>, true) |> Seq.cast<'a> |> Seq.toList
+
+let private tryReadPreviousName (memberInfo: MemberInfo) : Result<string option, string> =
+  let attributes =
+    memberInfo.GetCustomAttributes(typeof<PreviousNameAttribute>, true)
+    |> Seq.cast<PreviousNameAttribute>
+    |> Seq.toList
+
+  match attributes with
+  | [] -> Ok None
+  | [ attribute ] when String.IsNullOrWhiteSpace attribute.Name ->
+    Error $"PreviousName on '{memberInfo.Name}' cannot be empty."
+  | [ attribute ] -> Ok(Some attribute.Name)
+  | _ -> Error $"Member '{memberInfo.Name}' defines multiple PreviousName attributes."
+
+let private readDropColumns (recordType: Type) : Result<string list, string> =
+  let dropColumns =
+    getTypeAttributes<DropColumnAttribute> recordType |> List.map _.Name
+
+  let emptyNames = dropColumns |> List.filter String.IsNullOrWhiteSpace
+
+  if not emptyNames.IsEmpty then
+    Error $"Type '{recordType.Name}' declares DropColumn with an empty name."
+  else
+    let duplicateNames =
+      dropColumns
+      |> List.groupBy (fun name -> name.ToLowerInvariant())
+      |> List.filter (fun (_, entries) -> entries.Length > 1)
+      |> List.map (fun (_, entries) -> entries.Head)
+      |> List.sort
+
+    if duplicateNames.IsEmpty then
+      Ok dropColumns
+    else
+      let duplicates = String.concat ", " duplicateNames
+      Error $"Type '{recordType.Name}' declares duplicate DropColumn values: {duplicates}"
 
 let private resolveFieldByName (fields: PropertyInfo array) (fieldName: string) : Result<PropertyInfo, string> =
   let target = fieldName.ToLowerInvariant()
@@ -460,6 +495,7 @@ let private buildTable
   : Result<CreateTable * CreateIndex list, string> =
   result {
     let tableName = toSnakeCase recordType.Name
+    let! previousTableName = tryReadPreviousName recordType
     let fields = FSharpType.GetRecordFields(recordType, true)
 
     let! fieldColumnPairs =
@@ -486,40 +522,47 @@ let private buildTable
       |> Array.toList
       |> foldResults
         (fun cols field ->
-          match mapSupportedScalarType field.PropertyType with
-          | Some(sqlType, enumLikeDu) ->
-            Ok(
-              cols
-              @ [ { name = toSnakeCase field.Name
-                    columnType = sqlType
-                    constraints = [ NotNull ]
-                    enumLikeDu = enumLikeDu
-                    unitOfMeasure = None } ]
-            )
-          | None when isRecordType field.PropertyType ->
-            match pkByType.TryGetValue field.PropertyType with
-            | false, _ ->
-              Error
-                $"Field '{recordType.Name}.{field.Name}' references '{field.PropertyType.Name}' which does not declare PK or AutoIncPK"
-            | true, referencedPk ->
-              let fkColumnName = $"{toSnakeCase field.Name}_id"
+          let previousColumnNameResult = tryReadPreviousName field
 
-              let foreignKey =
-                { columns = []
-                  refTable = toSnakeCase field.PropertyType.Name
-                  refColumns = [ referencedPk.columnName ]
-                  onDelete = onDeleteByColumn.TryFind fkColumnName
-                  onUpdate = None }
-
+          match previousColumnNameResult with
+          | Error error -> Error error
+          | Ok previousColumnName ->
+            match mapSupportedScalarType field.PropertyType with
+            | Some(sqlType, enumLikeDu) ->
               Ok(
                 cols
-                @ [ { name = fkColumnName
-                      columnType = referencedPk.sqlType
-                      constraints = [ NotNull; ForeignKey foreignKey ]
-                      enumLikeDu = None
+                @ [ { name = toSnakeCase field.Name
+                      previousName = previousColumnName
+                      columnType = sqlType
+                      constraints = [ NotNull ]
+                      enumLikeDu = enumLikeDu
                       unitOfMeasure = None } ]
               )
-          | None -> Error $"Field '{recordType.Name}.{field.Name}' has unsupported type '{field.PropertyType.Name}'")
+            | None when isRecordType field.PropertyType ->
+              match pkByType.TryGetValue field.PropertyType with
+              | false, _ ->
+                Error
+                  $"Field '{recordType.Name}.{field.Name}' references '{field.PropertyType.Name}' which does not declare PK or AutoIncPK"
+              | true, referencedPk ->
+                let fkColumnName = $"{toSnakeCase field.Name}_id"
+
+                let foreignKey =
+                  { columns = []
+                    refTable = toSnakeCase field.PropertyType.Name
+                    refColumns = [ referencedPk.columnName ]
+                    onDelete = onDeleteByColumn.TryFind fkColumnName
+                    onUpdate = None }
+
+                Ok(
+                  cols
+                  @ [ { name = fkColumnName
+                        previousName = previousColumnName
+                        columnType = referencedPk.sqlType
+                        constraints = [ NotNull; ForeignKey foreignKey ]
+                        enumLikeDu = None
+                        unitOfMeasure = None } ]
+                )
+            | None -> Error $"Field '{recordType.Name}.{field.Name}' has unsupported type '{field.PropertyType.Name}'")
         []
 
     let! primaryKeyInfo = readPrimaryKeyInfo recordType
@@ -539,6 +582,7 @@ let private buildTable
     let! constrainedColumns, tableConstraints = applyConstraintAttributes recordType resolver columnsWithPrimaryKey
 
     let! indexes = readIndexDefinitions tableName recordType resolver
+    let! dropColumns = readDropColumns recordType
 
     let! (queryByAnnotations,
           queryLikeAnnotations,
@@ -548,6 +592,8 @@ let private buildTable
 
     return
       { name = tableName
+        previousName = previousTableName
+        dropColumns = dropColumns
         columns = constrainedColumns
         constraints = tableConstraints
         queryByAnnotations = queryByAnnotations
@@ -916,6 +962,7 @@ let private buildView
   : Result<CreateView, string> =
   result {
     let tableName = toSnakeCase viewType.Name
+    let! previousViewName = tryReadPreviousName viewType
     let fields = FSharpType.GetRecordFields(viewType, true)
 
     let! declaredColumns =
@@ -967,6 +1014,7 @@ let private buildView
 
     return
       { name = tableName
+        previousName = previousViewName
         sqlTokens = [ sql ]
         declaredColumns = declaredColumns
         dependencies = dependencies
@@ -1020,6 +1068,7 @@ let private buildUnionExtensionTables
 
             let fkColumn =
               { name = fkColumnName
+                previousName = None
                 columnType = referencedPk.sqlType
                 constraints =
                   [ NotNull
@@ -1053,6 +1102,7 @@ let private buildUnionExtensionTables
                     Ok(
                       cols
                       @ [ { name = toSnakeCase fieldName
+                            previousName = None
                             columnType = sqlType
                             constraints = [ NotNull ]
                             enumLikeDu = enumLikeDu
@@ -1065,6 +1115,8 @@ let private buildUnionExtensionTables
 
             let extensionTable =
               { name = extensionTableName
+                previousName = None
+                dropColumns = []
                 columns = fkColumn :: extensionColumns
                 constraints = []
                 queryByAnnotations = []
@@ -1094,7 +1146,7 @@ let internal buildSchemaFromTypes (types: Type list) : Result<SqlFile, string> =
     Error "No types were provided for schema reflection"
   else
     result {
-      let schemaTypes = HashSet<Type>(types)
+      let schemaTypes = HashSet<Type> types
 
       let tableRecordTypes =
         types
@@ -1196,3 +1248,26 @@ let internal buildSchemaFromAssembly (assembly: Assembly) : Result<SqlFile, stri
     |> Array.toList
 
   buildSchemaFromTypes types
+
+let private isTypeUnderModuleName (moduleName: string) (candidate: Type) =
+  let fullName = candidate.FullName
+
+  not (String.IsNullOrWhiteSpace fullName)
+  && (fullName.StartsWith(moduleName + "+", StringComparison.Ordinal)
+      || fullName.Contains("." + moduleName + "+", StringComparison.Ordinal))
+
+let internal buildSchemaFromAssemblyModule (assembly: Assembly) (moduleName: string) : Result<SqlFile, string> =
+  if String.IsNullOrWhiteSpace moduleName then
+    Error "Schema module name cannot be empty."
+  else
+    let types =
+      assembly.GetTypes()
+      |> Array.filter (fun t -> t.Assembly = assembly)
+      |> Array.filter (fun t -> isTypeUnderModuleName moduleName t)
+      |> Array.filter (fun t -> isRecordType t || isUnionType t)
+      |> Array.toList
+
+    if types.IsEmpty then
+      Error $"No record or union schema types were found under compiled module '{moduleName}'."
+    else
+      buildSchemaFromTypes types

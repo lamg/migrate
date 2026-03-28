@@ -1,6 +1,6 @@
 module Mig.DeclarativeMigrations.Types
 
-type internal SqlType =
+type SqlType =
   | SqlInteger
   | SqlText
   | SqlReal
@@ -8,42 +8,42 @@ type internal SqlType =
   | SqlString
   | SqlFlexible
 
-type internal EnumLikeDu =
+type EnumLikeDu =
   { typeName: string; cases: string list }
 
 type internal Autoincrement = Autoincrement
 
-type internal Expr =
+type Expr =
   | String of string
   | Integer of int
   | Real of double
   | Value of string
 
-type internal InsertInto =
+type InsertInto =
   { table: string
     columns: string list
     values: Expr list list }
 
-type internal FkAction =
+type FkAction =
   | Cascade
   | Restrict
   | NoAction
   | SetNull
   | SetDefault
 
-type internal ForeignKey =
+type ForeignKey =
   { columns: string list
     refTable: string
     refColumns: string list
     onDelete: FkAction option
     onUpdate: FkAction option }
 
-type internal PrimaryKey =
+type PrimaryKey =
   { constraintName: string option
     columns: string list
     isAutoincrement: bool }
 
-type internal ColumnConstraint =
+type ColumnConstraint =
   | PrimaryKey of PrimaryKey
   | Autoincrement
   | NotNull
@@ -52,31 +52,33 @@ type internal ColumnConstraint =
   | Check of string list
   | ForeignKey of ForeignKey
 
-type internal ColumnDef =
+type ColumnDef =
   { name: string
+    previousName: string option
     columnType: SqlType
     constraints: ColumnConstraint list
     enumLikeDu: EnumLikeDu option
     unitOfMeasure: string option }
 
-type internal ViewColumn =
+type ViewColumn =
   { name: string
     columnType: SqlType
     enumLikeDu: EnumLikeDu option
     unitOfMeasure: string option }
 
-type internal QueryByAnnotation = { columns: string list }
+type QueryByAnnotation = { columns: string list }
 
-type internal QueryLikeAnnotation = { columns: string list }
+type QueryLikeAnnotation = { columns: string list }
 
-type internal QueryByOrCreateAnnotation = { columns: string list }
+type QueryByOrCreateAnnotation = { columns: string list }
 
-type internal InsertOrIgnoreAnnotation = InsertOrIgnoreAnnotation
+type InsertOrIgnoreAnnotation = InsertOrIgnoreAnnotation
 
-type internal UpsertAnnotation = UpsertAnnotation
+type UpsertAnnotation = UpsertAnnotation
 
-type internal CreateView =
+type CreateView =
   { name: string
+    previousName: string option
     sqlTokens: string seq
     declaredColumns: ViewColumn list
     dependencies: string list
@@ -86,8 +88,10 @@ type internal CreateView =
     insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list
     upsertAnnotations: UpsertAnnotation list }
 
-type internal CreateTable =
+type CreateTable =
   { name: string
+    previousName: string option
+    dropColumns: string list
     columns: ColumnDef list
     constraints: ColumnConstraint list
     queryByAnnotations: QueryByAnnotation list
@@ -96,17 +100,17 @@ type internal CreateTable =
     insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list
     upsertAnnotations: UpsertAnnotation list }
 
-type internal CreateIndex =
+type CreateIndex =
   { name: string
     table: string
     columns: string list }
 
-type internal CreateTrigger =
+type CreateTrigger =
   { name: string
     sqlTokens: string seq
     dependencies: string list }
 
-type internal SqlFile =
+type SqlFile =
   { measureTypes: string list
     inserts: InsertInto list
     views: CreateView list
@@ -119,7 +123,7 @@ let internal foldResults
   (initial: 'state)
   (items: 'item list)
   : Result<'state, string> =
-  ((Ok initial), items)
+  (Ok initial, items)
   ||> List.fold (fun state item ->
     match state with
     | Error _ -> state

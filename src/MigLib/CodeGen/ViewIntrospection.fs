@@ -3,8 +3,8 @@ module internal Mig.CodeGen.ViewIntrospection
 
 open System
 open Microsoft.Data.Sqlite
-open FsToolkit.ErrorHandling
 open Mig.DeclarativeMigrations.Types
+open MigLib.Util
 
 /// Extract column information from a view by creating it in a temporary database
 let getViewColumns (tables: CreateTable list) (view: CreateView) : Result<ViewColumn list, string> =

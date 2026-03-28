@@ -4,6 +4,9 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="CompiledSchemaFixture.fs" />
+    <Compile Include="CompiledSchemaSourceFixture.fs" />
+    <Compile Include="SchemaReflectionFixture.fs" />
     <Compile Include="Tests.fs" />
   </ItemGroup>
   <ItemGroup>
@@ -17,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../MigLib/MigLib.fsproj" />
+    <ProjectReference Include="../MigLib.Web/MigLib.Web.fsproj" />
     <ProjectReference Include="../mig/mig.fsproj" />
   </ItemGroup>
 </Project>
