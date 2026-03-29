@@ -9,7 +9,7 @@
     <PackageId>migtool</PackageId>
     <RootNamespace>migrate</RootNamespace>
     <AssemblyName>migrate</AssemblyName>
-    <Version>5.0.0</Version>
+    <Version>5.0.1</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <InvariantGlobalization>true</InvariantGlobalization>
 
@@ -28,6 +28,7 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Argu" />
+    <PackageReference Include="FSharp.Core" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../MigLib/MigLib.fsproj" />

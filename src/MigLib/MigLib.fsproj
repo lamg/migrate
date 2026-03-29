@@ -4,7 +4,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
     <PackageId>MigLib</PackageId>
-    <Version>5.0.0</Version>
+    <Version>5.0.1</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <AssemblyName>MigLib</AssemblyName>
 
@@ -42,6 +42,7 @@
   <ItemGroup>
     <PackageReference Include="Fabulous.AST" />
     <PackageReference Include="Fantomas.Core" />
+    <PackageReference Include="FSharp.Core" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
   </ItemGroup>
 </Project>

@@ -853,9 +853,9 @@ let private synthesizeViewSql
 
     let baseTable = chooseViewBaseTable joins
 
-    let aliasesByTable = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-    let usedAliases = HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    let joinedSet = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    let aliasesByTable = Dictionary<string, string> StringComparer.OrdinalIgnoreCase
+    let usedAliases = HashSet<string> StringComparer.OrdinalIgnoreCase
+    let joinedSet = HashSet<string> StringComparer.OrdinalIgnoreCase
     let joinedOrder = ResizeArray<string>()
 
     let getOrCreateAlias (tableName: string) =

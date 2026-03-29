@@ -67,19 +67,17 @@ Target.create "PackTool" (fun _ ->
     Trace.log $"Packed %s{packageId} to %s{nupkgDir}")
 
 Target.create "InstallGlobal" (fun _ ->
-    let updateArgs =
-        $"update --global {packageId} --add-source \"{nupkgDir}\" --ignore-failed-sources"
+    let uninstallArgs = $"uninstall --global {packageId}"
+    let uninstallResult = DotNet.exec id "tool" uninstallArgs
 
-    let updateResult = DotNet.exec id "tool" updateArgs
+    if uninstallResult.OK then
+        Trace.log $"Removed existing global %s{packageId}."
 
-    if updateResult.OK then
-        Trace.log $"Updated global %s{packageId}."
-    else
-        let installArgs =
-            $"install --global {packageId} --add-source \"{nupkgDir}\" --ignore-failed-sources"
+    let installArgs =
+        $"install --global {packageId} --add-source \"{nupkgDir}\" --ignore-failed-sources"
 
-        runDotNetToolCommand installArgs
-        Trace.log $"Installed global %s{packageId}.")
+    runDotNetToolCommand installArgs
+    Trace.log $"Installed global %s{packageId} from local package output.")
 
 "Clean" ==> "Restore" ==> "Build" ==> "PackTool" ==> "InstallGlobal"
 

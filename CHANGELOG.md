@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.1] - 2026-03-29
+
+Fixed:
+
+- **MigLib / mig CLI**: aligned the packaged F# runtime dependency to `FSharp.Core 11.0.100`
+  - fixes compiled-schema loading failures when `mig init`, `migrate`, `offline`, or `plan` reflect over application assemblies built against `FSharp.Core 11`
+  - keeps `MigLib`, `MigLib.Web`, and `migtool` on the same F# runtime version for release builds
+
+Changed:
+
+- **mig CLI Local Install Workflow**: `build.fsx` now uninstalls the existing global `migtool` before reinstalling from the freshly packed local package output
+  - avoids stale global-tool installs during local release verification
+  - ensures `dotnet fsi build.fsx` picks up the newest locally built package artifacts
+
 ## [5.0.0] - 2026-03-28
 
 Changed:
