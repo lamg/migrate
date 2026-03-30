@@ -1870,12 +1870,43 @@ let runInitWithSchema (targetSchema: SqlFile) (newDbPath: string) : Task<Result<
     | ex -> return Error(toSqliteError ex.Message)
   }
 
+let inferPreviousDatabasePath
+  (sqliteDirectoryEnvVarName: string)
+  (dbFileName: string)
+  : Result<string option, SqliteException> =
+  result {
+    let! sqliteDirectory =
+      resolveEnvVarSqliteDirectory sqliteDirectoryEnvVarName
+      |> Result.mapError (fun message -> SqliteException(message, 0))
+
+    let currentDbPath = Path.Combine(sqliteDirectory, dbFileName)
+
+    let candidatePaths =
+      Directory.GetFiles(sqliteDirectory, "*.sqlite")
+      |> Array.filter (fun path -> not (String.Equals(path, currentDbPath, StringComparison.OrdinalIgnoreCase)))
+      |> Array.sort
+      |> Array.toList
+
+    match candidatePaths with
+    | [] -> return None
+    | [ candidatePath ] -> return Some candidatePath
+    | many ->
+      let rendered = String.concat ", " many
+
+      return!
+        Error(
+          SqliteException(
+            $"Could not infer previous database automatically. Found multiple sqlite files besides the target '{currentDbPath}': {rendered}.",
+            0
+          )
+        )
+  }
+
 let startServiceWithPolling
   (sqliteDirectoryEnvVarName: string)
   (dbFileName: string)
   (schemaIdentity: SchemaIdentity)
   (targetSchema: SqlFile)
-  (inferPreviousDatabasePath: unit -> Result<string option, SqliteException>)
   (pollInterval: TimeSpan)
   (cancellationToken: CancellationToken)
   : Task<Result<DbTxnBuilder, SqliteException>> =
@@ -1888,7 +1919,7 @@ let startServiceWithPolling
       do! waitForStartupDatabaseReady dbPath pollInterval cancellationToken
       return dbTxn dbPath
     | MigrateThisInstance newDbPath ->
-      let! oldDbPath = inferPreviousDatabasePath ()
+      let! oldDbPath = inferPreviousDatabasePath sqliteDirectoryEnvVarName dbFileName
 
       match oldDbPath with
       | None ->
@@ -1909,7 +1940,6 @@ let startService
   (dbFileName: string)
   (schemaIdentity: SchemaIdentity)
   (targetSchema: SqlFile)
-  (inferPreviousDatabasePath: unit -> Result<string option, SqliteException>)
   (cancellationToken: CancellationToken)
   : Task<Result<DbTxnBuilder, SqliteException>> =
   startServiceWithPolling
@@ -1917,7 +1947,6 @@ let startService
     dbFileName
     schemaIdentity
     targetSchema
-    inferPreviousDatabasePath
     (TimeSpan.FromSeconds 1.0)
     cancellationToken
 

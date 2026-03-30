@@ -10,6 +10,24 @@
 Migrate is a SQLite-first migration toolchain built around `Schema.fs`, generated `Db.fs`, and compiled schema modules.
 It provides both a hot-migration workflow (`migrate` -> `drain` -> `cutover`) and a one-shot offline workflow (`offline`), plus type-safe code generation from compiled schema types.
 
+## Schema Project Convention
+
+The recommended layout is to keep `Schema.fs` in its own `Schema.fsproj`, build that project first, and then generate `Db.fs` from the compiled schema assembly before compiling the main application project.
+
+This convention exists to eliminate build dependency cycles:
+
+- generating `Db.fs` needs a compiled schema assembly
+- compiling the main application project usually needs the generated `Db.fs`
+
+When `mig` runs in a directory that contains `Schema.fsproj`, it tries to discover the compiled schema assembly automatically by looking for:
+
+1. `bin/Debug/net10.0/<AssemblyName>.dll` when `<AssemblyName>` is set in `Schema.fsproj`
+2. `bin/Debug/net10.0/Schema.dll` otherwise
+
+If there is no `Schema.fsproj`, `mig` falls back to the single-`.fsproj` convention and looks for `bin/Debug/net10.0/<ProjectName>.dll`.
+
+All compiled-module commands can still be overridden with the optional `--assembly` and `--module` parameters.
+
 ## Installation
 
 If you just want to test the tool without installing [.Net][dotnet],
@@ -63,27 +81,27 @@ Assuming:
 
 - an existing SQLite database named `<dir>-<old-hash>.sqlite`
 - a compiled generated `Db` module produced from `Schema.fs`
+- the recommended `Schema.fsproj` convention above
 
 ```sh
 # from your project directory:
-# - expects exactly one source db matching <dir>-<old-hash>.sqlite
-# - derives target db from <Module>.DbFile
-mig plan --assembly /path/to/App.dll --module Db
-mig migrate --assembly /path/to/App.dll --module Db
+mig codegen
+mig plan
+mig migrate
 
 # then continue in the same directory (paths auto-resolve)
-mig status --assembly /path/to/App.dll --module Db
-mig drain --assembly /path/to/App.dll --module Db
-mig cutover --assembly /path/to/App.dll --module Db
+mig status
+mig drain
+mig cutover
 # optional, after traffic has fully moved to the new service:
-mig archive-old --assembly /path/to/App.dll --module Db
+mig archive-old
 
 # from a different directory:
-mig migrate -d /path/to/project --assembly /path/to/App.dll --module Db
+mig migrate -d /path/to/project
 
 # if migrate fails and you need to clear failed migration artifacts:
-mig reset --dry-run --assembly /path/to/App.dll --module Db
-mig reset --assembly /path/to/App.dll --module Db
+mig reset --dry-run
+mig reset
 ```
 
 ## Quickstart (Schema Initialization)
@@ -91,7 +109,8 @@ mig reset --assembly /path/to/App.dll --module Db
 When you want to bootstrap a database directly from a compiled generated `Db` module (no source DB yet):
 
 ```sh
-mig init --assembly /path/to/App.dll --module Db
+mig codegen
+mig init
 ```
 
 ## Quickstart (Offline Migration)
@@ -99,11 +118,43 @@ mig init --assembly /path/to/App.dll --module Db
 When downtime is acceptable and you want to create the fully migrated target DB in one command from a compiled generated `Db` module:
 
 ```sh
-# - expects exactly one source db matching <dir>-<old-hash>.sqlite
-# - derives target db from <Module>.DbFile
-# - archives the old db into ./archive/ after the copy succeeds
-mig offline --assembly /path/to/App.dll --module Db
+mig codegen
+mig offline
 ```
+
+## Library Example
+
+The CLI automates the same startup decision that `MigLib.HotMigration.startService` exposes directly in application code.
+
+```fsharp
+open System.Threading
+open Mig.HotMigration
+open Db
+
+let sqliteDirectoryEnvVar = "APP_SQLITE_DIRECTORY"
+
+let startRuntime cancellationToken =
+  task {
+    let! result =
+      startService
+        sqliteDirectoryEnvVar
+        Db.DbFile
+        Db.SchemaIdentity
+        Db.Schema
+        cancellationToken
+
+    match result with
+    | Ok db -> return db
+    | Error ex -> return raise ex
+  }
+```
+
+`startService` will:
+
+- use the ready database immediately when the current schema-bound file already exists
+- initialize a fresh database when no previous database is found
+- migrate from the previous database when exactly one non-target sqlite file is discovered in the configured directory
+- fail startup when previous-database inference is ambiguous or the target database is invalid
 
 ## Features
 
@@ -125,16 +176,16 @@ mig offline --assembly /path/to/App.dll --module Db
 
 ## Commands
 
-- `mig init [--dir|-d <path>] [--assembly|-a <path>] [--module|-m <name>]` - Create a schema-matched database from a compiled generated module and apply seed inserts (no source DB required).
-- `mig codegen [--dir|-d <path>] [--assembly|-a <path>] [--schema-module|-s <name>] [--module|-m <name>] [--output|-o <file>]` - Generate `Db.fs` from `Schema.fs` plus a compiled schema module, and emit a `DbFile` literal for the schema-bound SQLite filename.
-- `mig offline [--dir|-d <path>] [--assembly|-a <path>] [--module|-m <name>]` - Create the fully migrated target DB in one step from a compiled generated module, then archive the old DB into `archive/`.
-- `mig migrate [--dir|-d <path>] [--assembly|-a <path>] [--module|-m <name>]` - Create the new DB from a compiled generated module, copy data, and start recording on old DB.
-- `mig plan [--dir|-d <path>] [--assembly|-a <path>] [--module|-m <name>]` - Print dry-run inferred paths, schema diff summary, and replay prerequisites without mutating DBs using a compiled generated module.
-- `mig drain [--dir|-d <path>] [--assembly|-a <path>] [--module|-m <name>]` - Switch old DB to draining mode and replay pending migration log entries.
-- `mig cutover [--dir|-d <path>] [--assembly|-a <path>] [--module|-m <name>]` - Verify drain completion plus old marker/log replay safety, switch new DB to `ready`, and remove replay-only tables.
-- `mig archive-old [--dir|-d <path>] [--assembly|-a <path>] [--module|-m <name>]` - Optional archival of the old DB into `archive/`, replacing any existing archive with the same name.
-- `mig reset [--dir|-d <path>] [--assembly|-a <path>] [--module|-m <name>] [--dry-run]` - Reset failed/aborted migration artifacts, or inspect reset impact without mutating DB files.
-- `mig status [--dir|-d <path>] [--assembly|-a <path>] [--module|-m <name>]` - Show marker/status state and migration counters for operational visibility.
+- `mig codegen` - Generate `Db.fs` from `Schema.fs` plus the compiled schema module, and emit a `DbFile` literal for the schema-bound SQLite filename.
+- `mig init` - Create a schema-matched database from the compiled generated module and apply seed inserts when the database does not exist yet.
+- `mig plan` - Print inferred paths, schema diff summary, and replay prerequisites without mutating databases.
+- `mig migrate` - Create the new database, bulk-copy data, and start recording new writes on the old database.
+- `mig drain` - Switch the old database to draining mode and replay pending migration log entries.
+- `mig cutover` - Verify drain completion, switch the new database to `ready`, and remove replay-only tables.
+- `mig offline` - Create the fully migrated target database in one step and archive the old database into `archive/`.
+- `mig archive-old` - Archive the old database into `archive/`, replacing any existing archive with the same name.
+- `mig reset` - Reset failed or aborted migration artifacts, or inspect reset impact first with `--dry-run`.
+- `mig status` - Show marker/status state and migration counters for operational visibility.
 
 ## Contributing
 

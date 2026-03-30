@@ -3,6 +3,7 @@ module Mig.Program
 open Argu
 open System
 open System.IO
+open System.Xml.Linq
 open MigLib.Build
 open MigLib.CompiledSchema
 open MigLib.Db
@@ -433,6 +434,69 @@ let private resolveCompiledModuleName (candidate: string option) : Result<string
   else
     Ok moduleName
 
+let private tryReadAssemblyNameFromProject (projectPath: string) : Result<string option, string> =
+  try
+    let document = XDocument.Load projectPath
+
+    let assemblyName =
+      document.Descendants()
+      |> Seq.tryFind (fun element -> String.Equals(element.Name.LocalName, "AssemblyName", StringComparison.Ordinal))
+      |> Option.map _.Value
+      |> Option.map _.Trim()
+      |> Option.filter (String.IsNullOrWhiteSpace >> not)
+
+    Ok assemblyName
+  with ex ->
+    Error
+      $"Could not read project file '{Path.GetFullPath projectPath}' while inferring the compiled assembly: {ex.Message}"
+
+let private tryDiscoverProjectAssemblyPath
+  (commandName: string)
+  (currentDirectory: string)
+  : Result<string option, string> =
+  let schemaProjectPath = Path.Combine(currentDirectory, "Schema.fsproj")
+
+  if File.Exists schemaProjectPath then
+    result {
+      let! schemaAssemblyName = tryReadAssemblyNameFromProject schemaProjectPath
+
+      let schemaAssemblyFileName =
+        schemaAssemblyName
+        |> Option.defaultValue "Schema"
+        |> fun assemblyName -> $"{assemblyName}.dll"
+
+      let schemaAssemblyPath =
+        Path.Combine(currentDirectory, "bin", "Debug", "net10.0", schemaAssemblyFileName)
+
+      if File.Exists schemaAssemblyPath then
+        return Some(Path.GetFullPath schemaAssemblyPath)
+      else
+        return!
+          Error
+            $"Could not infer compiled assembly automatically for `{commandName}`. Found 'Schema.fsproj' and expected build output at '{Path.GetFullPath schemaAssemblyPath}'. Build the schema project or pass --assembly explicitly."
+    }
+  else
+    let projectFiles = Directory.GetFiles(currentDirectory, "*.fsproj") |> Array.sort
+
+    match projectFiles with
+    | [||] -> Ok None
+    | [| projectPath |] ->
+      let projectName = Path.GetFileNameWithoutExtension projectPath
+
+      let inferredAssemblyPath =
+        Path.Combine(currentDirectory, "bin", "Debug", "net10.0", $"{projectName}.dll")
+
+      if File.Exists inferredAssemblyPath then
+        Ok(Some(Path.GetFullPath inferredAssemblyPath))
+      else
+        Error
+          $"Could not infer compiled assembly automatically for `{commandName}`. Found project '{Path.GetFileName projectPath}' but expected build output at '{Path.GetFullPath inferredAssemblyPath}'. Build the project or pass --assembly explicitly."
+    | many ->
+      let projectList = many |> Array.map Path.GetFileName |> String.concat ", "
+
+      Error
+        $"Could not infer compiled assembly automatically for `{commandName}`. Found multiple .fsproj files in {currentDirectory}: {projectList}. Pass --assembly explicitly."
+
 let private resolveCompiledMode
   (assemblyPath: string option)
   (moduleName: string option)
@@ -449,14 +513,25 @@ let private resolveCompiledMode
 
 let private resolveRequiredCompiledMode
   (commandName: string)
+  (currentDirectory: string)
   (assemblyPath: string option)
   (moduleName: string option)
   : Result<string * string, string> =
-  resolveCompiledMode assemblyPath moduleName
-  |> Result.bind (
-    ResultEx.requireSomeWith (fun () ->
-      $"`{commandName}` requires --assembly pointing to a compiled generated Db module. Use --module to override the default module name `Db`.")
-  )
+  result {
+    let! resolvedModuleName = resolveCompiledModuleName moduleName
+
+    match assemblyPath with
+    | Some explicitAssemblyPath -> return explicitAssemblyPath, resolvedModuleName
+    | None ->
+      let! discoveredAssemblyPath = tryDiscoverProjectAssemblyPath commandName currentDirectory
+
+      match discoveredAssemblyPath with
+      | Some inferredAssemblyPath -> return inferredAssemblyPath, resolvedModuleName
+      | None ->
+        return!
+          Error
+            $"`{commandName}` requires --assembly pointing to a compiled generated Db module. No .fsproj was found in {currentDirectory}. Use --module to override the default module name `Db`."
+  }
 
 let private resolveCodegenGeneratedModuleName (candidate: string option) : Result<string, string> =
   let defaultModuleName = "Db"
@@ -485,14 +560,28 @@ let private resolveCodegenCompiledInput
     | None -> Ok None
 
 let private resolveRequiredCodegenCompiledInput
+  (currentDirectory: string)
   (assemblyPath: string option)
   (schemaModuleName: string option)
   : Result<string * string, string> =
-  resolveCodegenCompiledInput assemblyPath schemaModuleName
-  |> Result.bind (
-    ResultEx.requireSome
-      "codegen failed: `codegen` requires --assembly pointing to compiled schema types. Use --schema-module to override the default schema module name `Schema`."
-  )
+  result {
+    let resolvedSchemaModuleName = schemaModuleName |> Option.defaultValue "Schema"
+
+    if String.IsNullOrWhiteSpace resolvedSchemaModuleName then
+      return! Error "codegen failed: compiled schema module name cannot be empty."
+    else
+      match assemblyPath with
+      | Some explicitAssemblyPath -> return explicitAssemblyPath, resolvedSchemaModuleName
+      | None ->
+        let! discoveredAssemblyPath = tryDiscoverProjectAssemblyPath "codegen" currentDirectory
+
+        match discoveredAssemblyPath with
+        | Some inferredAssemblyPath -> return inferredAssemblyPath, resolvedSchemaModuleName
+        | None ->
+          return!
+            Error
+              $"codegen failed: `codegen` requires --assembly pointing to compiled schema types. No .fsproj was found in {currentDirectory}. Use --schema-module to override the default schema module name `Schema`."
+  }
 
 let private resolveCompiledModuleForCommand
   (commandName: string)
@@ -531,7 +620,7 @@ let private resolveRequiredCompiledModuleForCommand
   (moduleName: string option)
   : Result<ResolvedCompiledModule, string> =
   result {
-    let! assemblyPath, moduleName = resolveRequiredCompiledMode commandName assemblyPath moduleName
+    let! assemblyPath, moduleName = resolveRequiredCompiledMode commandName currentDirectory assemblyPath moduleName
     return! resolveCompiledModuleForCommand commandName currentDirectory assemblyPath moduleName
   }
 
@@ -624,6 +713,7 @@ let codegen (args: ParseResults<CodegenArgs>) =
 
       let! assemblyPath, schemaModuleName =
         resolveRequiredCodegenCompiledInput
+          currentDirectory
           (args.TryGetResult CodegenArgs.Assembly)
           (args.TryGetResult CodegenArgs.Schema_Module)
 
@@ -777,7 +867,11 @@ let init (args: ParseResults<InitArgs>) =
       let! currentDirectory = resolveCommandDirectory "init" (args.TryGetResult InitArgs.Dir)
 
       let! assemblyPath, moduleName =
-        resolveRequiredCompiledMode "init" (args.TryGetResult InitArgs.Assembly) (args.TryGetResult InitArgs.Module)
+        resolveRequiredCompiledMode
+          "init"
+          currentDirectory
+          (args.TryGetResult InitArgs.Assembly)
+          (args.TryGetResult InitArgs.Module)
 
       let! report =
         initDbFromAssemblyModulePath currentDirectory assemblyPath moduleName

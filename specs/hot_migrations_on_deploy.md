@@ -98,18 +98,12 @@ open Mig.HotMigration
 
 type Env = { dbTxn: DbTxnBuilder }
 
-let inferPreviousDatabasePath () : Result<string option, SqliteException> =
-  // Service-specific deploy logic goes here.
-  // Example: inspect the SQLite directory and pick the most recent non-target DB.
-  failwith "implementation-specific"
-
 let decideStartup () =
   startService
     "MYAPP_SQLITE_DIR"
     Db.DbFile
     Db.SchemaIdentity
     Db.Schema
-    inferPreviousDatabasePath
     CancellationToken.None
 
 let startApp (ct: CancellationToken) : Task<Result<Env, SqliteException>> =
@@ -120,7 +114,6 @@ let startApp (ct: CancellationToken) : Task<Result<Env, SqliteException>> =
         Db.DbFile
         Db.SchemaIdentity
         Db.Schema
-        inferPreviousDatabasePath
         ct
 
     return dbTxn |> Result.map (fun dbTxn -> { dbTxn = dbTxn })
@@ -169,6 +162,7 @@ If a migration cannot be derived from the supported `Schema.fs` primitives, plan
 - generation of `Db.fs`
 - generated query helpers
 - startup target-database state inspection
+- default previous-database inference for startup
 - waiting for target-database readiness
 - migration execution against a known old DB and known target DB
 - the hot-migration primitives used by services and by `mig`
@@ -178,7 +172,6 @@ The service owns:
 - choosing when generation runs in its build
 - choosing the runtime SQLite directory env var name
 - logging and process lifecycle policy
-- deciding how to identify the previous database file when a migration is needed
 - deciding whether to use direct startup migration, a leader-only migration process, or another deployment policy around the same `MigLib` calls
 
 ## `mig` CLI role

@@ -4,7 +4,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
     <PackageId>MigLib</PackageId>
-    <Version>5.1.0</Version>
+    <Version>5.2.0</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <AssemblyName>MigLib</AssemblyName>
 

@@ -91,6 +91,27 @@ let private runMigCli (args: string list) = runMigCliInDirectory None args
 
 let private withProcessStateLock (f: unit -> 'a) = lock cliIoLock f
 
+let private createTempFsprojWithBuildOutput projectName (sourceBuildOutputDirectory: string) =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_cli_project_autodiscovery_{projectName}_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let projectPath = Path.Combine(tempDir, $"{projectName}.fsproj")
+  File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>")
+
+  let targetBuildOutputDirectory = Path.Combine(tempDir, "bin", "Debug", "net10.0")
+  Directory.CreateDirectory targetBuildOutputDirectory |> ignore
+
+  Directory.GetFiles sourceBuildOutputDirectory
+  |> Array.iter (fun sourcePath ->
+    let destinationPath =
+      Path.Combine(targetBuildOutputDirectory, Path.GetFileName sourcePath)
+
+    File.Copy(sourcePath, destinationPath, true))
+
+  tempDir
+
 let private deriveShortSchemaHashFromSourceFile (schemaPath: string) =
   let normalizeLineEndings (text: string) =
     text.Replace("\r\n", "\n").Replace("\r", "\n")
@@ -622,6 +643,96 @@ let ``getStartupDatabaseDecisionFromEnvVar uses the named env var for the target
   | Ok other -> failwith $"Expected startup decision to use env-selected runtime directory, got: {other}"
 
 [<Fact>]
+let ``inferPreviousDatabasePath returns none when only target database exists`` () =
+  let envDir =
+    Path.Combine(Path.GetTempPath(), $"mig_infer_previous_none_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory envDir |> ignore
+
+  let dbFileName = "marketdesk-1111222233334444.sqlite"
+  let dbPath = Path.Combine(envDir, dbFileName)
+  createStudentDatabase dbPath [ "Alice" ] None
+
+  let inferenceResult =
+    withProcessStateLock (fun () ->
+      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
+
+      try
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
+        inferPreviousDatabasePath testSqliteDirectoryEnvVar dbFileName
+      finally
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+
+  match inferenceResult with
+  | Error ex -> failwith $"Expected previous-database inference to succeed, got: {ex.Message}"
+  | Ok None -> ()
+  | Ok(Some path) -> failwith $"Expected no previous database, got: {path}"
+
+  Directory.Delete(envDir, true)
+
+[<Fact>]
+let ``inferPreviousDatabasePath returns the only non-target sqlite file`` () =
+  let envDir =
+    Path.Combine(Path.GetTempPath(), $"mig_infer_previous_single_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory envDir |> ignore
+
+  let dbFileName = "marketdesk-1111222233334444.sqlite"
+  let targetDbPath = Path.Combine(envDir, dbFileName)
+  let oldDbPath = Path.Combine(envDir, "previous.sqlite")
+  createStudentDatabase targetDbPath [ "Alice" ] None
+  createStudentDatabase oldDbPath [ "Bob" ] None
+
+  let inferenceResult =
+    withProcessStateLock (fun () ->
+      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
+
+      try
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
+        inferPreviousDatabasePath testSqliteDirectoryEnvVar dbFileName
+      finally
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+
+  match inferenceResult with
+  | Error ex -> failwith $"Expected previous-database inference to succeed, got: {ex.Message}"
+  | Ok(Some path) -> Assert.Equal(Path.GetFullPath oldDbPath, path)
+  | Ok None -> failwith "Expected previous database to be inferred."
+
+  Directory.Delete(envDir, true)
+
+[<Fact>]
+let ``inferPreviousDatabasePath fails when multiple non-target sqlite files exist`` () =
+  let envDir =
+    Path.Combine(Path.GetTempPath(), $"mig_infer_previous_multiple_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory envDir |> ignore
+
+  let dbFileName = "marketdesk-1111222233334444.sqlite"
+  let targetDbPath = Path.Combine(envDir, dbFileName)
+  let firstOldDbPath = Path.Combine(envDir, "previous-a.sqlite")
+  let secondOldDbPath = Path.Combine(envDir, "previous-b.sqlite")
+  createStudentDatabase targetDbPath [ "Alice" ] None
+  createStudentDatabase firstOldDbPath [ "Bob" ] None
+  createStudentDatabase secondOldDbPath [ "Carol" ] None
+
+  let inferenceResult =
+    withProcessStateLock (fun () ->
+      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
+
+      try
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
+        inferPreviousDatabasePath testSqliteDirectoryEnvVar dbFileName
+      finally
+        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+
+  match inferenceResult with
+  | Ok result -> failwith $"Expected previous-database inference to fail, got: {result}"
+  | Error ex ->
+    Assert.Contains(Path.GetFullPath targetDbPath, ex.Message)
+    Assert.Contains(Path.GetFullPath firstOldDbPath, ex.Message)
+    Assert.Contains(Path.GetFullPath secondOldDbPath, ex.Message)
+
+[<Fact>]
 let ``startService returns a DbTxnBuilder for an already ready target database`` () =
   let envDir =
     Path.Combine(Path.GetTempPath(), $"mig_start_service_ready_{Guid.NewGuid()}")
@@ -645,7 +756,6 @@ let ``startService returns a DbTxnBuilder for an already ready target database``
           { schemaHash = "1111222233334444"
             schemaCommit = None }
           studentSchema
-          (fun () -> failwith "inferPreviousDatabasePath should not be called")
           CancellationToken.None
         |> fun t -> t.Result
       finally
@@ -680,7 +790,6 @@ let ``startService initializes the target database when no previous database exi
           { schemaHash = "1111222233334444"
             schemaCommit = None }
           studentSchema
-          (fun () -> Ok None)
           CancellationToken.None
         |> fun t -> t.Result
       finally
@@ -721,7 +830,6 @@ let ``startService migrates the previous database into the target database`` () 
           { schemaHash = "1111222233334444"
             schemaCommit = None }
           studentSchema
-          (fun () -> Ok(Some oldDbPath))
           CancellationToken.None
         |> fun t -> t.Result
       finally
@@ -3775,6 +3883,44 @@ let ``cli codegen requires assembly`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
+let ``cli codegen prefers Schema fsproj assembly name when present`` () =
+  let sourceBuildOutputDirectory =
+    typeof<CompiledSchemaSourceFixture.Marker>.Assembly.Location
+    |> Path.GetDirectoryName
+
+  let tempDir = createTempFsprojWithBuildOutput "Test" sourceBuildOutputDirectory
+  let schemaPath = Path.Combine(tempDir, "Schema.fs")
+  let outputPath = Path.Combine(tempDir, "Db.fs")
+  let testAssemblyPath = Path.Combine(tempDir, "bin", "Debug", "net10.0", "Test.dll")
+
+  let inferredAssemblyPath =
+    Path.Combine(tempDir, "bin", "Debug", "net10.0", "TruthMasker.Schema.dll")
+
+  File.WriteAllText(
+    Path.Combine(tempDir, "Schema.fsproj"),
+    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><AssemblyName>TruthMasker.Schema</AssemblyName></PropertyGroup></Project>"
+  )
+
+  File.Copy(testAssemblyPath, inferredAssemblyPath, true)
+  File.Delete(testAssemblyPath)
+
+  File.WriteAllText(
+    schemaPath,
+    "module Schema\n\nopen MigLib.Db\n\n[<AutoIncPK \"id\">]\ntype Student = { id: int64; name: string }\n"
+  )
+
+  let exitCode, stdOut, stdErr =
+    runMigCliInDirectory (Some tempDir) [ "codegen"; "--schema-module"; "CompiledSchemaSourceFixture" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains("Code generation complete.", stdOut)
+  Assert.Contains($"Compiled assembly: {Path.GetFullPath inferredAssemblyPath}", stdOut)
+  Assert.True(File.Exists outputPath, $"Expected generated file at: {outputPath}")
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
 let ``cli codegen defaults to Db fs and Db module in compiled mode`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_defaults_{Guid.NewGuid()}")
@@ -3878,7 +4024,8 @@ let ``cli codegen rejects schema module argument without assembly`` () =
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
-  Assert.Contains("codegen failed: --schema-module requires --assembly.", stdErr)
+  Assert.Contains("codegen failed:", stdErr)
+  Assert.Contains("requires --assembly", stdErr)
 
   Directory.Delete(tempDir, true)
 
@@ -4748,18 +4895,62 @@ let ``cli init can use compiled generated module from assembly`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli init rejects module argument without assembly`` () =
+let ``cli init prefers Schema fsproj assembly name when present`` () =
+  let sourceBuildOutputDirectory =
+    typeof<CompiledSchemaFixture.Marker>.Assembly.Location |> Path.GetDirectoryName
+
+  let tempDir = createTempFsprojWithBuildOutput "Test" sourceBuildOutputDirectory
+  let testAssemblyPath = Path.Combine(tempDir, "bin", "Debug", "net10.0", "Test.dll")
+
+  let inferredAssemblyPath =
+    Path.Combine(tempDir, "bin", "Debug", "net10.0", "TruthMasker.Schema.dll")
+
+  File.WriteAllText(
+    Path.Combine(tempDir, "Schema.fsproj"),
+    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><AssemblyName>TruthMasker.Schema</AssemblyName></PropertyGroup></Project>"
+  )
+
+  File.Copy(testAssemblyPath, inferredAssemblyPath, true)
+  File.Delete(testAssemblyPath)
+
+  let expectedDbPath =
+    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+
+  let exitCode, stdOut, stdErr =
+    runMigCliInDirectory (Some tempDir) [ "init"; "--module"; "CompiledSchemaFixture" ]
+
+  Assert.Equal(0, exitCode)
+  Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
+  Assert.Contains("Init complete.", stdOut)
+  Assert.Contains($"Compiled assembly: {Path.GetFullPath inferredAssemblyPath}", stdOut)
+  Assert.Contains("Compiled module: CompiledSchemaFixture", stdOut)
+  Assert.Contains($"Database: {expectedDbPath}", stdOut)
+  Assert.True(File.Exists expectedDbPath)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``cli init asks for assembly when fsproj autodiscovery has no built dll`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_init_module_only_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let exitCode, stdOut, stdErr =
-    runMigCli [ "init"; "-d"; tempDir; "--module"; "CompiledSchemaFixture" ]
+  File.WriteAllText(
+    Path.Combine(tempDir, "Schema.fsproj"),
+    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><AssemblyName>TruthMasker.Schema</AssemblyName></PropertyGroup></Project>"
+  )
+
+  let expectedAssemblyPath =
+    Path.Combine(tempDir, "bin", "Debug", "net10.0", "TruthMasker.Schema.dll")
+
+  let exitCode, stdOut, stdErr = runMigCli [ "init"; "-d"; tempDir ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
-  Assert.Contains("init failed: --module requires --assembly.", stdErr)
+  Assert.Contains("init failed:", stdErr)
+  Assert.Contains(Path.GetFullPath expectedAssemblyPath, stdErr)
+  Assert.Contains("pass --assembly explicitly", stdErr)
 
   Directory.Delete(tempDir, true)
 

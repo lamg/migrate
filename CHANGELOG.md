@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-03-30
+
+Added:
+
+- **Compiled Schema Seeds**: compiled schema reflection now derives seed inserts from module-level `let` values whose types are reflected schema record types
+  - generated `Db.fs` now preserves those inserts instead of emitting `inserts = []`
+  - `init` continues to apply seeds only when creating a fresh target database, and skips reinsertion when the schema-bound database already exists
+- **Schema Project Autodiscovery**: `mig` now prefers a dedicated `Schema.fsproj` when inferring the compiled schema assembly
+  - honors `<AssemblyName>` when present, so schema-project outputs like `TruthMasker.Schema.dll` are discovered automatically
+  - falls back to `Schema.dll`, then to the single-`.fsproj` convention when no dedicated schema project exists
+- **Startup Runtime Helper**: `MigLib.HotMigration` now exposes `inferPreviousDatabasePath`
+  - the helper inspects the configured SQLite directory, excludes the target `DbFile`, returns the single remaining `*.sqlite` candidate, and fails clearly when the choice is ambiguous
+
+Changed:
+
+- **Service Startup API**: `startService` and `startServiceWithPolling` no longer require a caller-provided previous-database callback
+  - the default startup path now uses `MigLib`'s built-in previous-database inference
+  - startup integration code is simpler while still failing clearly when multiple old-database candidates exist
+- **Documentation**: the README and deploy guidance now recommend the `Schema.fsproj` convention explicitly
+  - explains that the separate schema project breaks the build dependency cycle between compiled schema reflection and generated `Db.fs`
+  - shows the runtime flow through `MigLib.HotMigration.startService` directly in code
+
 ## [5.1.0] - 2026-03-30
 
 Added:
