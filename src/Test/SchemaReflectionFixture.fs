@@ -37,3 +37,12 @@ type File =
   { id: int64
     contentLength: int64<Byte>
     slug: string }
+
+[<PK "id">]
+type SeededStudent = { id: int64; name: string }
+
+let alice = { id = 1L; name = "Alice" }
+
+let bob = { id = 2L; name = "Bob" }
+
+let ignoredSeedMarker = "not-a-seed"

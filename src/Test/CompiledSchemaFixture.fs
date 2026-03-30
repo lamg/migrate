@@ -17,7 +17,10 @@ let SchemaIdentity: SchemaIdentity =
 
 let Schema: SqlFile =
   { measureTypes = []
-    inserts = []
+    inserts =
+      [ { table = "fixture_student"
+          columns = [ "id" ]
+          values = [ [ Integer 1 ] ] } ]
     views = []
     tables =
       [ { name = "fixture_student"

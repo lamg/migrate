@@ -6508,7 +6508,7 @@ let ``compiled schema init wrapper creates database from module schema`` () =
   | Error ex -> failwith $"Expected compiled schema init to succeed, got: {ex.Message}"
   | Ok result ->
     Assert.Equal(dbPath, result.newDbPath)
-    Assert.Equal(0L, result.seededRows)
+    Assert.Equal(1L, result.seededRows)
 
   use verifyConn = openSqliteConnection dbPath
 
@@ -6520,6 +6520,12 @@ let ``compiled schema init wrapper creates database from module schema`` () =
 
   let tableExists = tableExistsCmd.ExecuteScalar()
   Assert.False(isNull tableExists)
+
+  use seededRowsCmd =
+    new SqliteCommand("SELECT COUNT(*) FROM fixture_student", verifyConn)
+
+  let seededRows = seededRowsCmd.ExecuteScalar() :?> int64
+  Assert.Equal(1L, seededRows)
 
   verifyConn.Close()
   Directory.Delete(tempDir, true)
@@ -6541,7 +6547,7 @@ let ``build init wrapper creates schema-bound database and skips rerun`` () =
   | Error error -> failwith $"Expected build init wrapper to succeed, got: {error}"
   | Ok result ->
     Assert.Equal(expectedDbPath, result.newDbPath)
-    Assert.Equal(0L, result.seededRows)
+    Assert.Equal(1L, result.seededRows)
     Assert.False(result.skipped)
 
   let secondRun =
@@ -6644,6 +6650,48 @@ let ``codegen can run directly from in-memory schema model`` () =
     Assert.DoesNotContain("let DbFile =", generated)
     Assert.Contains("static member SelectByName (name: string) (tx: SqliteTransaction)", generated)
     Assert.False(File.Exists projectPath, "Code generation should not emit a sibling .fsproj file.")
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``compiled schema reflection derives inserts from module-level record lets`` () =
+  let assembly = typeof<SchemaReflectionFixture.Student>.Assembly
+
+  match buildSchemaFromAssemblyModule assembly "SchemaReflectionFixture" with
+  | Error error -> failwith $"Expected schema reflection from assembly module to succeed, got: {error}"
+  | Ok schema ->
+    let insert =
+      schema.inserts
+      |> List.find (fun candidate -> candidate.table = "seeded_student")
+
+    Assert.Equal<string list>([ "id"; "name" ], insert.columns)
+
+    Assert.Equal<Expr list list>([ [ Integer 1; String "Alice" ]; [ Integer 2; String "Bob" ] ], insert.values)
+
+[<Fact>]
+let ``codegen from assembly module emits inserts derived from module-level record lets`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_seed_reflection_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let outputPath = Path.Combine(tempDir, "Generated.fs")
+  let schemaPath = Path.Combine(__SOURCE_DIRECTORY__, "SchemaReflectionFixture.fs")
+  let assembly = typeof<SchemaReflectionFixture.Student>.Assembly
+
+  match
+    generateCodeFromAssemblyModuleWithDbFile "Generated" schemaPath assembly "SchemaReflectionFixture" outputPath
+  with
+  | Error error -> failwith $"Expected codegen from assembly module to succeed, got: {error}"
+  | Ok _ ->
+    let generated = File.ReadAllText outputPath
+
+    Assert.Contains("inserts =", generated)
+    Assert.Contains("table = \"seeded_student\"", generated)
+    Assert.Contains("Expr.Integer 1", generated)
+    Assert.Contains("Expr.String \"Alice\"", generated)
+    Assert.Contains("Expr.Integer 2", generated)
+    Assert.Contains("Expr.String \"Bob\"", generated)
 
   Directory.Delete(tempDir, true)
 
