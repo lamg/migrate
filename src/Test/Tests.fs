@@ -6525,6 +6525,39 @@ let ``compiled schema init wrapper creates database from module schema`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
+let ``build init wrapper creates schema-bound database and skips rerun`` () =
+  let tempDir = Path.Combine(Path.GetTempPath(), $"mig_build_init_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
+  let expectedDbPath = Path.Combine(tempDir, CompiledSchemaFixture.DbFile)
+
+  let firstRun =
+    initDbFromAssemblyModulePath tempDir assemblyPath "CompiledSchemaFixture"
+    |> fun t -> t.Result
+
+  match firstRun with
+  | Error error -> failwith $"Expected build init wrapper to succeed, got: {error}"
+  | Ok result ->
+    Assert.Equal(expectedDbPath, result.newDbPath)
+    Assert.Equal(0L, result.seededRows)
+    Assert.False(result.skipped)
+
+  let secondRun =
+    initDbFromAssemblyModulePath tempDir assemblyPath "CompiledSchemaFixture"
+    |> fun t -> t.Result
+
+  match secondRun with
+  | Error error -> failwith $"Expected build init wrapper rerun to skip cleanly, got: {error}"
+  | Ok result ->
+    Assert.Equal(expectedDbPath, result.newDbPath)
+    Assert.Equal(0L, result.seededRows)
+    Assert.True(result.skipped)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
 let ``compiled schema migrate wrapper copies rows using module schema identity`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_compiled_schema_migrate_{Guid.NewGuid()}")

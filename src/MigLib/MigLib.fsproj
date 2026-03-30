@@ -4,7 +4,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
     <PackageId>MigLib</PackageId>
-    <Version>5.0.1</Version>
+    <Version>5.1.0</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <AssemblyName>MigLib</AssemblyName>
 
@@ -33,9 +33,9 @@
     <Compile Include="CodeGen/NormalizedQueryGenerator.fs" />
     <Compile Include="CodeGen/QueryGenerator.fs" />
     <Compile Include="CodeGen/CodeGen.fs" />
-    <Compile Include="Build.fs" />
     <Compile Include="HotMigration.fs" />
     <Compile Include="CompiledSchema.fs" />
+    <Compile Include="Build.fs" />
     <Content Include="../../README.md" Pack="true" PackagePath="\" />
     <Content Include="../../images/logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>

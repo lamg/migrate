@@ -640,20 +640,10 @@ let codegen (args: ParseResults<CodegenArgs>) =
       let! outputPath =
         resolveCodegenOutputPath currentDirectory "Schema.fs" "Db.fs" (args.TryGetResult CodegenArgs.Output)
 
-      let! stats =
-        generateDbCodeFromAssemblyModulePath generatedModuleName schemaPath assemblyPath schemaModuleName outputPath
+      let! report =
+        runCodegenFromAssemblyModulePath generatedModuleName schemaPath assemblyPath schemaModuleName outputPath
 
-      printfn "Code generation complete."
-      printfn $"Schema source: {schemaPath}"
-      printfn $"Compiled assembly: {Path.GetFullPath assemblyPath}"
-      printfn $"Schema module: {schemaModuleName}"
-      printfn $"Generated module: {generatedModuleName}"
-      printfn $"Output file: {outputPath}"
-      printfn $"Normalized tables (DU): {stats.NormalizedTables}"
-      printfn $"Regular tables (records): {stats.RegularTables}"
-      printfn $"Views: {stats.Views}"
-      printfn "Generated files:"
-      stats.GeneratedFiles |> List.iter (fun file -> printfn $"  {file}")
+      writeCodegenReport (printfn "%s") report
       return 0
     }
 
@@ -786,31 +776,15 @@ let init (args: ParseResults<InitArgs>) =
     result {
       let! currentDirectory = resolveCommandDirectory "init" (args.TryGetResult InitArgs.Dir)
 
-      let! compiledModule =
-        resolveRequiredCompiledModuleForCommand
-          "init"
-          currentDirectory
-          (args.TryGetResult InitArgs.Assembly)
-          (args.TryGetResult InitArgs.Module)
+      let! assemblyPath, moduleName =
+        resolveRequiredCompiledMode "init" (args.TryGetResult InitArgs.Assembly) (args.TryGetResult InitArgs.Module)
 
-      let newDb = compiledModule.newDbPath
+      let! report =
+        initDbFromAssemblyModulePath currentDirectory assemblyPath moduleName
+        |> fun task -> task.Result
 
-      if File.Exists newDb then
-        printfn "Init skipped."
-        printCompiledModuleInfo compiledModule
-        printfn $"Database already present for current schema: {newDb}"
-        return 0
-      else
-        let! initResult =
-          runInitFromAssemblyPath compiledModule.assemblyPath compiledModule.moduleName newDb
-          |> fun t -> t.Result
-          |> Result.mapError formatExceptionDetails
-
-        printfn "Init complete."
-        printCompiledModuleInfo compiledModule
-        printfn $"Database: {initResult.newDbPath}"
-        printfn $"Seeded rows: {initResult.seededRows}"
-        return 0
+      writeInitDbReport (printfn "%s") report
+      return 0
     }
 
   finishCommand "init" result

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-03-30
+
+Added:
+
+- **MigLib.Build**: added high-level build-facing APIs for compiled-module workflows
+  - new codegen entrypoints now return structured reports and shared terminal output lines
+  - new init entrypoints resolve the schema-bound `DbFile`, create the database, and report clean skip behavior when the target already exists
+- **mig CLI**: `codegen` and `init` now reuse the shared `MigLib.Build` execution and reporting paths
+  - keeps CLI output aligned with library consumers instead of maintaining separate formatting logic
+
+Changed:
+
+- **MigLib.Util**: generalized `taskResult` so it works with any error type instead of only `SqliteException`
+  - allows build/reporting helpers to compose `Result` and `Task<Result<_, _>>` flows without forcing SQLite-shaped errors
+  - preserves the existing usage patterns in hot-migration code while widening the computation expression for other modules
+
 ## [5.0.1] - 2026-03-29
 
 Fixed:

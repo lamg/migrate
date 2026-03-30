@@ -105,22 +105,19 @@ module TaskResultEx =
     value |> Result.mapError mapError |> Task.FromResult
 
 module private TaskResult =
-  let result (x: 'a) : Task<Result<'a, SqliteException>> = Task.FromResult(Ok x)
+  let result (x: 'a) : Task<Result<'a, 'e>> = Task.FromResult(Ok x)
 
-  let returnFrom (m: Task<Result<'a, SqliteException>>) : Task<Result<'a, SqliteException>> = m
+  let returnFrom (m: Task<Result<'a, 'e>>) : Task<Result<'a, 'e>> = m
 
-  let returnFromResult (m: Result<'a, SqliteException>) : Task<Result<'a, SqliteException>> = Task.FromResult m
+  let returnFromResult (m: Result<'a, 'e>) : Task<Result<'a, 'e>> = Task.FromResult m
 
-  let returnFromTask (m: Task<'a>) : Task<Result<'a, SqliteException>> =
+  let returnFromTask (m: Task<'a>) : Task<Result<'a, 'e>> =
     task {
       let! value = m
       return Ok value
     }
 
-  let bind
-    (m: Task<Result<'a, SqliteException>>)
-    (f: 'a -> Task<Result<'b, SqliteException>>)
-    : Task<Result<'b, SqliteException>> =
+  let bind (m: Task<Result<'a, 'e>>) (f: 'a -> Task<Result<'b, 'e>>) : Task<Result<'b, 'e>> =
     task {
       let! result = m
 
@@ -129,34 +126,25 @@ module private TaskResult =
       | Error ex -> return Error ex
     }
 
-  let bindResult
-    (m: Result<'a, SqliteException>)
-    (f: 'a -> Task<Result<'b, SqliteException>>)
-    : Task<Result<'b, SqliteException>> =
+  let bindResult (m: Result<'a, 'e>) (f: 'a -> Task<Result<'b, 'e>>) : Task<Result<'b, 'e>> =
     match m with
     | Ok value -> f value
     | Error ex -> Task.FromResult(Error ex)
 
-  let bindTask (m: Task<'a>) (f: 'a -> Task<Result<'b, SqliteException>>) : Task<Result<'b, SqliteException>> =
+  let bindTask (m: Task<'a>) (f: 'a -> Task<Result<'b, 'e>>) : Task<Result<'b, 'e>> =
     task {
       let! value = m
       return! f value
     }
 
-  let combine
-    (m: Task<Result<unit, SqliteException>>)
-    (f: unit -> Task<Result<'a, SqliteException>>)
-    : Task<Result<'a, SqliteException>> =
+  let combine (m: Task<Result<unit, 'e>>) (f: unit -> Task<Result<'a, 'e>>) : Task<Result<'a, 'e>> =
     bind m (fun () -> f ())
 
-  let delay (f: unit -> Task<Result<'a, SqliteException>>) : unit -> Task<Result<'a, SqliteException>> = f
+  let delay (f: unit -> Task<Result<'a, 'e>>) : unit -> Task<Result<'a, 'e>> = f
 
-  let run (f: unit -> Task<Result<'a, SqliteException>>) : Task<Result<'a, SqliteException>> = f ()
+  let run (f: unit -> Task<Result<'a, 'e>>) : Task<Result<'a, 'e>> = f ()
 
-  let tryWith
-    (body: unit -> Task<Result<'a, SqliteException>>)
-    (handler: exn -> Task<Result<'a, SqliteException>>)
-    : Task<Result<'a, SqliteException>> =
+  let tryWith (body: unit -> Task<Result<'a, 'e>>) (handler: exn -> Task<Result<'a, 'e>>) : Task<Result<'a, 'e>> =
     task {
       try
         return! body ()
@@ -164,10 +152,7 @@ module private TaskResult =
         return! handler ex
     }
 
-  let tryFinally
-    (body: unit -> Task<Result<'a, SqliteException>>)
-    (compensation: unit -> unit)
-    : Task<Result<'a, SqliteException>> =
+  let tryFinally (body: unit -> Task<Result<'a, 'e>>) (compensation: unit -> unit) : Task<Result<'a, 'e>> =
     task {
       try
         return! body ()
@@ -175,84 +160,58 @@ module private TaskResult =
         compensation ()
     }
 
-  let using
-    (resource: 'a :> IDisposable)
-    (body: 'a -> Task<Result<'b, SqliteException>>)
-    : Task<Result<'b, SqliteException>> =
+  let using (resource: 'a :> IDisposable) (body: 'a -> Task<Result<'b, 'e>>) : Task<Result<'b, 'e>> =
     tryFinally (fun () -> body resource) (fun () ->
       if not (isNull (box resource)) then
         resource.Dispose())
 
-  let rec whileLoop
-    (guard: unit -> bool)
-    (body: unit -> Task<Result<unit, SqliteException>>)
-    : Task<Result<unit, SqliteException>> =
+  let rec whileLoop (guard: unit -> bool) (body: unit -> Task<Result<unit, 'e>>) : Task<Result<unit, 'e>> =
     if not (guard ()) then
       result ()
     else
       bind (body ()) (fun () -> whileLoop guard body)
 
-  let forEach (items: seq<'a>) (body: 'a -> Task<Result<unit, SqliteException>>) : Task<Result<unit, SqliteException>> =
+  let forEach (items: seq<'a>) (body: 'a -> Task<Result<unit, 'e>>) : Task<Result<unit, 'e>> =
     use enumerator = items.GetEnumerator()
     whileLoop enumerator.MoveNext (fun () -> body enumerator.Current)
 
 type TaskResultBuilder() =
-  member _.Return(x: 'a) : Task<Result<'a, SqliteException>> = TaskResult.result x
+  member _.Return(x: 'a) : Task<Result<'a, 'e>> = TaskResult.result x
 
-  member _.ReturnFrom(m: Task<Result<'a, SqliteException>>) : Task<Result<'a, SqliteException>> =
-    TaskResult.returnFrom m
+  member _.ReturnFrom(m: Task<Result<'a, 'e>>) : Task<Result<'a, 'e>> = TaskResult.returnFrom m
 
-  member _.ReturnFrom(m: Result<'a, SqliteException>) : Task<Result<'a, SqliteException>> =
-    TaskResult.returnFromResult m
+  member _.ReturnFrom(m: Result<'a, 'e>) : Task<Result<'a, 'e>> = TaskResult.returnFromResult m
 
-  member _.ReturnFrom(m: Task<'a>) : Task<Result<'a, SqliteException>> = TaskResult.returnFromTask m
+  member _.ReturnFrom(m: Task<'a>) : Task<Result<'a, 'e>> = TaskResult.returnFromTask m
 
-  member _.Bind
-    (m: Task<Result<'a, SqliteException>>, f: 'a -> Task<Result<'b, SqliteException>>)
-    : Task<Result<'b, SqliteException>> =
-    TaskResult.bind m f
+  member _.Bind(m: Task<Result<'a, 'e>>, f: 'a -> Task<Result<'b, 'e>>) : Task<Result<'b, 'e>> = TaskResult.bind m f
 
-  member _.Bind
-    (m: Result<'a, SqliteException>, f: 'a -> Task<Result<'b, SqliteException>>)
-    : Task<Result<'b, SqliteException>> =
-    TaskResult.bindResult m f
+  member _.Bind(m: Result<'a, 'e>, f: 'a -> Task<Result<'b, 'e>>) : Task<Result<'b, 'e>> = TaskResult.bindResult m f
 
-  member _.Bind(m: Task<'a>, f: 'a -> Task<Result<'b, SqliteException>>) : Task<Result<'b, SqliteException>> =
-    TaskResult.bindTask m f
+  member _.Bind(m: Task<'a>, f: 'a -> Task<Result<'b, 'e>>) : Task<Result<'b, 'e>> = TaskResult.bindTask m f
 
-  member _.Zero() : Task<Result<unit, SqliteException>> = TaskResult.result ()
+  member _.Zero() : Task<Result<unit, 'e>> = TaskResult.result ()
 
-  member _.Combine
-    (m: Task<Result<unit, SqliteException>>, f: unit -> Task<Result<'a, SqliteException>>)
-    : Task<Result<'a, SqliteException>> =
+  member _.Combine(m: Task<Result<unit, 'e>>, f: unit -> Task<Result<'a, 'e>>) : Task<Result<'a, 'e>> =
     TaskResult.combine m f
 
-  member _.Delay(f: unit -> Task<Result<'a, SqliteException>>) : unit -> Task<Result<'a, SqliteException>> =
-    TaskResult.delay f
+  member _.Delay(f: unit -> Task<Result<'a, 'e>>) : unit -> Task<Result<'a, 'e>> = TaskResult.delay f
 
-  member _.Run(f: unit -> Task<Result<'a, SqliteException>>) : Task<Result<'a, SqliteException>> = TaskResult.run f
+  member _.Run(f: unit -> Task<Result<'a, 'e>>) : Task<Result<'a, 'e>> = TaskResult.run f
 
-  member _.TryWith
-    (body: unit -> Task<Result<'a, SqliteException>>, handler: exn -> Task<Result<'a, SqliteException>>)
-    : Task<Result<'a, SqliteException>> =
+  member _.TryWith(body: unit -> Task<Result<'a, 'e>>, handler: exn -> Task<Result<'a, 'e>>) : Task<Result<'a, 'e>> =
     TaskResult.tryWith body handler
 
-  member _.TryFinally
-    (body: unit -> Task<Result<'a, SqliteException>>, compensation: unit -> unit)
-    : Task<Result<'a, SqliteException>> =
+  member _.TryFinally(body: unit -> Task<Result<'a, 'e>>, compensation: unit -> unit) : Task<Result<'a, 'e>> =
     TaskResult.tryFinally body compensation
 
-  member _.Using
-    (resource: 'a :> IDisposable, body: 'a -> Task<Result<'b, SqliteException>>)
-    : Task<Result<'b, SqliteException>> =
+  member _.Using(resource: 'a :> IDisposable, body: 'a -> Task<Result<'b, 'e>>) : Task<Result<'b, 'e>> =
     TaskResult.using resource body
 
-  member _.While
-    (guard: unit -> bool, body: unit -> Task<Result<unit, SqliteException>>)
-    : Task<Result<unit, SqliteException>> =
+  member _.While(guard: unit -> bool, body: unit -> Task<Result<unit, 'e>>) : Task<Result<unit, 'e>> =
     TaskResult.whileLoop guard body
 
-  member _.For(items: seq<'a>, body: 'a -> Task<Result<unit, SqliteException>>) : Task<Result<unit, SqliteException>> =
+  member _.For(items: seq<'a>, body: 'a -> Task<Result<unit, 'e>>) : Task<Result<unit, 'e>> =
     TaskResult.forEach items body
 
 let taskResult = TaskResultBuilder()
