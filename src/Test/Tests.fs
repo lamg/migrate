@@ -4895,23 +4895,38 @@ let ``cli init can use compiled generated module from assembly`` () =
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli init prefers Schema fsproj assembly name when present`` () =
-  let sourceBuildOutputDirectory =
+let ``cli init prefers non-schema project assembly when Schema fsproj is present`` () =
+  let runtimeBuildOutputDirectory =
     typeof<CompiledSchemaFixture.Marker>.Assembly.Location |> Path.GetDirectoryName
 
-  let tempDir = createTempFsprojWithBuildOutput "Test" sourceBuildOutputDirectory
-  let testAssemblyPath = Path.Combine(tempDir, "bin", "Debug", "net10.0", "Test.dll")
+  let schemaAssemblySourcePath = typeof<Mig.Program.MigrateArgs>.Assembly.Location
+
+  let tempDir = createTempFsprojWithBuildOutput "Test" runtimeBuildOutputDirectory
+
+  let copiedTestAssemblyPath =
+    Path.Combine(tempDir, "bin", "Debug", "net10.0", "Test.dll")
 
   let inferredAssemblyPath =
+    Path.Combine(tempDir, "bin", "Debug", "net10.0", "TruthMasker.Core.dll")
+
+  let schemaAssemblyPath =
     Path.Combine(tempDir, "bin", "Debug", "net10.0", "TruthMasker.Schema.dll")
+
+  File.Delete(Path.Combine(tempDir, "Test.fsproj"))
+
+  File.WriteAllText(
+    Path.Combine(tempDir, "Core.fsproj"),
+    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><AssemblyName>TruthMasker.Core</AssemblyName></PropertyGroup></Project>"
+  )
 
   File.WriteAllText(
     Path.Combine(tempDir, "Schema.fsproj"),
     "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><AssemblyName>TruthMasker.Schema</AssemblyName></PropertyGroup></Project>"
   )
 
-  File.Copy(testAssemblyPath, inferredAssemblyPath, true)
-  File.Delete(testAssemblyPath)
+  File.Copy(copiedTestAssemblyPath, inferredAssemblyPath, true)
+  File.Delete(copiedTestAssemblyPath)
+  File.Copy(schemaAssemblySourcePath, schemaAssemblyPath, true)
 
   let expectedDbPath =
     Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
@@ -4941,15 +4956,12 @@ let ``cli init asks for assembly when fsproj autodiscovery has no built dll`` ()
     "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><AssemblyName>TruthMasker.Schema</AssemblyName></PropertyGroup></Project>"
   )
 
-  let expectedAssemblyPath =
-    Path.Combine(tempDir, "bin", "Debug", "net10.0", "TruthMasker.Schema.dll")
-
   let exitCode, stdOut, stdErr = runMigCli [ "init"; "-d"; tempDir ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
   Assert.Contains("init failed:", stdErr)
-  Assert.Contains(Path.GetFullPath expectedAssemblyPath, stdErr)
+  Assert.Contains("Found only 'Schema.fsproj'", stdErr)
   Assert.Contains("pass --assembly explicitly", stdErr)
 
   Directory.Delete(tempDir, true)

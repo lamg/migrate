@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.1] - 2026-03-30
+
+Fixed:
+
+- **Runtime Assembly Autodiscovery**: `mig init` and the other compiled `Db` commands no longer mistake `Schema.fsproj` for the runtime module assembly
+  - `codegen` still prefers `Schema.fsproj` and its compiled schema assembly
+  - runtime commands now prefer the non-schema project that actually contains the generated `Db` module
+  - when only `Schema.fsproj` is present, `mig` now fails with explicit guidance to pass `--assembly`
+
 ## [5.2.0] - 2026-03-30
 
 Added:

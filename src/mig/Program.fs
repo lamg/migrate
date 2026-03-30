@@ -450,7 +450,19 @@ let private tryReadAssemblyNameFromProject (projectPath: string) : Result<string
     Error
       $"Could not read project file '{Path.GetFullPath projectPath}' while inferring the compiled assembly: {ex.Message}"
 
-let private tryDiscoverProjectAssemblyPath
+let private resolveProjectOutputPath (projectPath: string) =
+  result {
+    let! assemblyName = tryReadAssemblyNameFromProject projectPath
+
+    let assemblyFileName =
+      assemblyName
+      |> Option.defaultValue (Path.GetFileNameWithoutExtension projectPath)
+      |> fun name -> $"{name}.dll"
+
+    return Path.Combine(Path.GetDirectoryName projectPath, "bin", "Debug", "net10.0", assemblyFileName)
+  }
+
+let private tryDiscoverSchemaAssemblyPath
   (commandName: string)
   (currentDirectory: string)
   : Result<string option, string> =
@@ -458,15 +470,7 @@ let private tryDiscoverProjectAssemblyPath
 
   if File.Exists schemaProjectPath then
     result {
-      let! schemaAssemblyName = tryReadAssemblyNameFromProject schemaProjectPath
-
-      let schemaAssemblyFileName =
-        schemaAssemblyName
-        |> Option.defaultValue "Schema"
-        |> fun assemblyName -> $"{assemblyName}.dll"
-
-      let schemaAssemblyPath =
-        Path.Combine(currentDirectory, "bin", "Debug", "net10.0", schemaAssemblyFileName)
+      let! schemaAssemblyPath = resolveProjectOutputPath schemaProjectPath
 
       if File.Exists schemaAssemblyPath then
         return Some(Path.GetFullPath schemaAssemblyPath)
@@ -497,6 +501,40 @@ let private tryDiscoverProjectAssemblyPath
       Error
         $"Could not infer compiled assembly automatically for `{commandName}`. Found multiple .fsproj files in {currentDirectory}: {projectList}. Pass --assembly explicitly."
 
+let private tryDiscoverRuntimeAssemblyPath
+  (commandName: string)
+  (currentDirectory: string)
+  : Result<string option, string> =
+  let projectFiles =
+    Directory.GetFiles(currentDirectory, "*.fsproj")
+    |> Array.filter (fun path ->
+      not (String.Equals(Path.GetFileName path, "Schema.fsproj", StringComparison.OrdinalIgnoreCase)))
+    |> Array.sort
+
+  match projectFiles with
+  | [||] ->
+    if File.Exists(Path.Combine(currentDirectory, "Schema.fsproj")) then
+      Error
+        $"Could not infer compiled runtime assembly automatically for `{commandName}`. Found only 'Schema.fsproj' in {currentDirectory}. Runtime commands need the compiled generated Db module from the main application project, so pass --assembly explicitly."
+    else
+      Ok None
+  | [| projectPath |] ->
+    result {
+      let! inferredAssemblyPath = resolveProjectOutputPath projectPath
+
+      if File.Exists inferredAssemblyPath then
+        return Some(Path.GetFullPath inferredAssemblyPath)
+      else
+        return!
+          Error
+            $"Could not infer compiled runtime assembly automatically for `{commandName}`. Found project '{Path.GetFileName projectPath}' but expected build output at '{Path.GetFullPath inferredAssemblyPath}'. Build the project or pass --assembly explicitly."
+    }
+  | many ->
+    let projectList = many |> Array.map Path.GetFileName |> String.concat ", "
+
+    Error
+      $"Could not infer compiled runtime assembly automatically for `{commandName}`. Found multiple non-schema .fsproj files in {currentDirectory}: {projectList}. Pass --assembly explicitly."
+
 let private resolveCompiledMode
   (assemblyPath: string option)
   (moduleName: string option)
@@ -523,7 +561,7 @@ let private resolveRequiredCompiledMode
     match assemblyPath with
     | Some explicitAssemblyPath -> return explicitAssemblyPath, resolvedModuleName
     | None ->
-      let! discoveredAssemblyPath = tryDiscoverProjectAssemblyPath commandName currentDirectory
+      let! discoveredAssemblyPath = tryDiscoverRuntimeAssemblyPath commandName currentDirectory
 
       match discoveredAssemblyPath with
       | Some inferredAssemblyPath -> return inferredAssemblyPath, resolvedModuleName
@@ -573,7 +611,7 @@ let private resolveRequiredCodegenCompiledInput
       match assemblyPath with
       | Some explicitAssemblyPath -> return explicitAssemblyPath, resolvedSchemaModuleName
       | None ->
-        let! discoveredAssemblyPath = tryDiscoverProjectAssemblyPath "codegen" currentDirectory
+        let! discoveredAssemblyPath = tryDiscoverSchemaAssemblyPath "codegen" currentDirectory
 
         match discoveredAssemblyPath with
         | Some inferredAssemblyPath -> return inferredAssemblyPath, resolvedSchemaModuleName
