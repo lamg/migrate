@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.2] - 2026-03-31
+
+Fixed:
+
+- **Packaged F# Runtime Floor**: lowered the packaged `FSharp.Core` dependency to `10.0.104` for `MigLib`, `MigLib.Web`, and `migtool`
+  - removes `NU1605` package downgrade warnings when `dotnet fsi` restores build scripts under the .NET `10.0.104` SDK
+  - keeps the three published packages aligned on the same packaged F# runtime dependency
+
 ## [5.2.1] - 2026-03-30
 
 Fixed:
