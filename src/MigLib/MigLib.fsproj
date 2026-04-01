@@ -53,6 +53,12 @@
     <Compile Include="CodeGen/NormalizedQueryGenerator/QueryExtensions.fs" />
     <Compile Include="CodeGen/NormalizedQueryGenerator/Generate.fs" />
     <Compile Include="CodeGen/NormalizedQueryGenerator.fs" />
+    <Compile Include="CodeGen/QueryGenerator/Common.fs" />
+    <Compile Include="CodeGen/QueryGenerator/TableCrud.fs" />
+    <Compile Include="CodeGen/QueryGenerator/TableQueryExtensions.fs" />
+    <Compile Include="CodeGen/QueryGenerator/TableGenerate.fs" />
+    <Compile Include="CodeGen/QueryGenerator/ViewQueries.fs" />
+    <Compile Include="CodeGen/QueryGenerator/ViewGenerate.fs" />
     <Compile Include="CodeGen/QueryGenerator.fs" />
     <Compile Include="CodeGen/CodeGen.fs" />
     <Compile Include="HotMigration/Primitives.fs" />
