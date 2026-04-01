@@ -47,6 +47,11 @@
     <Compile Include="CodeGen/TypeGenerator.fs" />
     <Compile Include="CodeGen/NormalizedSchema.fs" />
     <Compile Include="CodeGen/NormalizedTypeGenerator.fs" />
+    <Compile Include="CodeGen/NormalizedQueryGenerator/Common.fs" />
+    <Compile Include="CodeGen/NormalizedQueryGenerator/InsertSelect.fs" />
+    <Compile Include="CodeGen/NormalizedQueryGenerator/UpdateDelete.fs" />
+    <Compile Include="CodeGen/NormalizedQueryGenerator/QueryExtensions.fs" />
+    <Compile Include="CodeGen/NormalizedQueryGenerator/Generate.fs" />
     <Compile Include="CodeGen/NormalizedQueryGenerator.fs" />
     <Compile Include="CodeGen/QueryGenerator.fs" />
     <Compile Include="CodeGen/CodeGen.fs" />
