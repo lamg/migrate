@@ -23,6 +23,14 @@
     <Compile Include="DeclarativeMigrations/SchemaDiff.fs" />
     <Compile Include="DeclarativeMigrations/DataCopy.fs" />
     <Compile Include="DeclarativeMigrations/DrainReplay.fs" />
+    <Compile Include="SchemaReflection/Types.fs" />
+    <Compile Include="SchemaReflection/NamingAndTypeMapping.fs" />
+    <Compile Include="SchemaReflection/AttributeReaders.fs" />
+    <Compile Include="SchemaReflection/TableReflection.fs" />
+    <Compile Include="SchemaReflection/ViewReflection.fs" />
+    <Compile Include="SchemaReflection/UnionExtensions.fs" />
+    <Compile Include="SchemaReflection/SchemaAssembly.fs" />
+    <Compile Include="SchemaReflection/SeedReflection.fs" />
     <Compile Include="SchemaReflection.fs" />
     <Compile Include="CodeGen/FabulousAstHelpers.fs" />
     <Compile Include="CodeGen/AstExprBuilders.fs" />
