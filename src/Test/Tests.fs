@@ -17,6 +17,7 @@ open Mig.CodeGen.CodeGen
 open Mig.DeclarativeMigrations.Types
 open Mig.DeclarativeMigrations.DataCopy
 open Mig.DeclarativeMigrations.DrainReplay
+open Mig.DeclarativeMigrations.DrainReplayTypes
 open Mig.DeclarativeMigrations.SchemaDiff
 open Mig.HotMigration
 open Mig.HotMigrationTypes

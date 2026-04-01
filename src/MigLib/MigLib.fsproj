@@ -27,6 +27,10 @@
     <Compile Include="DeclarativeMigrations/Types.fs" />
     <Compile Include="DeclarativeMigrations/SchemaDiff.fs" />
     <Compile Include="DeclarativeMigrations/DataCopy.fs" />
+    <Compile Include="DeclarativeMigrations/DrainReplay/Types.fs" />
+    <Compile Include="DeclarativeMigrations/DrainReplay/Parsing.fs" />
+    <Compile Include="DeclarativeMigrations/DrainReplay/State.fs" />
+    <Compile Include="DeclarativeMigrations/DrainReplay/Execution.fs" />
     <Compile Include="DeclarativeMigrations/DrainReplay.fs" />
     <Compile Include="SchemaReflection/Types.fs" />
     <Compile Include="SchemaReflection/NamingAndTypeMapping.fs" />
