@@ -63,7 +63,6 @@ let private mkLogEntry id txnId ordering operation sourceTable rowData =
     rowData = rowData }
 
 let private cliIoLock = obj ()
-let private testSqliteDirectoryEnvVar = "TEST_MIG_SQLITE_DIR"
 
 let private runMigCliInDirectory (workingDirectory: string option) (args: string list) =
   lock cliIoLock (fun () ->
@@ -314,173 +313,16 @@ type private ReflectionStudentWithPreviousName =
 type private ReflectionStudentWithDroppedColumn = { id: int64; name: string }
 
 [<Fact>]
-let ``resolveDatabasePathOrFail returns explicit absolute path when configured path is explicit`` () =
-  let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_resolve_path_explicit_{Guid.NewGuid()}")
-
-  Directory.CreateDirectory tempDir |> ignore
-
-  let dbPath = Path.Combine(tempDir, "database.sqlite")
-  createDatabaseWithMigrationStatus dbPath None
-
-  let resolvedPath = resolveDatabasePathOrFail dbPath
-
-  Assert.Equal(Path.GetFullPath dbPath, resolvedPath)
-
-  Directory.Delete(tempDir, true)
-
-[<Fact>]
-let ``resolveDatabaseFilePathOrFail combines directory and generated file name`` () =
+let ``resolveDatabaseFilePath combines directory and generated file name`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_resolve_file_path_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
 
   let resolvedPath =
-    resolveDatabaseFilePathOrFail tempDir "marketdesk-1111222233334444.sqlite"
-
-  Assert.Equal(Path.Combine(Path.GetFullPath tempDir, "marketdesk-1111222233334444.sqlite"), resolvedPath)
-
-  Directory.Delete(tempDir, true)
-
-[<Fact>]
-let ``resolveRuntimeSqliteDirectory uses env var when cli override is absent`` () =
-  let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_runtime_dir_env_{Guid.NewGuid()}")
-
-  Directory.CreateDirectory tempDir |> ignore
-
-  let resolvedPath =
-    withProcessStateLock (fun () ->
-      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
-
-      try
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, tempDir)
-        resolveRuntimeSqliteDirectoryOrFail (Some testSqliteDirectoryEnvVar) None
-      finally
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
-
-  Assert.Equal(Path.GetFullPath tempDir, resolvedPath)
-
-  Directory.Delete(tempDir, true)
-
-[<Fact>]
-let ``resolveEnvVarSqliteDirectory uses the named env var without requiring an override parameter`` () =
-  let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_env_only_runtime_dir_{Guid.NewGuid()}")
-
-  Directory.CreateDirectory tempDir |> ignore
-
-  let resolvedPath =
-    withProcessStateLock (fun () ->
-      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
-
-      try
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, tempDir)
-        resolveEnvVarSqliteDirectoryOrFail testSqliteDirectoryEnvVar
-      finally
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
-
-  Assert.Equal(Path.GetFullPath tempDir, resolvedPath)
-
-  Directory.Delete(tempDir, true)
-
-[<Fact>]
-let ``resolveEnvVarSqliteDirectory rejects a blank env var name`` () =
-  let error: InvalidOperationException =
-    Assert.Throws<InvalidOperationException>(fun () -> resolveEnvVarSqliteDirectoryOrFail " " |> ignore)
-
-  Assert.Contains("environment variable name is empty", error.Message)
-
-[<Fact>]
-let ``resolveRuntimeSqliteDirectory prefers cli override over env var`` () =
-  let envDir =
-    Path.Combine(Path.GetTempPath(), $"mig_runtime_dir_env_override_{Guid.NewGuid()}")
-
-  let cliDir =
-    Path.Combine(Path.GetTempPath(), $"mig_runtime_dir_cli_override_{Guid.NewGuid()}")
-
-  Directory.CreateDirectory envDir |> ignore
-  Directory.CreateDirectory cliDir |> ignore
-
-  let resolvedPath =
-    withProcessStateLock (fun () ->
-      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
-
-      try
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
-        resolveRuntimeSqliteDirectoryOrFail (Some testSqliteDirectoryEnvVar) (Some cliDir)
-      finally
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
-
-  Assert.Equal(Path.GetFullPath cliDir, resolvedPath)
-
-  Directory.Delete(envDir, true)
-  Directory.Delete(cliDir, true)
-
-[<Fact>]
-let ``resolveRuntimeSqliteDirectory falls back to current directory when unset`` () =
-  let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_runtime_dir_current_{Guid.NewGuid()}")
-
-  Directory.CreateDirectory tempDir |> ignore
-
-  let resolvedPath =
-    withProcessStateLock (fun () ->
-      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
-      let previousDirectory = Directory.GetCurrentDirectory()
-
-      try
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, null)
-        Directory.SetCurrentDirectory tempDir
-        resolveRuntimeSqliteDirectoryOrFail (Some testSqliteDirectoryEnvVar) None
-      finally
-        Directory.SetCurrentDirectory previousDirectory
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
-
-  Assert.Equal(Path.GetFullPath tempDir, resolvedPath)
-
-  Directory.Delete(tempDir, true)
-
-[<Fact>]
-let ``resolveRuntimeDatabaseFilePathOrFail combines runtime directory policy with generated file name`` () =
-  let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_runtime_file_path_{Guid.NewGuid()}")
-
-  Directory.CreateDirectory tempDir |> ignore
-
-  let resolvedPath =
-    withProcessStateLock (fun () ->
-      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
-
-      try
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, tempDir)
-
-        resolveRuntimeDatabaseFilePathOrFail (Some testSqliteDirectoryEnvVar) None "marketdesk-1111222233334444.sqlite"
-      finally
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
-
-  Assert.Equal(Path.Combine(Path.GetFullPath tempDir, "marketdesk-1111222233334444.sqlite"), resolvedPath)
-
-  Directory.Delete(tempDir, true)
-
-[<Fact>]
-let ``resolveEnvVarDatabaseFilePathOrFail combines env-var directory policy with generated file name`` () =
-  let tempDir =
-    Path.Combine(Path.GetTempPath(), $"mig_env_only_runtime_file_path_{Guid.NewGuid()}")
-
-  Directory.CreateDirectory tempDir |> ignore
-
-  let resolvedPath =
-    withProcessStateLock (fun () ->
-      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
-
-      try
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, tempDir)
-
-        resolveEnvVarDatabaseFilePathOrFail testSqliteDirectoryEnvVar "marketdesk-1111222233334444.sqlite"
-      finally
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+    match resolveDatabaseFilePath tempDir "marketdesk-1111222233334444.sqlite" with
+    | Ok resolvedPath -> resolvedPath
+    | Error message -> failwith $"Expected database file path resolution to succeed, got error: {message}"
 
   Assert.Equal(Path.Combine(Path.GetFullPath tempDir, "marketdesk-1111222233334444.sqlite"), resolvedPath)
 
@@ -582,67 +424,6 @@ let ``getStartupDatabaseDecision returns exit early when target database status 
   Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``getStartupDatabaseDecisionFromRuntimeConfig uses runtime directory precedence`` () =
-  let envDir =
-    Path.Combine(Path.GetTempPath(), $"mig_runtime_decision_env_{Guid.NewGuid()}")
-
-  let cliDir =
-    Path.Combine(Path.GetTempPath(), $"mig_runtime_decision_cli_{Guid.NewGuid()}")
-
-  Directory.CreateDirectory envDir |> ignore
-  Directory.CreateDirectory cliDir |> ignore
-
-  let dbFileName = "marketdesk-1111222233334444.sqlite"
-  let expectedPath = Path.Combine(Path.GetFullPath cliDir, dbFileName)
-
-  let decisionResult =
-    withProcessStateLock (fun () ->
-      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
-
-      try
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
-
-        getStartupDatabaseDecisionFromRuntimeConfig (Some testSqliteDirectoryEnvVar) (Some cliDir) dbFileName
-        |> fun t -> t.Result
-      finally
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
-
-  match decisionResult with
-  | Error ex -> failwith $"Expected startup decision to succeed, got error: {ex.Message}"
-  | Ok(MigrateThisInstance dbPath) -> Assert.Equal(expectedPath, dbPath)
-  | Ok other -> failwith $"Expected startup decision to use CLI-selected runtime directory, got: {other}"
-
-  Directory.Delete(envDir, true)
-  Directory.Delete(cliDir, true)
-
-[<Fact>]
-let ``getStartupDatabaseDecisionFromEnvVar uses the named env var for the target database directory`` () =
-  let envDir =
-    Path.Combine(Path.GetTempPath(), $"mig_env_only_runtime_decision_{Guid.NewGuid()}")
-
-  Directory.CreateDirectory envDir |> ignore
-
-  let dbFileName = "marketdesk-1111222233334444.sqlite"
-  let expectedPath = Path.Combine(Path.GetFullPath envDir, dbFileName)
-
-  let decisionResult =
-    withProcessStateLock (fun () ->
-      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
-
-      try
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
-
-        getStartupDatabaseDecisionFromEnvVar testSqliteDirectoryEnvVar dbFileName
-        |> fun t -> t.Result
-      finally
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
-
-  match decisionResult with
-  | Error ex -> failwith $"Expected startup decision to succeed, got error: {ex.Message}"
-  | Ok(MigrateThisInstance dbPath) -> Assert.Equal(expectedPath, dbPath)
-  | Ok other -> failwith $"Expected startup decision to use env-selected runtime directory, got: {other}"
-
-[<Fact>]
 let ``inferPreviousDatabasePath returns none when only target database exists`` () =
   let envDir =
     Path.Combine(Path.GetTempPath(), $"mig_infer_previous_none_{Guid.NewGuid()}")
@@ -654,14 +435,7 @@ let ``inferPreviousDatabasePath returns none when only target database exists`` 
   createStudentDatabase dbPath [ "Alice" ] None
 
   let inferenceResult =
-    withProcessStateLock (fun () ->
-      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
-
-      try
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
-        inferPreviousDatabasePath testSqliteDirectoryEnvVar dbFileName
-      finally
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+    withProcessStateLock (fun () -> inferPreviousDatabasePath envDir dbFileName)
 
   match inferenceResult with
   | Error ex -> failwith $"Expected previous-database inference to succeed, got: {ex.Message}"
@@ -684,14 +458,7 @@ let ``inferPreviousDatabasePath returns the only non-target sqlite file`` () =
   createStudentDatabase oldDbPath [ "Bob" ] None
 
   let inferenceResult =
-    withProcessStateLock (fun () ->
-      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
-
-      try
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
-        inferPreviousDatabasePath testSqliteDirectoryEnvVar dbFileName
-      finally
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+    withProcessStateLock (fun () -> inferPreviousDatabasePath envDir dbFileName)
 
   match inferenceResult with
   | Error ex -> failwith $"Expected previous-database inference to succeed, got: {ex.Message}"
@@ -716,14 +483,7 @@ let ``inferPreviousDatabasePath fails when multiple non-target sqlite files exis
   createStudentDatabase secondOldDbPath [ "Carol" ] None
 
   let inferenceResult =
-    withProcessStateLock (fun () ->
-      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
-
-      try
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
-        inferPreviousDatabasePath testSqliteDirectoryEnvVar dbFileName
-      finally
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+    withProcessStateLock (fun () -> inferPreviousDatabasePath envDir dbFileName)
 
   match inferenceResult with
   | Ok result -> failwith $"Expected previous-database inference to fail, got: {result}"
@@ -745,21 +505,14 @@ let ``startService returns a DbTxnBuilder for an already ready target database``
 
   let result =
     withProcessStateLock (fun () ->
-      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
-
-      try
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
-
-        startService
-          testSqliteDirectoryEnvVar
-          dbFileName
-          { schemaHash = "1111222233334444"
-            schemaCommit = None }
-          studentSchema
-          CancellationToken.None
-        |> fun t -> t.Result
-      finally
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+      startService
+        envDir
+        dbFileName
+        { schemaHash = "1111222233334444"
+          schemaCommit = None }
+        studentSchema
+        CancellationToken.None
+      |> fun t -> t.Result)
 
   match result with
   | Error ex -> failwith $"Expected startService to succeed, got error: {ex.Message}"
@@ -779,21 +532,14 @@ let ``startService initializes the target database when no previous database exi
 
   let result =
     withProcessStateLock (fun () ->
-      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
-
-      try
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
-
-        startService
-          testSqliteDirectoryEnvVar
-          dbFileName
-          { schemaHash = "1111222233334444"
-            schemaCommit = None }
-          studentSchema
-          CancellationToken.None
-        |> fun t -> t.Result
-      finally
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+      startService
+        envDir
+        dbFileName
+        { schemaHash = "1111222233334444"
+          schemaCommit = None }
+        studentSchema
+        CancellationToken.None
+      |> fun t -> t.Result)
 
   match result with
   | Error ex -> failwith $"Expected startService to initialize the target database, got error: {ex.Message}"
@@ -819,21 +565,14 @@ let ``startService migrates the previous database into the target database`` () 
 
   let result =
     withProcessStateLock (fun () ->
-      let previousValue = Environment.GetEnvironmentVariable testSqliteDirectoryEnvVar
-
-      try
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, envDir)
-
-        startService
-          testSqliteDirectoryEnvVar
-          dbFileName
-          { schemaHash = "1111222233334444"
-            schemaCommit = None }
-          studentSchema
-          CancellationToken.None
-        |> fun t -> t.Result
-      finally
-        Environment.SetEnvironmentVariable(testSqliteDirectoryEnvVar, previousValue))
+      startService
+        envDir
+        dbFileName
+        { schemaHash = "1111222233334444"
+          schemaCommit = None }
+        studentSchema
+        CancellationToken.None
+      |> fun t -> t.Result)
 
   match result with
   | Error ex -> failwith $"Expected startService to migrate the previous database, got error: {ex.Message}"

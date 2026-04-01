@@ -192,88 +192,6 @@ let resolveDatabaseFilePath (configuredDirectory: string) (dbFileName: string) :
     else
       Ok(Path.Combine(resolvedDirectory, dbFileName))
 
-let resolveDatabasePathOrFail (configuredPath: string) : string =
-  resolveDatabasePath configuredPath |> ResultEx.orFail invalidOp
-
-let resolveDatabaseFilePathOrFail (configuredDirectory: string) (dbFileName: string) : string =
-  resolveDatabaseFilePath configuredDirectory dbFileName
-  |> ResultEx.orFail invalidOp
-
-let private noneIfBlank (value: string option) =
-  value
-  |> Option.bind (fun candidate ->
-    if String.IsNullOrWhiteSpace candidate then
-      None
-    else
-      Some candidate)
-
-let private requireRuntimeEnvVarName (envVarName: string) : Result<string, string> =
-  if String.IsNullOrWhiteSpace envVarName then
-    Error "SQLite directory environment variable name is empty."
-  else
-    Ok envVarName
-
-let resolveRuntimeSqliteDirectory
-  (sqliteDirectoryEnvVarName: string option)
-  (cliDirectoryOverride: string option)
-  : Result<string, string> =
-  let envDirectory =
-    sqliteDirectoryEnvVarName
-    |> noneIfBlank
-    |> Option.bind (fun envVarName -> Environment.GetEnvironmentVariable envVarName |> Some |> noneIfBlank)
-
-  let configuredDirectory =
-    cliDirectoryOverride
-    |> noneIfBlank
-    |> Option.orElse envDirectory
-    |> Option.defaultValue (Directory.GetCurrentDirectory())
-
-  resolveDatabasePath configuredDirectory
-
-let resolveRuntimeSqliteDirectoryOrFail
-  (sqliteDirectoryEnvVarName: string option)
-  (cliDirectoryOverride: string option)
-  : string =
-  resolveRuntimeSqliteDirectory sqliteDirectoryEnvVarName cliDirectoryOverride
-  |> ResultEx.orFail invalidOp
-
-let resolveEnvVarSqliteDirectory (sqliteDirectoryEnvVarName: string) : Result<string, string> =
-  result {
-    let! sqliteDirectoryEnvVarName = requireRuntimeEnvVarName sqliteDirectoryEnvVarName
-    return! resolveRuntimeSqliteDirectory (Some sqliteDirectoryEnvVarName) None
-  }
-
-let resolveEnvVarSqliteDirectoryOrFail (sqliteDirectoryEnvVarName: string) : string =
-  resolveEnvVarSqliteDirectory sqliteDirectoryEnvVarName
-  |> ResultEx.orFail invalidOp
-
-let resolveRuntimeDatabaseFilePath
-  (sqliteDirectoryEnvVarName: string option)
-  (cliDirectoryOverride: string option)
-  (dbFileName: string)
-  : Result<string, string> =
-  match resolveRuntimeSqliteDirectory sqliteDirectoryEnvVarName cliDirectoryOverride with
-  | Error message -> Error message
-  | Ok resolvedDirectory -> resolveDatabaseFilePath resolvedDirectory dbFileName
-
-let resolveRuntimeDatabaseFilePathOrFail
-  (sqliteDirectoryEnvVarName: string option)
-  (cliDirectoryOverride: string option)
-  (dbFileName: string)
-  : string =
-  resolveRuntimeDatabaseFilePath sqliteDirectoryEnvVarName cliDirectoryOverride dbFileName
-  |> ResultEx.orFail invalidOp
-
-let resolveEnvVarDatabaseFilePath (sqliteDirectoryEnvVarName: string) (dbFileName: string) : Result<string, string> =
-  result {
-    let! sqliteDirectoryEnvVarName = requireRuntimeEnvVarName sqliteDirectoryEnvVarName
-    return! resolveRuntimeDatabaseFilePath (Some sqliteDirectoryEnvVarName) None dbFileName
-  }
-
-let resolveEnvVarDatabaseFilePathOrFail (sqliteDirectoryEnvVarName: string) (dbFileName: string) : string =
-  resolveEnvVarDatabaseFilePath sqliteDirectoryEnvVarName dbFileName
-  |> ResultEx.orFail invalidOp
-
 let private toJsonNode (value: obj) : JsonNode =
   if isNull value || Object.ReferenceEquals(value, DBNull.Value) then
     null
@@ -399,36 +317,6 @@ let getStartupDatabaseDecision
       | Migrating -> WaitForMigration dbPath
       | Invalid reason -> ExitEarly(dbPath, reason)
   }
-
-let getStartupDatabaseDecisionFromRuntimeConfig
-  (sqliteDirectoryEnvVarName: string option)
-  (cliDirectoryOverride: string option)
-  (dbFileName: string)
-  : Task<Result<StartupDatabaseDecision, SqliteException>> =
-  taskResult {
-    let! dbPath =
-      (resolveRuntimeDatabaseFilePath sqliteDirectoryEnvVarName cliDirectoryOverride dbFileName
-       |> TaskResultEx.ofResultMapError (fun message -> SqliteException(message, 0))
-      : Task<Result<string, SqliteException>>)
-
-    let! state = (getStartupDatabaseState dbPath: Task<Result<StartupDatabaseState, SqliteException>>)
-
-    return
-      match state with
-      | Missing -> MigrateThisInstance dbPath
-      | Ready -> UseExisting dbPath
-      | Migrating -> WaitForMigration dbPath
-      | Invalid reason -> ExitEarly(dbPath, reason)
-  }
-
-let getStartupDatabaseDecisionFromEnvVar
-  (sqliteDirectoryEnvVarName: string)
-  (dbFileName: string)
-  : Task<Result<StartupDatabaseDecision, SqliteException>> =
-  match requireRuntimeEnvVarName sqliteDirectoryEnvVarName with
-  | Error message -> Task.FromResult(Error(SqliteException(message, 0)))
-  | Ok sqliteDirectoryEnvVarName ->
-    getStartupDatabaseDecisionFromRuntimeConfig (Some sqliteDirectoryEnvVarName) None dbFileName
 
 let waitForStartupDatabaseReady
   (dbPath: string)

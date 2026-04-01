@@ -33,7 +33,13 @@
     <Compile Include="CodeGen/NormalizedQueryGenerator.fs" />
     <Compile Include="CodeGen/QueryGenerator.fs" />
     <Compile Include="CodeGen/CodeGen.fs" />
-    <Compile Include="HotMigration.fs" />
+    <Compile Include="HotMigration/Primitives.fs" />
+    <Compile Include="HotMigration/Metadata.fs" />
+    <Compile Include="HotMigration/SchemaBootstrap.fs" />
+    <Compile Include="HotMigration/SchemaIntrospection.fs" />
+    <Compile Include="HotMigration/Copy.fs" />
+    <Compile Include="HotMigration/Planning.fs" />
+    <Compile Include="HotMigration/Operations.fs" />
     <Compile Include="CompiledSchema.fs" />
     <Compile Include="Build.fs" />
     <Content Include="../../README.md" Pack="true" PackagePath="\" />
