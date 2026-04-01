@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.3] - 2026-04-01
+
+Changed:
+
+- **MigLib Internal Layering**: split several large implementation files into documented layered directories while keeping their public facades stable
+  - `HotMigration`, `HotMigration/Operations`, `SchemaReflection`, `Db`, `DeclarativeMigrations/DrainReplay`, `CodeGen/NormalizedQueryGenerator`, and `CodeGen/QueryGenerator` now separate lower-level helpers from top-level orchestration
+  - each refactored area now includes a local `README.md` that explains responsibilities and dependency direction between layers
+  - these changes are structural only and preserve the existing runtime and code-generation behavior validated by the test suite
+- **mig CLI Internal Layering**: split the CLI entrypoint into documented operational layers under `src/mig/Program/`
+  - argument definitions, path/module resolution, build commands, and migration commands are now isolated in separate files under a dedicated directory
+  - the public entrypoint and command surface remain stable while the implementation is easier to navigate and evolve
+
 ## [5.2.2] - 2026-03-31
 
 Fixed:
