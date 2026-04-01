@@ -18,6 +18,11 @@
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Util.fs" />
+    <Compile Include="Db/Attributes.fs" />
+    <Compile Include="Db/Core.fs" />
+    <Compile Include="Db/Startup.fs" />
+    <Compile Include="Db/Recording.fs" />
+    <Compile Include="Db/Transactions.fs" />
     <Compile Include="Db.fs" />
     <Compile Include="DeclarativeMigrations/Types.fs" />
     <Compile Include="DeclarativeMigrations/SchemaDiff.fs" />
