@@ -19,6 +19,7 @@ open Mig.DeclarativeMigrations.DataCopy
 open Mig.DeclarativeMigrations.DrainReplay
 open Mig.DeclarativeMigrations.SchemaDiff
 open Mig.HotMigration
+open Mig.HotMigrationTypes
 open Mig.SchemaReflection
 open Microsoft.AspNetCore.Http
 open Microsoft.Data.Sqlite

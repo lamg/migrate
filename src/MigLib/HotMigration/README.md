@@ -81,6 +81,16 @@ Responsibilities:
 
 This is the top layer and the only one intended to expose the public `Mig.HotMigration` API.
 
+The operations layer is itself split into a nested directory:
+
+- `Operations/README.md` explains the internal layers of the operations area.
+- `Operations/Types.fs` contains the public result and report types.
+- `Operations/Shared.fs` contains shared constants and helper values for operation workflows.
+- `Operations/Reporting.fs` contains read-only reporting and planning entry points.
+- `Operations/Migration.fs` contains migrate, init, startup, and drain workflows.
+- `Operations/Admin.fs` contains archive, reset, and cutover workflows.
+- `Operations.fs` is a thin facade that re-exports the public API.
+
 ## Dependency Direction
 
 The intended dependency direction is:
@@ -94,6 +104,7 @@ More concretely:
 - `SchemaIntrospection` depends on `Primitives`
 - `Copy` depends on `Primitives`
 - `Planning` depends on declarative migration planning logic and small formatting helpers
-- `Operations` depends on all lower layers
+- `OperationsReporting`, `OperationsMigration`, and `OperationsAdmin` depend on all lower layers they need
+- `Operations` depends on the operation sublayers and acts as the stable public facade
 
 When adding new code, prefer placing it in the lowest layer that can own the responsibility cleanly.

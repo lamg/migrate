@@ -39,6 +39,11 @@
     <Compile Include="HotMigration/SchemaIntrospection.fs" />
     <Compile Include="HotMigration/Copy.fs" />
     <Compile Include="HotMigration/Planning.fs" />
+    <Compile Include="HotMigration/Operations/Types.fs" />
+    <Compile Include="HotMigration/Operations/Shared.fs" />
+    <Compile Include="HotMigration/Operations/Reporting.fs" />
+    <Compile Include="HotMigration/Operations/Migration.fs" />
+    <Compile Include="HotMigration/Operations/Admin.fs" />
     <Compile Include="HotMigration/Operations.fs" />
     <Compile Include="CompiledSchema.fs" />
     <Compile Include="Build.fs" />
