@@ -22,6 +22,11 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
+    <Compile Include="Program/Args.fs" />
+    <Compile Include="Program/Common.fs" />
+    <Compile Include="Program/Resolution.fs" />
+    <Compile Include="Program/BuildCommands.fs" />
+    <Compile Include="Program/MigrationCommands.fs" />
     <Compile Include="Program.fs" />
     <Content Include="../../README.md" Pack="true" PackagePath="\" />
     <Content Include="../../images/logo.png" Pack="true" PackagePath="\" />
