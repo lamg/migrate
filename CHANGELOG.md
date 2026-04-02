@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.5] - 2026-04-02
+
+Changed:
+
+- **Codegen Query Helper Consolidation**: reduced repeated generated database code by pushing more common query and write patterns into `MigLib.Db`
+  - added shared helpers for single-row queries, list queries, query-or-insert flows, write execution, insert result handling, upsert control flow, and last-insert-id lookup
+  - regular, normalized, and view code generation now reuse common parameter binding and select projection rendering helpers to keep generator output smaller and more consistent
+  - preserves generated behavior while simplifying both generated `Db.fs` output and MigLib's code generator internals, validated by the full test suite
+
 ## [5.2.4] - 2026-04-02
 
 Fixed:
