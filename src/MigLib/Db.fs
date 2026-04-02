@@ -122,6 +122,13 @@ let executeWrite
       return Error ex
   }
 
+let executeWriteUnit
+  (sql: string)
+  (configure: SqliteCommand -> unit)
+  (tx: SqliteTransaction)
+  : Task<Result<unit, SqliteException>> =
+  executeWrite sql configure tx (fun _ -> Task.FromResult(Ok()))
+
 let getLastInsertRowId (tx: SqliteTransaction) : Task<int64> =
   task {
     use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
@@ -155,6 +162,23 @@ let executeInsertOrIgnore
         let! newId = getLastInsertRowId tx
         return! finish (Some newId)
     })
+
+let sequenceUnitResults
+  (steps: (unit -> Task<Result<unit, SqliteException>>) list)
+  : Task<Result<unit, SqliteException>> =
+  let rec loop remaining =
+    task {
+      match remaining with
+      | [] -> return Ok()
+      | step :: rest ->
+        let! result = step ()
+
+        match result with
+        | Ok() -> return! loop rest
+        | Error ex -> return Error ex
+    }
+
+  loop steps
 
 type StartupDatabaseState =
   | Missing

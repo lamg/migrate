@@ -8,6 +8,21 @@ open Mig.CodeGen.NormalizedSchema
 open Mig.CodeGen.NormalizedQueryGeneratorCommon
 open Mig.CodeGen.SqlParamBindings
 
+let private generateExecuteWriteUnitStep (sql: string) (bindings: string) =
+  $"""(fun () ->
+                  executeWriteUnit
+                    "{sql}"
+                    (fun cmd ->
+                      {bindings})
+                    tx)"""
+
+let private generateStepList (steps: string list) =
+  match steps with
+  | [] -> "[]"
+  | _ ->
+    let body = steps |> String.concat ";\n                "
+    $"[\n                {body}\n              ]"
+
 let private generateUpdateBaseSql (baseTable: CreateTable) : string =
   let pkCols =
     getPrimaryKeyColumns baseTable |> List.map (fun c -> c.name) |> Set.ofList
@@ -46,36 +61,30 @@ let private generateUpdateBaseCase
 
   let idVarName =
     idFieldName.ToLower().[0..0]
-    + (if idFieldName.Length > 1 then idFieldName.[1..] else "")
+    + if idFieldName.Length > 1 then idFieldName.[1..] else ""
 
   let asyncParamBindings =
     generateParamBindings baseTable.columns "cmd"
-    |> String.concat "\n                "
+    |> String.concat "\n                      "
 
-  let deleteStatements =
+  let deleteSteps =
     extensions
-    |> List.mapi (fun i ext ->
-      let deleteResultName = $"deleteResult{i}"
+    |> List.map (fun ext ->
       let deleteIdBinding = addPlainBinding "cmd" "id" idVarName
 
-      $"            let! {deleteResultName} =\n              executeWrite\n                \"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\"\n                (fun cmd ->\n                  {deleteIdBinding})\n                tx\n                (fun _ -> task {{ return Ok() }})\n\n            match {deleteResultName} with\n            | Error ex -> return Error ex\n            | Ok () -> ()")
-    |> String.concat "\n\n"
+      generateExecuteWriteUnitStep ($"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id") deleteIdBinding)
 
   $"""        | {typeName}.Base({fieldPattern}) ->
           // Update base table, delete all extensions
-          let! updateResult =
-            executeWrite
-              "{updateSql}"
-              (fun cmd ->
-                {asyncParamBindings})
-              tx
-              (fun _ -> task {{ return Ok() }})
+          let deleteExtensions () =
+            sequenceUnitResults
+              {generateStepList deleteSteps}
 
-          match updateResult with
-          | Error ex -> return Error ex
-          | Ok () ->
-{deleteStatements}
-            return Ok()"""
+          return!
+            sequenceUnitResults
+              {generateStepList
+                 [ generateExecuteWriteUnitStep updateSql asyncParamBindings
+                   "(fun () -> deleteExtensions ())" ]}"""
 
 let private generateUpdateExtensionCase
   (baseTable: CreateTable)
@@ -114,55 +123,40 @@ let private generateUpdateExtensionCase
 
   let idVarName =
     idFieldName.ToLower().[0..0]
-    + (if idFieldName.Length > 1 then idFieldName.[1..] else "")
+    + if idFieldName.Length > 1 then idFieldName.[1..] else ""
 
   let asyncBaseParamBindings =
     generateParamBindings baseTable.columns "cmd"
-    |> String.concat "\n                "
+    |> String.concat "\n                      "
 
   let asyncExtensionParamBindings =
     generateParamBindings extensionInsertColumns "cmd"
-    |> String.concat "\n                    "
+    |> String.concat "\n                      "
 
   let extensionFkBinding = addPlainBinding "cmd" extension.fkColumn idVarName
 
-  let deleteOtherExtensions =
+  let deleteOtherExtensionSteps =
     allExtensions
     |> List.filter (fun e -> e.table.name <> extension.table.name)
-    |> List.mapi (fun i ext ->
-      let deleteResultName = $"deleteOtherResult{i}"
+    |> List.map (fun ext ->
       let deleteIdBinding = addPlainBinding "cmd" "id" idVarName
 
-      $"                let! {deleteResultName} =\n                  executeWrite\n                    \"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\"\n                    (fun cmd ->\n                      {deleteIdBinding})\n                    tx\n                    (fun _ -> task {{ return Ok() }})\n\n                match {deleteResultName} with\n                | Error ex -> return Error ex\n                | Ok () -> ()")
-    |> String.concat "\n\n"
+      generateExecuteWriteUnitStep ($"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id") deleteIdBinding)
 
   $"""        | {typeName}.With{caseName}({fieldPattern}) ->
           // Update base, INSERT OR REPLACE extension
-          let! updateBaseResult =
-            executeWrite
-              "{updateSql}"
-              (fun cmd ->
-                {asyncBaseParamBindings})
-              tx
-              (fun _ -> task {{ return Ok() }})
+          let deleteOtherExtensions () =
+            sequenceUnitResults
+              {generateStepList deleteOtherExtensionSteps}
 
-          match updateBaseResult with
-          | Error ex -> return Error ex
-          | Ok () ->
-            let! updateExtensionResult =
-              executeWrite
-                "{insertOrReplaceSql}"
-                (fun cmd ->
-                  {extensionFkBinding}
-                  {asyncExtensionParamBindings})
-                tx
-                (fun _ -> task {{ return Ok() }})
-
-            match updateExtensionResult with
-            | Error ex -> return Error ex
-            | Ok () ->
-{deleteOtherExtensions}
-              return Ok()"""
+          return!
+            sequenceUnitResults
+              {generateStepList
+                 [ generateExecuteWriteUnitStep updateSql asyncBaseParamBindings
+                   generateExecuteWriteUnitStep
+                     insertOrReplaceSql
+                     $"{extensionFkBinding}\n                      {asyncExtensionParamBindings}"
+                   "(fun () -> deleteOtherExtensions ())" ]}"""
 
 let generateUpdate (normalized: NormalizedTable) : string option =
   let pkCols = getPrimaryKeyColumns normalized.baseTable
@@ -222,12 +216,8 @@ let generateDelete (normalized: NormalizedTable) : string option =
 
     Some
       $"""  static member Delete {paramList} (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
-    executeWrite
+    executeWriteUnit
       "{deleteSql}"
       (fun cmd ->
         {asyncParamBindings})
-      tx
-      (fun _ ->
-        task {{
-          return Ok()
-        }})"""
+      tx"""
