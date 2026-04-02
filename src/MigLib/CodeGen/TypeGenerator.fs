@@ -145,15 +145,23 @@ let collectEnumLikeDusFromViewColumns (columns: #seq<ViewColumn>) : EnumLikeDu l
   |> Seq.toList
 
 let generateEnumType (enumLikeDu: EnumLikeDu) : string =
-  let cases =
-    enumLikeDu.cases
-    |> List.map (fun caseName -> $"  | {caseName}")
-    |> String.concat "\n"
+  Oak() {
+    AnonymousModule() {
+      Union(enumLikeDu.typeName) {
+        for caseName in enumLikeDu.cases do
+          UnionCase(caseName)
+      }
+    }
+  }
+  |> Gen.mkOak
+  |> Gen.run
 
-  $"""type {enumLikeDu.typeName} =
-{cases}"""
-
-let generateMeasureType (measureType: string) = $"[<Measure>] type {measureType}"
+let generateMeasureType (measureType: string) =
+  Oak() {
+    AnonymousModule() { Measure(measureType) }
+  }
+  |> Gen.mkOak
+  |> Gen.run
 
 /// Generate a record field from a column definition
 let generateField (column: ColumnDef) =

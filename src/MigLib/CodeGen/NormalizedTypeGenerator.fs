@@ -5,6 +5,7 @@ module internal Mig.CodeGen.NormalizedTypeGenerator
 open Mig.DeclarativeMigrations.Types
 open Fabulous.AST
 open type Fabulous.AST.Ast
+open Mig.CodeGen.AstExprBuilders
 
 /// Get columns that should be included in the "New" type (excludes auto-increment PKs)
 let private getInsertColumns (table: CreateTable) : ColumnDef list =
@@ -209,33 +210,6 @@ let private generateProperty (typeName: string) (field: FieldInfo) (normalized: 
 
   Member($"this.{field.Name}", MatchExpr("this", baseClause :: extensionClauses), returnType)
 
-/// Generate a positional pattern to extract a specific field from columns
-/// Returns the pattern string where the target field gets a var name and others get _
-let private generatePositionalPattern (columns: ColumnDef list) (targetFieldName: string) : string * string =
-  let parts =
-    columns
-    |> List.map (fun col ->
-      let fieldName = TypeGenerator.toPascalCase col.name
-
-      if fieldName = targetFieldName then
-        let varName =
-          fieldName.ToLower().[0..0]
-          + (if fieldName.Length > 1 then fieldName.[1..] else "")
-
-        varName
-      else
-        "_")
-
-  let pattern = parts |> String.concat ", "
-
-  let varName =
-    let fieldName = targetFieldName
-
-    fieldName.ToLower().[0..0]
-    + (if fieldName.Length > 1 then fieldName.[1..] else "")
-
-  (pattern, varName)
-
 /// Generate properties for the query type
 let private generateProperties (normalized: NormalizedTable) : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
@@ -244,47 +218,10 @@ let private generateProperties (normalized: NormalizedTable) : string =
   if fields.IsEmpty then
     ""
   else
-    // Generate type extension members using positional patterns
-    // (named patterns like `Field = var` are not supported by Fantomas parser)
-    let members =
-      fields
-      |> List.map (fun field ->
-        let returnType =
-          if field.InAllCases then
-            field.FSharpType
-          else
-            $"{field.FSharpType} option"
-
-        let createClause caseName columns =
-          let hasField =
-            columns
-            |> List.exists (fun (col: ColumnDef) -> TypeGenerator.toPascalCase col.name = field.Name)
-
-          if hasField then
-            let (pattern, varName) = generatePositionalPattern columns field.Name
-
-            if field.InAllCases then
-              $"    | {typeName}.{caseName}({pattern}) -> {varName}"
-            else
-              $"    | {typeName}.{caseName}({pattern}) -> Some {varName}"
-          else
-            $"    | {typeName}.{caseName} _ -> None"
-
-        let baseClause = createClause "Base" (getBaseCaseColumns normalized.baseTable true)
-
-        let extClauses =
-          normalized.extensions
-          |> List.map (fun ext ->
-            let caseName = $"With{aspectToPascalCase ext.aspectName}"
-            let columns = getExtensionCaseColumns normalized.baseTable ext true
-            createClause caseName columns)
-
-        let allClauses = baseClause :: extClauses |> String.concat "\n"
-
-        $"  member this.{field.Name} : {returnType} =\n    match this with\n{allClauses}")
-      |> String.concat "\n\n"
-
-    $"\ntype {typeName} with\n{members}"
+    fields
+    |> List.map (fun field -> generateProperty typeName field normalized)
+    |> generateAugmentationCode typeName
+    |> fun code -> $"\n{code}"
 
 /// Generate both DU types for a normalized table with properties
 let generateTypes (normalized: NormalizedTable) : string =
