@@ -11,18 +11,23 @@ let private generateBaseCase (baseTable: CreateTable) (typeName: string) : strin
   let fieldPattern = generateFieldPattern insertColumns
 
   let asyncParamBindings =
-    generateParamBindings insertColumns "cmd" |> String.concat "\n          "
+    generateParamBindings insertColumns "cmd" |> String.concat "\n                "
 
   $"""        | New{typeName}.Base({fieldPattern}) ->
           // Single INSERT into base table
-          use cmd = new SqliteCommand("{insertSql}", tx.Connection, tx)
-          {asyncParamBindings}
-          MigrationLog.ensureWriteAllowed tx
-          let! _ = cmd.ExecuteNonQueryAsync()
-          use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
-          let! lastId = lastIdCmd.ExecuteScalarAsync()
-          let {baseTable.name}Id = lastId |> unbox<int64>
-          return Ok {baseTable.name}Id"""
+          return!
+            executeWrite
+              "{insertSql}"
+              (fun cmd ->
+                {asyncParamBindings})
+              tx
+              (fun _ ->
+                task {{
+                  use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+                  let! lastId = lastIdCmd.ExecuteScalarAsync()
+                  let {baseTable.name}Id = lastId |> unbox<int64>
+                  return Ok {baseTable.name}Id
+                }})"""
 
 let private generateBaseCaseInsertOrIgnore (baseTable: CreateTable) (typeName: string) : string =
   let insertColumns = getInsertColumns baseTable
@@ -30,21 +35,26 @@ let private generateBaseCaseInsertOrIgnore (baseTable: CreateTable) (typeName: s
   let fieldPattern = generateFieldPattern insertColumns
 
   let asyncParamBindings =
-    generateParamBindings insertColumns "cmd" |> String.concat "\n          "
+    generateParamBindings insertColumns "cmd" |> String.concat "\n                "
 
   $"""        | New{typeName}.Base({fieldPattern}) ->
           // Single INSERT OR IGNORE into base table
-          use cmd = new SqliteCommand("{insertSql}", tx.Connection, tx)
-          {asyncParamBindings}
-          MigrationLog.ensureWriteAllowed tx
-          let! rows = cmd.ExecuteNonQueryAsync()
-          if rows = 0 then
-            return Ok None
-          else
-            use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
-            let! lastId = lastIdCmd.ExecuteScalarAsync()
-            let {baseTable.name}Id = lastId |> unbox<int64>
-            return Ok (Some {baseTable.name}Id)"""
+          return!
+            executeWrite
+              "{insertSql}"
+              (fun cmd ->
+                {asyncParamBindings})
+              tx
+              (fun rows ->
+                task {{
+                  if rows = 0 then
+                    return Ok None
+                  else
+                    use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+                    let! lastId = lastIdCmd.ExecuteScalarAsync()
+                    let {baseTable.name}Id = lastId |> unbox<int64>
+                    return Ok (Some {baseTable.name}Id)
+                }})"""
 
 let private generateExtensionCase (baseTable: CreateTable) (extension: ExtensionTable) (typeName: string) : string =
   let caseName = TypeGenerator.toPascalCase extension.aspectName
@@ -65,29 +75,46 @@ let private generateExtensionCase (baseTable: CreateTable) (extension: Extension
   let fieldPattern = generateFieldPattern allColumns
 
   let asyncBaseParamBindings =
-    generateParamBindings baseInsertColumns "cmd1" |> String.concat "\n          "
+    generateParamBindings baseInsertColumns "cmd"
+    |> String.concat "\n                "
 
   let asyncExtensionParamBindings =
-    generateParamBindings extensionInsertColumns "cmd2"
-    |> String.concat "\n          "
+    generateParamBindings extensionInsertColumns "cmd"
+    |> String.concat "\n                    "
+
+  let extensionFkBinding =
+    addPlainBinding "cmd" extension.fkColumn extensionFkValueExpr
 
   $"""        | New{typeName}.With{caseName}({fieldPattern}) ->
           // Two inserts in same transaction (atomic)
-          use cmd1 = new SqliteCommand("{baseInsertSql}", tx.Connection, tx)
-          {asyncBaseParamBindings}
-          MigrationLog.ensureWriteAllowed tx
-          let! _ = cmd1.ExecuteNonQueryAsync()
+          let! baseInsertResult =
+            executeWrite
+              "{baseInsertSql}"
+              (fun cmd ->
+                {asyncBaseParamBindings})
+              tx
+              (fun _ ->
+                task {{
+                  use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+                  let! lastId = lastIdCmd.ExecuteScalarAsync()
+                  let {baseTable.name}Id = lastId |> unbox<int64>
+                  return Ok {baseTable.name}Id
+                }})
 
-          use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
-          let! lastId = lastIdCmd.ExecuteScalarAsync()
-          let {baseTable.name}Id = lastId |> unbox<int64>
-
-          use cmd2 = new SqliteCommand("INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "}) VALUES (@{extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "})", tx.Connection, tx)
-          {addPlainBinding "cmd2" extension.fkColumn extensionFkValueExpr}
-          {asyncExtensionParamBindings}
-          MigrationLog.ensureWriteAllowed tx
-          let! _ = cmd2.ExecuteNonQueryAsync()
-          return Ok {baseTable.name}Id"""
+          match baseInsertResult with
+          | Error ex -> return Error ex
+          | Ok {baseTable.name}Id ->
+            return!
+              executeWrite
+                "INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "}) VALUES (@{extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "})"
+                (fun cmd ->
+                  {extensionFkBinding}
+                  {asyncExtensionParamBindings})
+                tx
+                (fun _ ->
+                  task {{
+                    return Ok {baseTable.name}Id
+                  }})"""
 
 let private generateExtensionCaseInsertOrIgnore
   (baseTable: CreateTable)
@@ -112,31 +139,50 @@ let private generateExtensionCaseInsertOrIgnore
   let fieldPattern = generateFieldPattern allColumns
 
   let asyncBaseParamBindings =
-    generateParamBindings baseInsertColumns "cmd1" |> String.concat "\n          "
+    generateParamBindings baseInsertColumns "cmd"
+    |> String.concat "\n                "
 
   let asyncExtensionParamBindings =
-    generateParamBindings extensionInsertColumns "cmd2"
-    |> String.concat "\n          "
+    generateParamBindings extensionInsertColumns "cmd"
+    |> String.concat "\n                    "
+
+  let extensionFkBinding =
+    addPlainBinding "cmd" extension.fkColumn extensionFkValueExpr
 
   $"""        | New{typeName}.With{caseName}({fieldPattern}) ->
           // Base INSERT OR IGNORE then extension INSERT
-          use cmd1 = new SqliteCommand("{baseInsertSql}", tx.Connection, tx)
-          {asyncBaseParamBindings}
-          MigrationLog.ensureWriteAllowed tx
-          let! rows = cmd1.ExecuteNonQueryAsync()
-          if rows = 0 then
-            return Ok None
-          else
-            use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
-            let! lastId = lastIdCmd.ExecuteScalarAsync()
-            let {baseTable.name}Id = lastId |> unbox<int64>
+          let! baseInsertResult =
+            executeWrite
+              "{baseInsertSql}"
+              (fun cmd ->
+                {asyncBaseParamBindings})
+              tx
+              (fun rows ->
+                task {{
+                  if rows = 0 then
+                    return Ok None
+                  else
+                    use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+                    let! lastId = lastIdCmd.ExecuteScalarAsync()
+                    let {baseTable.name}Id = lastId |> unbox<int64>
+                    return Ok (Some {baseTable.name}Id)
+                }})
 
-            use cmd2 = new SqliteCommand("INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "}) VALUES (@{extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "})", tx.Connection, tx)
-            {addPlainBinding "cmd2" extension.fkColumn extensionFkValueExpr}
-            {asyncExtensionParamBindings}
-            MigrationLog.ensureWriteAllowed tx
-            let! _ = cmd2.ExecuteNonQueryAsync()
-            return Ok (Some {baseTable.name}Id)"""
+          match baseInsertResult with
+          | Error ex -> return Error ex
+          | Ok None -> return Ok None
+          | Ok(Some {baseTable.name}Id) ->
+            return!
+              executeWrite
+                "INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "}) VALUES (@{extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "})"
+                (fun cmd ->
+                  {extensionFkBinding}
+                  {asyncExtensionParamBindings})
+                tx
+                (fun _ ->
+                  task {{
+                    return Ok (Some {baseTable.name}Id)
+                  }})"""
 
 let generateInsert (normalized: NormalizedTable) : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name

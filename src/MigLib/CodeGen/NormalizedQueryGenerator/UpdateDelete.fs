@@ -49,26 +49,33 @@ let private generateUpdateBaseCase
     + (if idFieldName.Length > 1 then idFieldName.[1..] else "")
 
   let asyncParamBindings =
-    generateParamBindings baseTable.columns "cmd" |> String.concat "\n          "
+    generateParamBindings baseTable.columns "cmd"
+    |> String.concat "\n                "
 
   let deleteStatements =
     extensions
-    |> List.map (fun ext ->
-      let deleteCmdVarName = $"delCmd{ext.aspectName}"
-      let deleteIdBinding = addPlainBinding deleteCmdVarName "id" idVarName
+    |> List.mapi (fun i ext ->
+      let deleteResultName = $"deleteResult{i}"
+      let deleteIdBinding = addPlainBinding "cmd" "id" idVarName
 
-      $"          use {deleteCmdVarName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n          {deleteIdBinding}\n          MigrationLog.ensureWriteAllowed tx\n          let! _ = {deleteCmdVarName}.ExecuteNonQueryAsync()")
-    |> String.concat "\n"
+      $"            let! {deleteResultName} =\n              executeWrite\n                \"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\"\n                (fun cmd ->\n                  {deleteIdBinding})\n                tx\n                (fun _ -> task {{ return Ok() }})\n\n            match {deleteResultName} with\n            | Error ex -> return Error ex\n            | Ok () -> ()")
+    |> String.concat "\n\n"
 
   $"""        | {typeName}.Base({fieldPattern}) ->
           // Update base table, delete all extensions
-          use cmd = new SqliteCommand("{updateSql}", tx.Connection, tx)
-          {asyncParamBindings}
-          MigrationLog.ensureWriteAllowed tx
-          let! _ = cmd.ExecuteNonQueryAsync()
+          let! updateResult =
+            executeWrite
+              "{updateSql}"
+              (fun cmd ->
+                {asyncParamBindings})
+              tx
+              (fun _ -> task {{ return Ok() }})
 
+          match updateResult with
+          | Error ex -> return Error ex
+          | Ok () ->
 {deleteStatements}
-          return Ok()"""
+            return Ok()"""
 
 let private generateUpdateExtensionCase
   (baseTable: CreateTable)
@@ -110,39 +117,52 @@ let private generateUpdateExtensionCase
     + (if idFieldName.Length > 1 then idFieldName.[1..] else "")
 
   let asyncBaseParamBindings =
-    generateParamBindings baseTable.columns "cmd1" |> String.concat "\n          "
+    generateParamBindings baseTable.columns "cmd"
+    |> String.concat "\n                "
 
   let asyncExtensionParamBindings =
-    generateParamBindings extensionInsertColumns "cmd2"
-    |> String.concat "\n          "
+    generateParamBindings extensionInsertColumns "cmd"
+    |> String.concat "\n                    "
 
-  let extensionFkBinding = addPlainBinding "cmd2" extension.fkColumn idVarName
+  let extensionFkBinding = addPlainBinding "cmd" extension.fkColumn idVarName
 
   let deleteOtherExtensions =
     allExtensions
     |> List.filter (fun e -> e.table.name <> extension.table.name)
-    |> List.map (fun ext ->
-      let deleteCmdVarName = $"delCmd{ext.aspectName}"
-      let deleteIdBinding = addPlainBinding deleteCmdVarName "id" idVarName
+    |> List.mapi (fun i ext ->
+      let deleteResultName = $"deleteOtherResult{i}"
+      let deleteIdBinding = addPlainBinding "cmd" "id" idVarName
 
-      $"          use {deleteCmdVarName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n          {deleteIdBinding}\n          MigrationLog.ensureWriteAllowed tx\n          let! _ = {deleteCmdVarName}.ExecuteNonQueryAsync()")
-    |> String.concat "\n"
+      $"                let! {deleteResultName} =\n                  executeWrite\n                    \"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\"\n                    (fun cmd ->\n                      {deleteIdBinding})\n                    tx\n                    (fun _ -> task {{ return Ok() }})\n\n                match {deleteResultName} with\n                | Error ex -> return Error ex\n                | Ok () -> ()")
+    |> String.concat "\n\n"
 
   $"""        | {typeName}.With{caseName}({fieldPattern}) ->
           // Update base, INSERT OR REPLACE extension
-          use cmd1 = new SqliteCommand("{updateSql}", tx.Connection, tx)
-          {asyncBaseParamBindings}
-          MigrationLog.ensureWriteAllowed tx
-          let! _ = cmd1.ExecuteNonQueryAsync()
+          let! updateBaseResult =
+            executeWrite
+              "{updateSql}"
+              (fun cmd ->
+                {asyncBaseParamBindings})
+              tx
+              (fun _ -> task {{ return Ok() }})
 
-          use cmd2 = new SqliteCommand("{insertOrReplaceSql}", tx.Connection, tx)
-          {extensionFkBinding}
-          {asyncExtensionParamBindings}
-          MigrationLog.ensureWriteAllowed tx
-          let! _ = cmd2.ExecuteNonQueryAsync()
+          match updateBaseResult with
+          | Error ex -> return Error ex
+          | Ok () ->
+            let! updateExtensionResult =
+              executeWrite
+                "{insertOrReplaceSql}"
+                (fun cmd ->
+                  {extensionFkBinding}
+                  {asyncExtensionParamBindings})
+                tx
+                (fun _ -> task {{ return Ok() }})
 
+            match updateExtensionResult with
+            | Error ex -> return Error ex
+            | Ok () ->
 {deleteOtherExtensions}
-          return Ok()"""
+              return Ok()"""
 
 let generateUpdate (normalized: NormalizedTable) : string option =
   let pkCols = getPrimaryKeyColumns normalized.baseTable
@@ -195,14 +215,19 @@ let generateDelete (normalized: NormalizedTable) : string option =
       |> List.map (fun pk -> let pkType = TypeGenerator.mapColumnType pk in $"({pk.name}: {pkType})")
       |> String.concat " "
 
-    let asyncBodyExprs =
-      [ OtherExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)" ]
-      @ (pks |> List.map (fun pk -> OtherExpr(addColumnBinding "cmd" pk pk.name)))
-      @ [ OtherExpr "MigrationLog.ensureWriteAllowed tx"
-          OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"
-          OtherExpr "return Ok()" ]
+    let asyncParamBindings =
+      pks
+      |> List.map (fun pk -> addColumnBinding "cmd" pk pk.name)
+      |> joinBindings "        "
 
-    let memberName = $"Delete {paramList} (tx: SqliteTransaction)"
-    let returnType = "Task<Result<unit, SqliteException>>"
-    let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
-    Some(generateStaticMemberCode typeName memberName returnType body)
+    Some
+      $"""  static member Delete {paramList} (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
+    executeWrite
+      "{deleteSql}"
+      (fun cmd ->
+        {asyncParamBindings})
+      tx
+      (fun _ ->
+        task {{
+          return Ok()
+        }})"""

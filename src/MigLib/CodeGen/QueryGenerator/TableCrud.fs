@@ -34,9 +34,10 @@ let generateInsert (table: CreateTable) : string =
 
   let insertSql = $"INSERT INTO {table.name} ({columnNames}) VALUES ({paramNames})"
 
-  let asyncParamBindingExprs =
+  let asyncParamBindings =
     insertCols
-    |> List.map (fun col -> OtherExpr(paramBindingExprForItem "cmd" "item" col))
+    |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
+    |> joinBindings "        "
 
   let rowDataPairs =
     (insertCols |> List.map (rowDataPairExprForItem "item"))
@@ -46,21 +47,20 @@ let generateInsert (table: CreateTable) : string =
     |> String.concat "; "
     |> fun pairs -> $"[{pairs}]"
 
-  let asyncBodyExprs =
-    [ OtherExpr $"use cmd = new SqliteCommand(\"{insertSql}\", tx.Connection, tx)" ]
-    @ asyncParamBindingExprs
-    @ [ OtherExpr "MigrationLog.ensureWriteAllowed tx"
-        OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"
-        OtherExpr "use lastIdCmd = new SqliteCommand(\"SELECT last_insert_rowid()\", tx.Connection, tx)"
-        OtherExpr "let! lastId = lastIdCmd.ExecuteScalarAsync()"
-        OtherExpr "let newId = lastId |> unbox<int64>"
-        OtherExpr $"MigrationLog.recordInsert tx \"{table.name}\" {rowDataPairs}"
-        OtherExpr "return Ok newId" ]
-
-  let memberName = $"Insert (item: {typeName}) (tx: SqliteTransaction)"
-  let returnType = "Task<Result<int64, SqliteException>>"
-  let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
-  generateStaticMemberCode typeName memberName returnType body
+  $"""  static member Insert (item: {typeName}) (tx: SqliteTransaction) : Task<Result<int64, SqliteException>> =
+    executeWrite
+      "{insertSql}"
+      (fun cmd ->
+        {asyncParamBindings})
+      tx
+      (fun _ ->
+        task {{
+          use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+          let! lastId = lastIdCmd.ExecuteScalarAsync()
+          let newId = lastId |> unbox<int64>
+          MigrationLog.recordInsert tx "{table.name}" {rowDataPairs}
+          return Ok newId
+        }})"""
 
 let generateInsertOrIgnore (table: CreateTable) : string =
   let typeName = capitalizeName table.name
@@ -89,9 +89,10 @@ let generateInsertOrIgnore (table: CreateTable) : string =
   let insertSql =
     $"INSERT OR IGNORE INTO {table.name} ({columnNames}) VALUES ({paramNames})"
 
-  let asyncParamBindingExprs =
+  let asyncParamBindings =
     insertCols
-    |> List.map (fun col -> OtherExpr(paramBindingExprForItem "cmd" "item" col))
+    |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
+    |> joinBindings "        "
 
   let rowDataPairs =
     (insertCols |> List.map (rowDataPairExprForItem "item"))
@@ -101,22 +102,23 @@ let generateInsertOrIgnore (table: CreateTable) : string =
     |> String.concat "; "
     |> fun pairs -> $"[{pairs}]"
 
-  let asyncBodyExprs =
-    [ OtherExpr $"use cmd = new SqliteCommand(\"{insertSql}\", tx.Connection, tx)" ]
-    @ asyncParamBindingExprs
-    @ [ OtherExpr "MigrationLog.ensureWriteAllowed tx"
-        OtherExpr "let! rows = cmd.ExecuteNonQueryAsync()"
-        OtherExpr "if rows = 0 then return Ok None else"
-        OtherExpr "  use lastIdCmd = new SqliteCommand(\"SELECT last_insert_rowid()\", tx.Connection, tx)"
-        OtherExpr "  let! lastId = lastIdCmd.ExecuteScalarAsync()"
-        OtherExpr "  let newId = lastId |> unbox<int64>"
-        OtherExpr $"  MigrationLog.recordInsert tx \"{table.name}\" {rowDataPairs}"
-        OtherExpr "  return Ok (Some newId)" ]
-
-  let memberName = $"InsertOrIgnore (item: {typeName}) (tx: SqliteTransaction)"
-  let returnType = "Task<Result<int64 option, SqliteException>>"
-  let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
-  generateStaticMemberCode typeName memberName returnType body
+  $"""  static member InsertOrIgnore (item: {typeName}) (tx: SqliteTransaction) : Task<Result<int64 option, SqliteException>> =
+    executeWrite
+      "{insertSql}"
+      (fun cmd ->
+        {asyncParamBindings})
+      tx
+      (fun rows ->
+        task {{
+          if rows = 0 then
+            return Ok None
+          else
+            use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+            let! lastId = lastIdCmd.ExecuteScalarAsync()
+            let newId = lastId |> unbox<int64>
+            MigrationLog.recordInsert tx "{table.name}" {rowDataPairs}
+            return Ok (Some newId)
+        }})"""
 
 let generateGet (table: CreateTable) : string option =
   let typeName = capitalizeName table.name
@@ -217,22 +219,23 @@ let generateUpdate (table: CreateTable) : string option =
 
     let updateSql = $"UPDATE {table.name} SET {setClauses} WHERE {whereClause}"
 
-    let asyncParamBindingExprs =
+    let asyncParamBindings =
       table.columns
-      |> List.map (fun col -> OtherExpr(paramBindingExprForItem "cmd" "item" col))
+      |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
+      |> joinBindings "        "
 
-    let asyncBodyExprs =
-      [ OtherExpr $"use cmd = new SqliteCommand(\"{updateSql}\", tx.Connection, tx)" ]
-      @ asyncParamBindingExprs
-      @ [ OtherExpr "MigrationLog.ensureWriteAllowed tx"
-          OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"
-          OtherExpr $"MigrationLog.recordUpdate tx \"{table.name}\" {rowDataExpr}"
-          OtherExpr "return Ok()" ]
-
-    let memberName = $"Update (item: {typeName}) (tx: SqliteTransaction)"
-    let returnType = "Task<Result<unit, SqliteException>>"
-    let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
-    Some(generateStaticMemberCode typeName memberName returnType body)
+    Some
+      $"""  static member Update (item: {typeName}) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
+    executeWrite
+      "{updateSql}"
+      (fun cmd ->
+        {asyncParamBindings})
+      tx
+      (fun _ ->
+        task {{
+          MigrationLog.recordUpdate tx "{table.name}" {rowDataExpr}
+          return Ok()
+        }})"""
 
 let generateDelete (table: CreateTable) : string option =
   let typeName = capitalizeName table.name
@@ -252,19 +255,23 @@ let generateDelete (table: CreateTable) : string option =
       |> List.map (fun pk -> let pkType = TypeGenerator.mapColumnType pk in $"({pk.name}: {pkType})")
       |> String.concat " "
 
-    let asyncBodyExprs =
-      [ OtherExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)" ]
-      @ (pks
-         |> List.map (fun pk -> OtherExpr(paramBindingExprForColumnVar "cmd" pk pk.name)))
-      @ [ OtherExpr "MigrationLog.ensureWriteAllowed tx"
-          OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"
-          OtherExpr $"MigrationLog.recordDelete tx \"{table.name}\" {rowDataExpr}"
-          OtherExpr "return Ok()" ]
+    let asyncParamBindings =
+      pks
+      |> List.map (fun pk -> paramBindingExprForColumnVar "cmd" pk pk.name)
+      |> joinBindings "        "
 
-    let memberName = $"Delete {paramList} (tx: SqliteTransaction)"
-    let returnType = "Task<Result<unit, SqliteException>>"
-    let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
-    Some(generateStaticMemberCode typeName memberName returnType body)
+    Some
+      $"""  static member Delete {paramList} (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
+    executeWrite
+      "{deleteSql}"
+      (fun cmd ->
+        {asyncParamBindings})
+      tx
+      (fun _ ->
+        task {{
+          MigrationLog.recordDelete tx "{table.name}" {rowDataExpr}
+          return Ok()
+        }})"""
 
 let generateUpsert (table: CreateTable) : string option =
   let typeName = capitalizeName table.name

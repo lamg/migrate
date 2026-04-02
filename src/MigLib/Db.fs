@@ -105,6 +105,23 @@ let querySingleOrInsert
     | Error ex -> return Error ex
   }
 
+let executeWrite
+  (sql: string)
+  (configure: SqliteCommand -> unit)
+  (tx: SqliteTransaction)
+  (finish: int -> Task<Result<'a, SqliteException>>)
+  : Task<Result<'a, SqliteException>> =
+  task {
+    try
+      use cmd = new SqliteCommand(sql, tx.Connection, tx)
+      configure cmd
+      MigLib.MigrationLog.ensureWriteAllowed tx
+      let! rows = cmd.ExecuteNonQueryAsync()
+      return! finish rows
+    with :? SqliteException as ex ->
+      return Error ex
+  }
+
 type StartupDatabaseState =
   | Missing
   | Ready
