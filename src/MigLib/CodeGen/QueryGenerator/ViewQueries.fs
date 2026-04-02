@@ -10,41 +10,33 @@ open Mig.CodeGen.SqlParamBindings
 
 let generateViewGetAll (viewName: string) (columns: ViewColumn list) : string =
   let typeName = capitalizeName viewName
-  let columnNames = columns |> List.map (fun c -> c.name) |> String.concat ", "
+
+  let columnNames, fieldMappings =
+    buildRecordProjection (fun (c: ViewColumn) -> c.name) TypeGenerator.readViewColumnExpr columns
+
   let getSql = $"SELECT {columnNames} FROM {viewName}"
 
-  let fieldMappings =
-    columns
-    |> List.mapi (fun i col ->
-      let fieldName = capitalizeName col.name in $"{fieldName} = {TypeGenerator.readViewColumnExpr col i}")
-    |> String.concat "; "
-
-  $"""  static member SelectAll (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
-    queryList
-      "{getSql}"
-      (fun _ -> ())
-      (fun reader ->
-        {{ {fieldMappings} }})
-      tx"""
+  renderSelectMember
+    $"SelectAll (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>>"
+    "queryList"
+    getSql
+    "(fun _ -> ())"
+    fieldMappings
 
 let generateViewGetOne (viewName: string) (columns: ViewColumn list) : string =
   let typeName = capitalizeName viewName
-  let columnNames = columns |> List.map (fun c -> c.name) |> String.concat ", "
+
+  let columnNames, fieldMappings =
+    buildRecordProjection (fun (c: ViewColumn) -> c.name) TypeGenerator.readViewColumnExpr columns
+
   let getSql = $"SELECT {columnNames} FROM {viewName} LIMIT 1"
 
-  let fieldMappings =
-    columns
-    |> List.mapi (fun i col ->
-      let fieldName = capitalizeName col.name in $"{fieldName} = {TypeGenerator.readViewColumnExpr col i}")
-    |> String.concat "; "
-
-  $"""  static member SelectOne (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
-    querySingle
-      "{getSql}"
-      (fun _ -> ())
-      (fun reader ->
-        {{ {fieldMappings} }})
-      tx"""
+  renderSelectMember
+    $"SelectOne (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>>"
+    "querySingle"
+    getSql
+    "(fun _ -> ())"
+    fieldMappings
 
 let validateViewQueryByAnnotation
   (viewName: string)
@@ -108,13 +100,8 @@ let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotatio
     |> List.map (fun col -> $"{col} = @{col}")
     |> String.concat " AND "
 
-  let columnNames = columns |> List.map (fun c -> c.name) |> String.concat ", "
-
-  let fieldMappings =
-    columns
-    |> List.mapi (fun i col ->
-      let fieldName = capitalizeName col.name in $"{fieldName} = {TypeGenerator.readViewColumnExpr col i}")
-    |> String.concat "; "
+  let columnNames, fieldMappings =
+    buildRecordProjection (fun (c: ViewColumn) -> c.name) TypeGenerator.readViewColumnExpr columns
 
   let asyncParamBindings =
     annotation.columns
@@ -122,14 +109,12 @@ let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotatio
       let columnDef = findViewColumn columns col |> Option.get in addViewBinding "cmd" columnDef col)
     |> joinBindings "        "
 
-  $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
-    queryList
-      "SELECT {columnNames} FROM {viewName} WHERE {whereClause}"
-      (fun cmd ->
-        {asyncParamBindings})
-      (fun reader ->
-        {{ {fieldMappings} }})
-      tx"""
+  renderSelectMember
+    $"{methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>>"
+    "queryList"
+    $"SELECT {columnNames} FROM {viewName} WHERE {whereClause}"
+    $"(fun cmd ->\n        {asyncParamBindings})"
+    fieldMappings
 
 let generateViewQueryLike (viewName: string) (columns: ViewColumn list) (annotation: QueryLikeAnnotation) : string =
   let typeName = capitalizeName viewName
@@ -139,21 +124,15 @@ let generateViewQueryLike (viewName: string) (columns: ViewColumn list) (annotat
   let fsharpType = TypeGenerator.mapSqlType columnDef.columnType false
   let parameters = $"{col}: {fsharpType}"
   let whereClause = $"{col} LIKE '%%' || @{col} || '%%'"
-  let columnNames = columns |> List.map (fun c -> c.name) |> String.concat ", "
 
-  let fieldMappings =
-    columns
-    |> List.mapi (fun i c ->
-      let fieldName = capitalizeName c.name in $"{fieldName} = {TypeGenerator.readViewColumnExpr c i}")
-    |> String.concat "; "
+  let columnNames, fieldMappings =
+    buildRecordProjection (fun (c: ViewColumn) -> c.name) TypeGenerator.readViewColumnExpr columns
 
   let asyncParamBindingExpr = addPlainBinding "cmd" col col
 
-  $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
-    queryList
-      "SELECT {columnNames} FROM {viewName} WHERE {whereClause}"
-      (fun cmd ->
-        {asyncParamBindingExpr})
-      (fun reader ->
-        {{ {fieldMappings} }})
-      tx"""
+  renderSelectMember
+    $"{methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>>"
+    "queryList"
+    $"SELECT {columnNames} FROM {viewName} WHERE {whereClause}"
+    $"(fun cmd ->\n        {asyncParamBindingExpr})"
+    fieldMappings

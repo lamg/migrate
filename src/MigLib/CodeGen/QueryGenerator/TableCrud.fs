@@ -121,7 +121,8 @@ let generateGet (table: CreateTable) : string option =
   match pkCols with
   | [] -> None
   | pks ->
-    let columnNames = table.columns |> List.map (fun c -> c.name) |> String.concat ", "
+    let columnNames, fieldMappings =
+      buildRecordProjection (fun (c: ColumnDef) -> c.name) TypeGenerator.readColumnExpr table.columns
 
     let whereClause =
       pks |> List.map (fun pk -> $"{pk.name} = @{pk.name}") |> String.concat " AND "
@@ -133,64 +134,49 @@ let generateGet (table: CreateTable) : string option =
       |> List.map (fun pk -> let pkType = TypeGenerator.mapColumnType pk in $"({pk.name}: {pkType})")
       |> String.concat " "
 
-    let fieldMappings =
-      table.columns
-      |> List.mapi (fun i col ->
-        let fieldName = capitalizeName col.name in $"{fieldName} = {TypeGenerator.readColumnExpr col i}")
-      |> String.concat "; "
-
     let asyncParamBindings =
       pks
       |> List.map (fun pk -> paramBindingExprForColumnVar "cmd" pk pk.name)
       |> joinBindings "        "
 
-    Some
-      $"""  static member SelectById {paramList} (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
-    querySingle
-      "{getSql}"
-      (fun cmd ->
-        {asyncParamBindings})
-      (fun reader ->
-        {{ {fieldMappings} }})
-      tx"""
+    Some(
+      renderSelectMember
+        $"SelectById {paramList} (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>>"
+        "querySingle"
+        getSql
+        $"(fun cmd ->\n        {asyncParamBindings})"
+        fieldMappings
+    )
 
 let generateGetAll (table: CreateTable) : string =
   let typeName = capitalizeName table.name
-  let columnNames = table.columns |> List.map (fun c -> c.name) |> String.concat ", "
+
+  let columnNames, fieldMappings =
+    buildRecordProjection (fun (c: ColumnDef) -> c.name) TypeGenerator.readColumnExpr table.columns
+
   let getSql = $"SELECT {columnNames} FROM {table.name}"
 
-  let fieldMappings =
-    table.columns
-    |> List.mapi (fun i col ->
-      let fieldName = capitalizeName col.name in $"{fieldName} = {TypeGenerator.readColumnExpr col i}")
-    |> String.concat "; "
-
-  $"""  static member SelectAll (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
-    queryList
-      "{getSql}"
-      (fun _ -> ())
-      (fun reader ->
-        {{ {fieldMappings} }})
-      tx"""
+  renderSelectMember
+    $"SelectAll (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>>"
+    "queryList"
+    getSql
+    "(fun _ -> ())"
+    fieldMappings
 
 let generateGetOne (table: CreateTable) : string =
   let typeName = capitalizeName table.name
-  let columnNames = table.columns |> List.map (fun c -> c.name) |> String.concat ", "
+
+  let columnNames, fieldMappings =
+    buildRecordProjection (fun (c: ColumnDef) -> c.name) TypeGenerator.readColumnExpr table.columns
+
   let getSql = $"SELECT {columnNames} FROM {table.name} LIMIT 1"
 
-  let fieldMappings =
-    table.columns
-    |> List.mapi (fun i col ->
-      let fieldName = capitalizeName col.name in $"{fieldName} = {TypeGenerator.readColumnExpr col i}")
-    |> String.concat "; "
-
-  $"""  static member SelectOne (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
-    querySingle
-      "{getSql}"
-      (fun _ -> ())
-      (fun reader ->
-        {{ {fieldMappings} }})
-      tx"""
+  renderSelectMember
+    $"SelectOne (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>>"
+    "querySingle"
+    getSql
+    "(fun _ -> ())"
+    fieldMappings
 
 let generateUpdate (table: CreateTable) : string option =
   let typeName = capitalizeName table.name

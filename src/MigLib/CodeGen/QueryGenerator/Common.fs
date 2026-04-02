@@ -114,3 +114,30 @@ let paramBindingExprForItem (cmdVarName: string) (itemExpr: string) (column: Col
 
 let paramBindingExprForColumnVar (cmdVarName: string) (column: ColumnDef) (varExpr: string) =
   addColumnBinding cmdVarName column varExpr
+
+let buildRecordProjection (getName: 'a -> string) (readExpr: 'a -> int -> string) (columns: 'a list) : string * string =
+  let columnNames = columns |> List.map getName |> String.concat ", "
+
+  let fieldMappings =
+    columns
+    |> List.mapi (fun i column ->
+      let fieldName = capitalizeName (getName column)
+      $"{fieldName} = {readExpr column i}")
+    |> String.concat "; "
+
+  columnNames, fieldMappings
+
+let renderSelectMember
+  (memberSignature: string)
+  (queryHelper: string)
+  (sql: string)
+  (configureExpr: string)
+  (fieldMappings: string)
+  =
+  $"""  static member {memberSignature} =
+    {queryHelper}
+      "{sql}"
+      {configureExpr}
+      (fun reader ->
+        {{ {fieldMappings} }})
+      tx"""
