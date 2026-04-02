@@ -129,6 +129,33 @@ let getLastInsertRowId (tx: SqliteTransaction) : Task<int64> =
     return lastId |> unbox<int64>
   }
 
+let executeInsert
+  (sql: string)
+  (configure: SqliteCommand -> unit)
+  (tx: SqliteTransaction)
+  (finish: int64 -> Task<Result<'a, SqliteException>>)
+  : Task<Result<'a, SqliteException>> =
+  executeWrite sql configure tx (fun _ ->
+    task {
+      let! newId = getLastInsertRowId tx
+      return! finish newId
+    })
+
+let executeInsertOrIgnore
+  (sql: string)
+  (configure: SqliteCommand -> unit)
+  (tx: SqliteTransaction)
+  (finish: int64 option -> Task<Result<'a, SqliteException>>)
+  : Task<Result<'a, SqliteException>> =
+  executeWrite sql configure tx (fun rows ->
+    task {
+      if rows = 0 then
+        return! finish None
+      else
+        let! newId = getLastInsertRowId tx
+        return! finish (Some newId)
+    })
+
 type StartupDatabaseState =
   | Missing
   | Ready

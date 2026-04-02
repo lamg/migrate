@@ -48,14 +48,13 @@ let generateInsert (table: CreateTable) : string =
     |> fun pairs -> $"[{pairs}]"
 
   $"""  static member Insert (item: {typeName}) (tx: SqliteTransaction) : Task<Result<int64, SqliteException>> =
-    executeWrite
+    executeInsert
       "{insertSql}"
       (fun cmd ->
         {asyncParamBindings})
       tx
-      (fun _ ->
+      (fun newId ->
         task {{
-          let! newId = getLastInsertRowId tx
           MigrationLog.recordInsert tx "{table.name}" {rowDataPairs}
           return Ok newId
         }})"""
@@ -101,17 +100,16 @@ let generateInsertOrIgnore (table: CreateTable) : string =
     |> fun pairs -> $"[{pairs}]"
 
   $"""  static member InsertOrIgnore (item: {typeName}) (tx: SqliteTransaction) : Task<Result<int64 option, SqliteException>> =
-    executeWrite
+    executeInsertOrIgnore
       "{insertSql}"
       (fun cmd ->
         {asyncParamBindings})
       tx
-      (fun rows ->
+      (fun newId ->
         task {{
-          if rows = 0 then
-            return Ok None
-          else
-            let! newId = getLastInsertRowId tx
+          match newId with
+          | None -> return Ok None
+          | Some newId ->
             MigrationLog.recordInsert tx "{table.name}" {rowDataPairs}
             return Ok (Some newId)
         }})"""

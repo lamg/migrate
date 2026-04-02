@@ -16,14 +16,13 @@ let private generateBaseCase (baseTable: CreateTable) (typeName: string) : strin
   $"""        | New{typeName}.Base({fieldPattern}) ->
           // Single INSERT into base table
           return!
-            executeWrite
+            executeInsert
               "{insertSql}"
               (fun cmd ->
                 {asyncParamBindings})
               tx
-              (fun _ ->
+              (fun {baseTable.name}Id ->
                 task {{
-                  let! {baseTable.name}Id = getLastInsertRowId tx
                   return Ok {baseTable.name}Id
                 }})"""
 
@@ -38,18 +37,14 @@ let private generateBaseCaseInsertOrIgnore (baseTable: CreateTable) (typeName: s
   $"""        | New{typeName}.Base({fieldPattern}) ->
           // Single INSERT OR IGNORE into base table
           return!
-            executeWrite
+            executeInsertOrIgnore
               "{insertSql}"
               (fun cmd ->
                 {asyncParamBindings})
               tx
-              (fun rows ->
+              (fun {baseTable.name}Id ->
                 task {{
-                  if rows = 0 then
-                    return Ok None
-                  else
-                    let! {baseTable.name}Id = getLastInsertRowId tx
-                    return Ok (Some {baseTable.name}Id)
+                  return Ok {baseTable.name}Id
                 }})"""
 
 let private generateExtensionCase (baseTable: CreateTable) (extension: ExtensionTable) (typeName: string) : string =
@@ -84,14 +79,13 @@ let private generateExtensionCase (baseTable: CreateTable) (extension: Extension
   $"""        | New{typeName}.With{caseName}({fieldPattern}) ->
           // Two inserts in same transaction (atomic)
           let! baseInsertResult =
-            executeWrite
+            executeInsert
               "{baseInsertSql}"
               (fun cmd ->
                 {asyncBaseParamBindings})
               tx
-              (fun _ ->
+              (fun {baseTable.name}Id ->
                 task {{
-                  let! {baseTable.name}Id = getLastInsertRowId tx
                   return Ok {baseTable.name}Id
                 }})
 
@@ -146,18 +140,14 @@ let private generateExtensionCaseInsertOrIgnore
   $"""        | New{typeName}.With{caseName}({fieldPattern}) ->
           // Base INSERT OR IGNORE then extension INSERT
           let! baseInsertResult =
-            executeWrite
+            executeInsertOrIgnore
               "{baseInsertSql}"
               (fun cmd ->
                 {asyncBaseParamBindings})
               tx
-              (fun rows ->
+              (fun {baseTable.name}Id ->
                 task {{
-                  if rows = 0 then
-                    return Ok None
-                  else
-                    let! {baseTable.name}Id = getLastInsertRowId tx
-                    return Ok (Some {baseTable.name}Id)
+                  return Ok {baseTable.name}Id
                 }})
 
           match baseInsertResult with
