@@ -6059,7 +6059,7 @@ let ``querybyorcreate for regular tables re-queries by annotation columns`` () =
     Assert.Contains("(tx: SqliteTransaction)", generated)
     Assert.Contains("SELECT slug, title FROM slug_article WHERE slug = @slug LIMIT 1", generated)
     Assert.DoesNotContain("let! getResult = SlugArticle.SelectById", generated)
-    Assert.Contains("| Ok _ ->", generated)
+    Assert.Contains("querySingleOrInsert select", generated)
 
   Directory.Delete(tempDir, true)
 
@@ -6083,7 +6083,7 @@ let ``querybyorcreate for normalized tables uses base PK column in re-query join
     Assert.DoesNotContain("LEFT JOIN product_stock ext0 ON product.id = ext0.product_id", generated)
     Assert.DoesNotContain("cmd2.Parameters.AddWithValue(\"@product_id\", productId)", generated)
     Assert.DoesNotContain("let! getResult = Product.SelectById newId tx", generated)
-    Assert.Contains("| Ok _ ->", generated)
+    Assert.Contains("querySingleOrInsert select", generated)
     Assert.DoesNotContain(": Result<", generated)
 
   Directory.Delete(tempDir, true)

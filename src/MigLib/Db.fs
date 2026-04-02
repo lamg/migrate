@@ -80,6 +80,31 @@ let queryList
       return Error ex
   }
 
+let querySingleOrInsert
+  (select: unit -> Task<Result<'a option, SqliteException>>)
+  (insert: unit -> Task<Result<'b, SqliteException>>)
+  : Task<Result<'a, SqliteException>> =
+  task {
+    let! existingResult = select ()
+
+    match existingResult with
+    | Ok(Some item) -> return Ok item
+    | Ok None ->
+      let! insertResult = insert ()
+
+      match insertResult with
+      | Ok _ ->
+        let! insertedResult = select ()
+
+        return
+          match insertedResult with
+          | Ok(Some item) -> Ok item
+          | Ok None -> Error(SqliteException("Failed to retrieve inserted record", 0))
+          | Error ex -> Error ex
+      | Error ex -> return Error ex
+    | Error ex -> return Error ex
+  }
+
 type StartupDatabaseState =
   | Missing
   | Ready

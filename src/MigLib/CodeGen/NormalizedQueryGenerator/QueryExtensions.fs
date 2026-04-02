@@ -233,58 +233,26 @@ let generateNormalizedQueryByOrCreate (normalized: NormalizedTable) (annotation:
         $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toDbValueExpr columnDef col}) |> ignore")
     |> String.concat $"\n{lineIndent}"
 
-  let asyncParamBindings = generateAsyncParamBindings "cmd" "            "
-  let asyncRequeryParamBindings = generateAsyncParamBindings "cmd" "                "
+  let asyncParamBindings = generateAsyncParamBindings "cmd" "          "
 
   let caseSelection =
     generateCaseSelection 14 normalized.baseTable normalized.extensions typeName
 
-  let nestedCaseSelection =
-    generateCaseSelection 18 normalized.baseTable normalized.extensions typeName
-
-  let valueExtractions = generateValueExtractions "      " "        "
+  let valueExtractions = generateValueExtractions "    " "      "
 
   $"""  static member {methodName} (newItem: {newTypeName}) (tx: SqliteTransaction) : Task<Result<{typeName}, SqliteException>> =
-    task {{
-      // Extract query values from NewType DU
+    // Extract query values from NewType DU
 {valueExtractions}
-      // Try to find existing record
-      let! existingResult =
-        (querySingle
-          "{selectSql}"
-          (fun cmd ->
-            {asyncParamBindings})
-          (fun reader ->
-            let item =
+
+    let select () =
+      querySingle
+        "{selectSql}"
+        (fun cmd ->
+          {asyncParamBindings})
+        (fun reader ->
+          let item =
 {caseSelection}
-            item)
-          tx)
+          item)
+        tx
 
-      match existingResult with
-      | Ok(Some item) ->
-        return Ok item
-      | Ok None ->
-        // Not found - insert and fetch
-        let! insertResult = {typeName}.Insert newItem tx
-
-        match insertResult with
-        | Ok _ ->
-          let! insertedResult =
-            (querySingle
-              "{selectSql}"
-              (fun cmd ->
-                {asyncRequeryParamBindings})
-              (fun reader ->
-                let insertedItem =
-{nestedCaseSelection}
-                insertedItem)
-              tx)
-
-          return
-            match insertedResult with
-            | Ok(Some item) -> Ok item
-            | Ok None -> Error (SqliteException("Failed to retrieve inserted record", 0))
-            | Error ex -> Error ex
-        | Error ex -> return Error ex
-      | Error ex -> return Error ex
-    }}"""
+    querySingleOrInsert select (fun () -> {typeName}.Insert newItem tx)"""

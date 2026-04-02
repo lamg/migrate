@@ -163,7 +163,7 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
   let asyncValueExtractions =
     annotation.columns
     |> List.map (fun col -> let fieldName = capitalizeName col in $"let {col} = newItem.{fieldName}")
-    |> String.concat "\n      "
+    |> String.concat "\n    "
 
   let generateAsyncParamBindings (cmdVarName: string) (lineIndent: string) =
     annotation.columns
@@ -175,46 +175,19 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
   let selectSql =
     $"SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1"
 
-  let asyncParamBindings = generateAsyncParamBindings "cmd" "            "
-  let asyncRequeryParamBindings = generateAsyncParamBindings "cmd" "                "
+  let asyncParamBindings = generateAsyncParamBindings "cmd" "          "
 
   $"""  static member {methodName} (newItem: {typeName}) (tx: SqliteTransaction) : Task<Result<{typeName}, SqliteException>> =
-    task {{
-      // Extract query values from newItem
-      {asyncValueExtractions}
-      // Try to find existing record
-      let! existingResult =
-        (querySingle
-          "{selectSql}"
-          (fun cmd ->
-            {asyncParamBindings})
-          (fun reader ->
-            {{ {fieldMappings} }})
-          tx)
+    // Extract query values from newItem
+    {asyncValueExtractions}
 
-      match existingResult with
-      | Ok(Some item) ->
-        return Ok item
-      | Ok None ->
-        // Not found - insert and fetch
-        let! insertResult = {typeName}.Insert newItem tx
+    let select () =
+      querySingle
+        "{selectSql}"
+        (fun cmd ->
+          {asyncParamBindings})
+        (fun reader ->
+          {{ {fieldMappings} }})
+        tx
 
-        match insertResult with
-        | Ok _ ->
-          let! insertedResult =
-            (querySingle
-              "{selectSql}"
-              (fun cmd ->
-                {asyncRequeryParamBindings})
-              (fun reader ->
-                {{ {fieldMappings} }})
-              tx)
-
-          return
-            match insertedResult with
-            | Ok(Some item) -> Ok item
-            | Ok None -> Error (SqliteException("Failed to retrieve inserted record", 0))
-            | Error ex -> Error ex
-        | Error ex -> return Error ex
-      | Error ex -> return Error ex
-    }}"""
+    querySingleOrInsert select (fun () -> {typeName}.Insert newItem tx)"""
