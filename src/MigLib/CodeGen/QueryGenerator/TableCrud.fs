@@ -289,19 +289,10 @@ let generateUpsert (table: CreateTable) : string option =
 
     Some
       $"""  static member Upsert (item: {typeName}) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
-    task {{
-      let! existing = {typeName}.SelectById {selectByIdArgs} tx
-
-      match existing with
-      | Error ex -> return Error ex
-      | Ok(Some _) -> return! {typeName}.Update item tx
-      | Ok None ->
-        let! inserted = {typeName}.Insert item tx
-
-        match inserted with
-        | Ok _ -> return Ok()
-        | Error ex -> return Error ex
-    }}"""
+    upsertByExisting
+      (fun () -> {typeName}.SelectById {selectByIdArgs} tx)
+      (fun () -> {typeName}.Update item tx)
+      (fun () -> {typeName}.Insert item tx)"""
 
 let validateUpsertAnnotation (table: CreateTable) : Result<unit, string> =
   if table.upsertAnnotations.IsEmpty then

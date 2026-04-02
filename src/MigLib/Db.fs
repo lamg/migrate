@@ -180,6 +180,26 @@ let sequenceUnitResults
 
   loop steps
 
+let upsertByExisting
+  (selectExisting: unit -> Task<Result<'a option, SqliteException>>)
+  (updateExisting: unit -> Task<Result<unit, SqliteException>>)
+  (insertNew: unit -> Task<Result<'b, SqliteException>>)
+  : Task<Result<unit, SqliteException>> =
+  task {
+    let! existingResult = selectExisting ()
+
+    match existingResult with
+    | Error ex -> return Error ex
+    | Ok(Some _) -> return! updateExisting ()
+    | Ok None ->
+      let! insertResult = insertNew ()
+
+      return
+        match insertResult with
+        | Ok _ -> Ok()
+        | Error ex -> Error ex
+  }
+
 type StartupDatabaseState =
   | Missing
   | Ready
