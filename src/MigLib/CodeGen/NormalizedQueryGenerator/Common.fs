@@ -74,14 +74,7 @@ let getColumnVarName (column: ColumnDef) : string =
 
 let generateParamBindings (columns: ColumnDef list) (cmdVarName: string) : string list =
   columns
-  |> List.map (fun col ->
-    let varName = getColumnVarName col
-    let isNullable = TypeGenerator.isColumnNullable col
-
-    if isNullable then
-      $"{cmdVarName}.Parameters.AddWithValue(\"@{col.name}\", {TypeGenerator.toNullableDbValueExpr col varName}) |> ignore"
-    else
-      $"{cmdVarName}.Parameters.AddWithValue(\"@{col.name}\", {TypeGenerator.toDbValueExpr col varName}) |> ignore")
+  |> List.map (fun col -> addColumnBinding cmdVarName col (getColumnVarName col))
 
 let getSinglePrimaryKeyColumn (table: CreateTable) : ColumnDef option =
   let tableLevelPk =
