@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.6] - 2026-04-02
+
+Changed:
+
+- **AST-Backed Generated Type Definitions**: moved the remaining generated type-definition blocks away from full F# string templates and onto `Fabulous.AST`
+  - regular and normalized query members were already emitted through AST builders, and enum types, measure types, and normalized DU property augmentations now follow the same path
+  - this reduces handwritten code-string assembly in the generator while preserving the generated API and output verified by the full test suite
+
 ## [5.2.5] - 2026-04-02
 
 Changed:
