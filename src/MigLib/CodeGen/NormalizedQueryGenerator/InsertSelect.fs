@@ -3,6 +3,7 @@ module internal Mig.CodeGen.NormalizedQueryGeneratorInsertSelect
 open Mig.DeclarativeMigrations.Types
 open Mig.CodeGen.NormalizedSchema
 open Mig.CodeGen.NormalizedQueryGeneratorCommon
+open Mig.CodeGen.SqlParamBindings
 
 let private generateBaseCase (baseTable: CreateTable) (typeName: string) : string =
   let insertColumns = getInsertColumns baseTable
@@ -82,7 +83,7 @@ let private generateExtensionCase (baseTable: CreateTable) (extension: Extension
           let {baseTable.name}Id = lastId |> unbox<int64>
 
           use cmd2 = new SqliteCommand("INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "}) VALUES (@{extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "})", tx.Connection, tx)
-          cmd2.Parameters.AddWithValue("@{extension.fkColumn}", {extensionFkValueExpr}) |> ignore
+          {addPlainBinding "cmd2" extension.fkColumn extensionFkValueExpr}
           {asyncExtensionParamBindings}
           MigrationLog.ensureWriteAllowed tx
           let! _ = cmd2.ExecuteNonQueryAsync()
@@ -131,7 +132,7 @@ let private generateExtensionCaseInsertOrIgnore
             let {baseTable.name}Id = lastId |> unbox<int64>
 
             use cmd2 = new SqliteCommand("INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "}) VALUES (@{extension.fkColumn}, {extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "})", tx.Connection, tx)
-            cmd2.Parameters.AddWithValue("@{extension.fkColumn}", {extensionFkValueExpr}) |> ignore
+            {addPlainBinding "cmd2" extension.fkColumn extensionFkValueExpr}
             {asyncExtensionParamBindings}
             MigrationLog.ensureWriteAllowed tx
             let! _ = cmd2.ExecuteNonQueryAsync()
@@ -243,9 +244,8 @@ let generateGetById (normalized: NormalizedTable) : string option =
 
     let asyncParamBindings =
       pks
-      |> List.map (fun pk ->
-        $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {TypeGenerator.toDbValueExpr pk pk.name}) |> ignore")
-      |> String.concat "\n        "
+      |> List.map (fun pk -> addColumnBinding "cmd" pk pk.name)
+      |> joinBindings "        "
 
     let caseSelection =
       generateCaseSelection 12 normalized.baseTable normalized.extensions typeName

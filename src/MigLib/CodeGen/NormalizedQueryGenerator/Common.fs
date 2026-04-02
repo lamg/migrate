@@ -4,6 +4,7 @@ open Mig.DeclarativeMigrations.Types
 open Fabulous.AST
 open Mig.CodeGen.AstExprBuilders
 open Mig.CodeGen.NormalizedSchema
+open Mig.CodeGen.SqlParamBindings
 
 let readerMethod (t: string) =
   t.Replace("int64", "Int64").Replace("string", "String").Replace("float", "Double").Replace("DateTime", "DateTime")
@@ -65,15 +66,16 @@ let generateSingleFieldPattern (columns: ColumnDef list) (targetColName: string)
 
   pattern, varName
 
+let getColumnVarName (column: ColumnDef) : string =
+  let fieldName = TypeGenerator.toPascalCase column.name
+
+  fieldName.ToLower().[0..0]
+  + (if fieldName.Length > 1 then fieldName.[1..] else "")
+
 let generateParamBindings (columns: ColumnDef list) (cmdVarName: string) : string list =
   columns
   |> List.map (fun col ->
-    let fieldName = TypeGenerator.toPascalCase col.name
-
-    let varName =
-      fieldName.ToLower().[0..0]
-      + (if fieldName.Length > 1 then fieldName.[1..] else "")
-
+    let varName = getColumnVarName col
     let isNullable = TypeGenerator.isColumnNullable col
 
     if isNullable then
@@ -111,12 +113,6 @@ let isAutoIncrementPrimaryKey (column: ColumnDef) : bool =
     match constraintDef with
     | PrimaryKey pk -> pk.isAutoincrement
     | _ -> false)
-
-let getColumnVarName (column: ColumnDef) : string =
-  let fieldName = TypeGenerator.toPascalCase column.name
-
-  fieldName.ToLower().[0..0]
-  + (if fieldName.Length > 1 then fieldName.[1..] else "")
 
 let getPrimaryKeyColumns (table: CreateTable) : ColumnDef list =
   let tableLevelPk =

@@ -6,6 +6,7 @@ open Fabulous.AST
 open type Fabulous.AST.Ast
 open Mig.CodeGen.AstExprBuilders
 open Mig.CodeGen.QueryGeneratorCommon
+open Mig.CodeGen.SqlParamBindings
 
 let generateViewGetAll (viewName: string) (columns: ViewColumn list) : string =
   let typeName = capitalizeName viewName
@@ -118,9 +119,8 @@ let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotatio
   let asyncParamBindings =
     annotation.columns
     |> List.map (fun col ->
-      let columnDef = findViewColumn columns col |> Option.get in
-      $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toViewDbValueExpr columnDef col}) |> ignore")
-    |> String.concat "\n        "
+      let columnDef = findViewColumn columns col |> Option.get in addViewBinding "cmd" columnDef col)
+    |> joinBindings "        "
 
   $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
     queryList
@@ -147,8 +147,7 @@ let generateViewQueryLike (viewName: string) (columns: ViewColumn list) (annotat
       let fieldName = capitalizeName c.name in $"{fieldName} = {TypeGenerator.readViewColumnExpr c i}")
     |> String.concat "; "
 
-  let asyncParamBindingExpr =
-    $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore"
+  let asyncParamBindingExpr = addPlainBinding "cmd" col col
 
   $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
     queryList

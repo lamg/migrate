@@ -3,6 +3,7 @@ module internal Mig.CodeGen.QueryGeneratorCommon
 open Mig.DeclarativeMigrations.Types
 open Mig.CodeGen.ViewIntrospection
 open Mig.CodeGen.AstExprBuilders
+open Mig.CodeGen.SqlParamBindings
 
 let indent n = String.replicate n " "
 
@@ -106,3 +107,10 @@ let findColumn (table: CreateTable) (colName: string) : ColumnDef option =
 let findViewColumn (columns: ViewColumn list) (colName: string) : ViewColumn option =
   columns
   |> List.tryFind (fun c -> c.name.ToLowerInvariant() = colName.ToLowerInvariant())
+
+let paramBindingExprForItem (cmdVarName: string) (itemExpr: string) (column: ColumnDef) =
+  let fieldName = capitalize column.name
+  addColumnBinding cmdVarName column $"{itemExpr}.{fieldName}"
+
+let paramBindingExprForColumnVar (cmdVarName: string) (column: ColumnDef) (varExpr: string) =
+  addColumnBinding cmdVarName column varExpr

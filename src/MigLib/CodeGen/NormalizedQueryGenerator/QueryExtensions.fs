@@ -3,6 +3,7 @@ module internal Mig.CodeGen.NormalizedQueryGeneratorQueryExtensions
 open Mig.DeclarativeMigrations.Types
 open Mig.CodeGen.NormalizedSchema
 open Mig.CodeGen.NormalizedQueryGeneratorCommon
+open Mig.CodeGen.SqlParamBindings
 
 let generateNormalizedQueryBy (normalized: NormalizedTable) (annotation: QueryByAnnotation) : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
@@ -53,14 +54,8 @@ let generateNormalizedQueryBy (normalized: NormalizedTable) (annotation: QueryBy
   let asyncParamBindings =
     annotation.columns
     |> List.map (fun col ->
-      let _, columnDef = findNormalizedColumn normalized col |> Option.get in
-      let isNullable = TypeGenerator.isColumnNullable columnDef in
-
-      if isNullable then
-        $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toNullableDbValueExpr columnDef col}) |> ignore"
-      else
-        $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toDbValueExpr columnDef col}) |> ignore")
-    |> String.concat "\n        "
+      let _, columnDef = findNormalizedColumn normalized col |> Option.get in addColumnBinding "cmd" columnDef col)
+    |> joinBindings "        "
 
   let caseSelection =
     generateCaseSelection 14 normalized.baseTable normalized.extensions typeName
@@ -113,13 +108,7 @@ let generateNormalizedQueryLike (normalized: NormalizedTable) (annotation: Query
         WHERE {whereClause}"""
 
   let asyncParamBindings =
-    let _, columnDef = findNormalizedColumn normalized col |> Option.get in
-    let isNullable = TypeGenerator.isColumnNullable columnDef in
-
-    if isNullable then
-      $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toNullableDbValueExpr columnDef col}) |> ignore"
-    else
-      $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toDbValueExpr columnDef col}) |> ignore"
+    let _, columnDef = findNormalizedColumn normalized col |> Option.get in addColumnBinding "cmd" columnDef col
 
   let caseSelection =
     generateCaseSelection 14 normalized.baseTable normalized.extensions typeName

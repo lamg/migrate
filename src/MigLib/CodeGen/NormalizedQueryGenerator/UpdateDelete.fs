@@ -6,6 +6,7 @@ open type Fabulous.AST.Ast
 open Mig.CodeGen.AstExprBuilders
 open Mig.CodeGen.NormalizedSchema
 open Mig.CodeGen.NormalizedQueryGeneratorCommon
+open Mig.CodeGen.SqlParamBindings
 
 let private generateUpdateBaseSql (baseTable: CreateTable) : string =
   let pkCols =
@@ -53,7 +54,10 @@ let private generateUpdateBaseCase
   let deleteStatements =
     extensions
     |> List.map (fun ext ->
-      $"          use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n          delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", {idVarName}) |> ignore\n          MigrationLog.ensureWriteAllowed tx\n          let! _ = delCmd{ext.aspectName}.ExecuteNonQueryAsync()")
+      let deleteCmdVarName = $"delCmd{ext.aspectName}"
+      let deleteIdBinding = addPlainBinding deleteCmdVarName "id" idVarName
+
+      $"          use {deleteCmdVarName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n          {deleteIdBinding}\n          MigrationLog.ensureWriteAllowed tx\n          let! _ = {deleteCmdVarName}.ExecuteNonQueryAsync()")
     |> String.concat "\n"
 
   $"""        | {typeName}.Base({fieldPattern}) ->
@@ -112,11 +116,16 @@ let private generateUpdateExtensionCase
     generateParamBindings extensionInsertColumns "cmd2"
     |> String.concat "\n          "
 
+  let extensionFkBinding = addPlainBinding "cmd2" extension.fkColumn idVarName
+
   let deleteOtherExtensions =
     allExtensions
     |> List.filter (fun e -> e.table.name <> extension.table.name)
     |> List.map (fun ext ->
-      $"          use delCmd{ext.aspectName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n          delCmd{ext.aspectName}.Parameters.AddWithValue(\"@id\", {idVarName}) |> ignore\n          MigrationLog.ensureWriteAllowed tx\n          let! _ = delCmd{ext.aspectName}.ExecuteNonQueryAsync()")
+      let deleteCmdVarName = $"delCmd{ext.aspectName}"
+      let deleteIdBinding = addPlainBinding deleteCmdVarName "id" idVarName
+
+      $"          use {deleteCmdVarName} = new SqliteCommand(\"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id\", tx.Connection, tx)\n          {deleteIdBinding}\n          MigrationLog.ensureWriteAllowed tx\n          let! _ = {deleteCmdVarName}.ExecuteNonQueryAsync()")
     |> String.concat "\n"
 
   $"""        | {typeName}.With{caseName}({fieldPattern}) ->
@@ -127,7 +136,7 @@ let private generateUpdateExtensionCase
           let! _ = cmd1.ExecuteNonQueryAsync()
 
           use cmd2 = new SqliteCommand("{insertOrReplaceSql}", tx.Connection, tx)
-          cmd2.Parameters.AddWithValue("@{extension.fkColumn}", {idVarName}) |> ignore
+          {extensionFkBinding}
           {asyncExtensionParamBindings}
           MigrationLog.ensureWriteAllowed tx
           let! _ = cmd2.ExecuteNonQueryAsync()
@@ -188,9 +197,7 @@ let generateDelete (normalized: NormalizedTable) : string option =
 
     let asyncBodyExprs =
       [ OtherExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)" ]
-      @ (pks
-         |> List.map (fun pk ->
-           OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {TypeGenerator.toDbValueExpr pk pk.name}) |> ignore"))
+      @ (pks |> List.map (fun pk -> OtherExpr(addColumnBinding "cmd" pk pk.name)))
       @ [ OtherExpr "MigrationLog.ensureWriteAllowed tx"
           OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"
           OtherExpr "return Ok()" ]

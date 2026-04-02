@@ -6,6 +6,7 @@ open type Fabulous.AST.Ast
 open Microsoft.Data.Sqlite
 open Mig.CodeGen.AstExprBuilders
 open Mig.CodeGen.QueryGeneratorCommon
+open Mig.CodeGen.SqlParamBindings
 
 let generateInsert (table: CreateTable) : string =
   let typeName = capitalizeName table.name
@@ -35,17 +36,7 @@ let generateInsert (table: CreateTable) : string =
 
   let asyncParamBindingExprs =
     insertCols
-    |> List.map (fun col ->
-      let fieldName = capitalizeName col.name
-      let isNullable = TypeGenerator.isColumnNullable col
-      let itemFieldExpr = $"item.{fieldName}"
-
-      if isNullable then
-        let dbValueExpr = TypeGenerator.toNullableDbValueExpr col itemFieldExpr
-        OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", {dbValueExpr}) |> ignore"
-      else
-        let dbValueExpr = TypeGenerator.toDbValueExpr col itemFieldExpr
-        OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", {dbValueExpr}) |> ignore")
+    |> List.map (fun col -> OtherExpr(paramBindingExprForItem "cmd" "item" col))
 
   let rowDataPairs =
     (insertCols |> List.map (rowDataPairExprForItem "item"))
@@ -100,17 +91,7 @@ let generateInsertOrIgnore (table: CreateTable) : string =
 
   let asyncParamBindingExprs =
     insertCols
-    |> List.map (fun col ->
-      let fieldName = capitalizeName col.name
-      let isNullable = TypeGenerator.isColumnNullable col
-      let itemFieldExpr = $"item.{fieldName}"
-
-      if isNullable then
-        let dbValueExpr = TypeGenerator.toNullableDbValueExpr col itemFieldExpr
-        OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", {dbValueExpr}) |> ignore"
-      else
-        let dbValueExpr = TypeGenerator.toDbValueExpr col itemFieldExpr
-        OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", {dbValueExpr}) |> ignore")
+    |> List.map (fun col -> OtherExpr(paramBindingExprForItem "cmd" "item" col))
 
   let rowDataPairs =
     (insertCols |> List.map (rowDataPairExprForItem "item"))
@@ -164,9 +145,8 @@ let generateGet (table: CreateTable) : string option =
 
     let asyncParamBindings =
       pks
-      |> List.map (fun pk ->
-        $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {TypeGenerator.toDbValueExpr pk pk.name}) |> ignore")
-      |> String.concat "\n        "
+      |> List.map (fun pk -> paramBindingExprForColumnVar "cmd" pk pk.name)
+      |> joinBindings "        "
 
     Some
       $"""  static member SelectById {paramList} (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
@@ -239,17 +219,7 @@ let generateUpdate (table: CreateTable) : string option =
 
     let asyncParamBindingExprs =
       table.columns
-      |> List.map (fun col ->
-        let fieldName = capitalizeName col.name
-        let isNullable = TypeGenerator.isColumnNullable col
-        let itemFieldExpr = $"item.{fieldName}"
-
-        if isNullable then
-          let dbValueExpr = TypeGenerator.toNullableDbValueExpr col itemFieldExpr in
-          OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", {dbValueExpr}) |> ignore"
-        else
-          let dbValueExpr = TypeGenerator.toDbValueExpr col itemFieldExpr in
-          OtherExpr $"cmd.Parameters.AddWithValue(\"@{col.name}\", {dbValueExpr}) |> ignore")
+      |> List.map (fun col -> OtherExpr(paramBindingExprForItem "cmd" "item" col))
 
     let asyncBodyExprs =
       [ OtherExpr $"use cmd = new SqliteCommand(\"{updateSql}\", tx.Connection, tx)" ]
@@ -285,8 +255,7 @@ let generateDelete (table: CreateTable) : string option =
     let asyncBodyExprs =
       [ OtherExpr $"use cmd = new SqliteCommand(\"{deleteSql}\", tx.Connection, tx)" ]
       @ (pks
-         |> List.map (fun pk ->
-           OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {TypeGenerator.toDbValueExpr pk pk.name}) |> ignore"))
+         |> List.map (fun pk -> OtherExpr(paramBindingExprForColumnVar "cmd" pk pk.name)))
       @ [ OtherExpr "MigrationLog.ensureWriteAllowed tx"
           OtherExpr "let! _ = cmd.ExecuteNonQueryAsync()"
           OtherExpr $"MigrationLog.recordDelete tx \"{table.name}\" {rowDataExpr}"

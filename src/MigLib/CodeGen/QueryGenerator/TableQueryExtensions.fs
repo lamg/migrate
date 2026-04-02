@@ -5,6 +5,7 @@ open Fabulous.AST
 open type Fabulous.AST.Ast
 open Mig.CodeGen.AstExprBuilders
 open Mig.CodeGen.QueryGeneratorCommon
+open Mig.CodeGen.SqlParamBindings
 
 let validateQueryByAnnotation (table: CreateTable) (annotation: QueryByAnnotation) : Result<unit, string> =
   let columnNames =
@@ -74,13 +75,8 @@ let generateQueryBy (table: CreateTable) (annotation: QueryByAnnotation) : strin
     annotation.columns
     |> List.map (fun col ->
       let columnDef = findColumn table col |> Option.get
-      let isNullable = TypeGenerator.isColumnNullable columnDef
-
-      if isNullable then
-        $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toNullableDbValueExpr columnDef col}) |> ignore"
-      else
-        $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toDbValueExpr columnDef col}) |> ignore")
-    |> String.concat "\n        "
+      addColumnBinding "cmd" columnDef col)
+    |> joinBindings "        "
 
   $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
     queryList
@@ -110,9 +106,9 @@ let generateQueryLike (table: CreateTable) (annotation: QueryLikeAnnotation) : s
 
   let asyncParamBindingExpr =
     if isNullable then
-      $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+      addOptionalPlainBinding "cmd" col col
     else
-      $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore"
+      addPlainBinding "cmd" col col
 
   $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
     queryList
@@ -173,13 +169,8 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
     annotation.columns
     |> List.map (fun col ->
       let columnDef = findColumn table col |> Option.get
-      let isNullable = TypeGenerator.isColumnNullable columnDef
-
-      if isNullable then
-        $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toNullableDbValueExpr columnDef col}) |> ignore"
-      else
-        $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toDbValueExpr columnDef col}) |> ignore")
-    |> String.concat $"\n{lineIndent}"
+      addColumnBinding cmdVarName columnDef col)
+    |> joinBindings lineIndent
 
   let selectSql =
     $"SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1"
