@@ -262,49 +262,58 @@ let generateNormalizedQueryByOrCreate (normalized: NormalizedTable) (annotation:
         $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toDbValueExpr columnDef col}) |> ignore")
     |> String.concat $"\n{lineIndent}"
 
-  let asyncParamBindings = generateAsyncParamBindings "cmd" "        "
-  let asyncRequeryParamBindings = generateAsyncParamBindings "cmd2" "            "
+  let asyncParamBindings = generateAsyncParamBindings "cmd" "            "
+  let asyncRequeryParamBindings = generateAsyncParamBindings "cmd" "                "
 
   let caseSelection =
-    generateCaseSelection 12 normalized.baseTable normalized.extensions typeName
+    generateCaseSelection 14 normalized.baseTable normalized.extensions typeName
 
   let nestedCaseSelection =
-    generateCaseSelection 16 normalized.baseTable normalized.extensions typeName
+    generateCaseSelection 18 normalized.baseTable normalized.extensions typeName
 
-  let valueExtractions = generateValueExtractions "        " "          "
+  let valueExtractions = generateValueExtractions "      " "        "
 
   $"""  static member {methodName} (newItem: {newTypeName}) (tx: SqliteTransaction) : Task<Result<{typeName}, SqliteException>> =
     task {{
-      try
-        // Extract query values from NewType DU
+      // Extract query values from NewType DU
 {valueExtractions}
-        // Try to find existing record
-        use cmd = new SqliteCommand("{selectSql}", tx.Connection, tx)
-        {asyncParamBindings}
-        use! reader = cmd.ExecuteReaderAsync()
-        let! hasRow = reader.ReadAsync()
-        if hasRow then
-          // Found existing record - return it
-          let item =
+      // Try to find existing record
+      let! existingResult =
+        (querySingle
+          "{selectSql}"
+          (fun cmd ->
+            {asyncParamBindings})
+          (fun reader ->
+            let item =
 {caseSelection}
-          return Ok item
-        else
-          // Not found - insert and fetch
-          reader.Close()
-          let! insertResult = {typeName}.Insert newItem tx
-          match insertResult with
-          | Ok _ ->
-            use cmd2 = new SqliteCommand("{selectSql}", tx.Connection, tx)
-            {asyncRequeryParamBindings}
-            use! reader = cmd2.ExecuteReaderAsync()
-            let! hasInsertedRow = reader.ReadAsync()
-            if hasInsertedRow then
-              let insertedItem =
+            item)
+          tx)
+
+      match existingResult with
+      | Ok(Some item) ->
+        return Ok item
+      | Ok None ->
+        // Not found - insert and fetch
+        let! insertResult = {typeName}.Insert newItem tx
+
+        match insertResult with
+        | Ok _ ->
+          let! insertedResult =
+            (querySingle
+              "{selectSql}"
+              (fun cmd ->
+                {asyncRequeryParamBindings})
+              (fun reader ->
+                let insertedItem =
 {nestedCaseSelection}
-              return Ok insertedItem
-            else
-              return Error (SqliteException("Failed to retrieve inserted record", 0))
-          | Error ex -> return Error ex
-      with
-      | :? SqliteException as ex -> return Error ex
+                insertedItem)
+              tx)
+
+          return
+            match insertedResult with
+            | Ok(Some item) -> Ok item
+            | Ok None -> Error (SqliteException("Failed to retrieve inserted record", 0))
+            | Error ex -> Error ex
+        | Error ex -> return Error ex
+      | Error ex -> return Error ex
     }}"""

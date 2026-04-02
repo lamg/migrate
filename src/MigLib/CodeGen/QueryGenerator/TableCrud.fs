@@ -162,22 +162,21 @@ let generateGet (table: CreateTable) : string option =
         let fieldName = capitalizeName col.name in $"{fieldName} = {TypeGenerator.readColumnExpr col i}")
       |> String.concat "; "
 
-    let asyncParamBindingExprs =
+    let asyncParamBindings =
       pks
       |> List.map (fun pk ->
-        OtherExpr $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {TypeGenerator.toDbValueExpr pk pk.name}) |> ignore")
+        $"cmd.Parameters.AddWithValue(\"@{pk.name}\", {TypeGenerator.toDbValueExpr pk pk.name}) |> ignore")
+      |> String.concat "\n        "
 
-    let asyncBodyExprs =
-      [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)" ]
-      @ asyncParamBindingExprs
-      @ [ OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
-          OtherExpr "let! hasRow = reader.ReadAsync()"
-          OtherExpr $"if hasRow then return Ok(Some {{ {fieldMappings} }}) else return Ok None" ]
-
-    let memberName = $"SelectById {paramList} (tx: SqliteTransaction)"
-    let returnType = $"Task<Result<{typeName} option, SqliteException>>"
-    let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
-    Some(generateStaticMemberCode typeName memberName returnType body)
+    Some
+      $"""  static member SelectById {paramList} (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
+    querySingle
+      "{getSql}"
+      (fun cmd ->
+        {asyncParamBindings})
+      (fun reader ->
+        {{ {fieldMappings} }})
+      tx"""
 
 let generateGetAll (table: CreateTable) : string =
   let typeName = capitalizeName table.name
@@ -216,16 +215,13 @@ let generateGetOne (table: CreateTable) : string =
       let fieldName = capitalizeName col.name in $"{fieldName} = {TypeGenerator.readColumnExpr col i}")
     |> String.concat "; "
 
-  let asyncBodyExprs =
-    [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
-      OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
-      OtherExpr "let! hasRow = reader.ReadAsync()"
-      OtherExpr $"if hasRow then return Ok(Some {{ {fieldMappings} }}) else return Ok None" ]
-
-  let memberName = "SelectOne (tx: SqliteTransaction)"
-  let returnType = $"Task<Result<{typeName} option, SqliteException>>"
-  let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
-  generateStaticMemberCode typeName memberName returnType body
+  $"""  static member SelectOne (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
+    querySingle
+      "{getSql}"
+      (fun _ -> ())
+      (fun reader ->
+        {{ {fieldMappings} }})
+      tx"""
 
 let generateUpdate (table: CreateTable) : string option =
   let typeName = capitalizeName table.name

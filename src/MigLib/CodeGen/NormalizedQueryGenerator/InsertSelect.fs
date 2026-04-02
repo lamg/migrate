@@ -261,21 +261,15 @@ let generateGetById (normalized: NormalizedTable) : string option =
 
     Some
       $"""  static member SelectById {paramList} (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
-        {asyncParamBindings}
-        use! reader = cmd.ExecuteReaderAsync()
-        let! hasRow = reader.ReadAsync()
-        if hasRow then
-          let item =
+    querySingle
+      "{getSql}"
+      (fun cmd ->
+        {asyncParamBindings})
+      (fun reader ->
+        let item =
 {caseSelection}
-          return Ok(Some item)
-        else
-          return Ok None
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+        item)
+      tx"""
 
 let generateGetOne (normalized: NormalizedTable) : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
@@ -294,17 +288,11 @@ let generateGetOne (normalized: NormalizedTable) : string =
     generateCaseSelection 12 normalized.baseTable normalized.extensions typeName
 
   $"""  static member SelectOne (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
-        use! reader = cmd.ExecuteReaderAsync()
-        let! hasRow = reader.ReadAsync()
-        if hasRow then
-          let item =
+    querySingle
+      "{getSql}"
+      (fun _ -> ())
+      (fun reader ->
+        let item =
 {caseSelection}
-          return Ok(Some item)
-        else
-          return Ok None
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+        item)
+      tx"""

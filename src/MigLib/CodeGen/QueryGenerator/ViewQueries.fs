@@ -44,16 +44,13 @@ let generateViewGetOne (viewName: string) (columns: ViewColumn list) : string =
       let fieldName = capitalizeName col.name in $"{fieldName} = {TypeGenerator.readViewColumnExpr col i}")
     |> String.concat "; "
 
-  let asyncBodyExprs =
-    [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
-      OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
-      OtherExpr "let! hasRow = reader.ReadAsync()"
-      OtherExpr $"if hasRow then return Ok(Some {{ {fieldMappings} }}) else return Ok None" ]
-
-  let memberName = "SelectOne (tx: SqliteTransaction)"
-  let returnType = $"Task<Result<{typeName} option, SqliteException>>"
-  let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
-  generateStaticMemberCode typeName memberName returnType body
+  $"""  static member SelectOne (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>> =
+    querySingle
+      "{getSql}"
+      (fun _ -> ())
+      (fun reader ->
+        {{ {fieldMappings} }})
+      tx"""
 
 let validateViewQueryByAnnotation
   (viewName: string)

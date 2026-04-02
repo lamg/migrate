@@ -184,7 +184,7 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
   let asyncValueExtractions =
     annotation.columns
     |> List.map (fun col -> let fieldName = capitalizeName col in $"let {col} = newItem.{fieldName}")
-    |> String.concat "\n        "
+    |> String.concat "\n      "
 
   let generateAsyncParamBindings (cmdVarName: string) (lineIndent: string) =
     annotation.columns
@@ -198,41 +198,49 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
         $"{cmdVarName}.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toDbValueExpr columnDef col}) |> ignore")
     |> String.concat $"\n{lineIndent}"
 
-  let asyncParamBindings = generateAsyncParamBindings "cmd" "        "
-  let asyncRequeryParamBindings = generateAsyncParamBindings "cmd2" "            "
+  let selectSql =
+    $"SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1"
 
-  let requeryAfterInsertAsync =
-    $"""
-            // Re-query to get inserted record
-            use cmd2 = new SqliteCommand("SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1", tx.Connection, tx)
-            {asyncRequeryParamBindings}
-            use! reader = cmd2.ExecuteReaderAsync()
-            let! hasInsertedRow = reader.ReadAsync()
-            if hasInsertedRow then
-              return Ok {{ {fieldMappings} }}
-            else
-              return Error (SqliteException("Failed to retrieve inserted record", 0))"""
+  let asyncParamBindings = generateAsyncParamBindings "cmd" "            "
+  let asyncRequeryParamBindings = generateAsyncParamBindings "cmd" "                "
 
   $"""  static member {methodName} (newItem: {typeName}) (tx: SqliteTransaction) : Task<Result<{typeName}, SqliteException>> =
     task {{
-      try
-        // Extract query values from newItem
-        {asyncValueExtractions}
-        // Try to find existing record
-        use cmd = new SqliteCommand("SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1", tx.Connection, tx)
-        {asyncParamBindings}
-        use! reader = cmd.ExecuteReaderAsync()
-        let! hasRow = reader.ReadAsync()
-        if hasRow then
-          // Found existing record - return it
-          return Ok {{ {fieldMappings} }}
-        else
-          // Not found - insert and fetch
-          reader.Close()
-          let! insertResult = {typeName}.Insert newItem tx
-          match insertResult with
-          | Ok _ ->{requeryAfterInsertAsync}
-          | Error ex -> return Error ex
-      with
-      | :? SqliteException as ex -> return Error ex
+      // Extract query values from newItem
+      {asyncValueExtractions}
+      // Try to find existing record
+      let! existingResult =
+        (querySingle
+          "{selectSql}"
+          (fun cmd ->
+            {asyncParamBindings})
+          (fun reader ->
+            {{ {fieldMappings} }})
+          tx)
+
+      match existingResult with
+      | Ok(Some item) ->
+        return Ok item
+      | Ok None ->
+        // Not found - insert and fetch
+        let! insertResult = {typeName}.Insert newItem tx
+
+        match insertResult with
+        | Ok _ ->
+          let! insertedResult =
+            (querySingle
+              "{selectSql}"
+              (fun cmd ->
+                {asyncRequeryParamBindings})
+              (fun reader ->
+                {{ {fieldMappings} }})
+              tx)
+
+          return
+            match insertedResult with
+            | Ok(Some item) -> Ok item
+            | Ok None -> Error (SqliteException("Failed to retrieve inserted record", 0))
+            | Error ex -> Error ex
+        | Error ex -> return Error ex
+      | Error ex -> return Error ex
     }}"""

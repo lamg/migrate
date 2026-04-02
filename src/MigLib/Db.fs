@@ -1,5 +1,6 @@
 module MigLib.Db
 
+open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 
 [<Literal>]
@@ -31,6 +32,27 @@ type DropColumnAttribute = DbAttributes.DropColumnAttribute
 
 let openSqliteConnection = DbCore.openSqliteConnection
 let resolveDatabaseFilePath = DbCore.resolveDatabaseFilePath
+
+let querySingle
+  (sql: string)
+  (configure: SqliteCommand -> unit)
+  (readRow: SqliteDataReader -> 'a)
+  (tx: SqliteTransaction)
+  : Task<Result<'a option, SqliteException>> =
+  task {
+    try
+      use cmd = new SqliteCommand(sql, tx.Connection, tx)
+      configure cmd
+      use! reader = cmd.ExecuteReaderAsync()
+      let! hasRow = reader.ReadAsync()
+
+      if hasRow then
+        return Ok(Some(readRow reader))
+      else
+        return Ok None
+    with :? SqliteException as ex ->
+      return Error ex
+  }
 
 type StartupDatabaseState =
   | Missing
