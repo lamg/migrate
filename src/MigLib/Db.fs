@@ -2,7 +2,8 @@ module MigLib.Db
 
 open Microsoft.Data.Sqlite
 
-let Rfc3339UtcNow = DbAttributes.Rfc3339UtcNow
+[<Literal>]
+let Rfc3339UtcNow = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'utc')"
 
 type AutoIncPKAttribute = DbAttributes.AutoIncPKAttribute
 type PKAttribute = DbAttributes.PKAttribute

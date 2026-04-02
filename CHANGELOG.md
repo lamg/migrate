@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.4] - 2026-04-02
+
+Fixed:
+
+- **Attribute-Safe RFC3339 Default Expression**: restored `MigLib.Db.Rfc3339UtcNow` as a compile-time literal so schema attributes can reference it directly again
+  - `DefaultExpr("createdAt", MigLib.Db.Rfc3339UtcNow)` now compiles without callers needing a local literal alias
+  - keeps the public `MigLib.Db` facade aligned with the underlying `DbAttributes.Rfc3339UtcNow` literal contract
+
 ## [5.2.3] - 2026-04-01
 
 Changed:
