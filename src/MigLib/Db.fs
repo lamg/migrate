@@ -54,6 +54,32 @@ let querySingle
       return Error ex
   }
 
+let queryList
+  (sql: string)
+  (configure: SqliteCommand -> unit)
+  (readRow: SqliteDataReader -> 'a)
+  (tx: SqliteTransaction)
+  : Task<Result<'a list, SqliteException>> =
+  task {
+    try
+      use cmd = new SqliteCommand(sql, tx.Connection, tx)
+      configure cmd
+      use! reader = cmd.ExecuteReaderAsync()
+      let results = ResizeArray<'a>()
+      let mutable hasMore = true
+
+      while hasMore do
+        let! next = reader.ReadAsync()
+        hasMore <- next
+
+        if hasMore then
+          results.Add(readRow reader)
+
+      return Ok(results |> Seq.toList)
+    with :? SqliteException as ex ->
+      return Error ex
+  }
+
 type StartupDatabaseState =
   | Missing
   | Ready

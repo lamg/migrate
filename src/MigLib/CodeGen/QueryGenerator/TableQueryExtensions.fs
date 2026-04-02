@@ -70,34 +70,26 @@ let generateQueryBy (table: CreateTable) (annotation: QueryByAnnotation) : strin
       let fieldName = capitalizeName col.name in $"{fieldName} = {TypeGenerator.readColumnExpr col i}")
     |> String.concat "; "
 
-  let asyncParamBindingExprs =
+  let asyncParamBindings =
     annotation.columns
     |> List.map (fun col ->
       let columnDef = findColumn table col |> Option.get
       let isNullable = TypeGenerator.isColumnNullable columnDef
 
       if isNullable then
-        OtherExpr
-          $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toNullableDbValueExpr columnDef col}) |> ignore"
+        $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toNullableDbValueExpr columnDef col}) |> ignore"
       else
-        OtherExpr $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toDbValueExpr columnDef col}) |> ignore")
+        $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toDbValueExpr columnDef col}) |> ignore")
+    |> String.concat "\n        "
 
-  let whileLoopBody =
-    $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
-
-  let asyncBodyExprs =
-    [ OtherExpr
-        $"use cmd = new SqliteCommand(\"SELECT {columnNames} FROM {table.name} WHERE {whereClause}\", tx.Connection, tx)" ]
-    @ asyncParamBindingExprs
-    @ [ OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
-        OtherExpr $"let results = ResizeArray<{typeName}>()"
-        OtherExpr whileLoopBody
-        OtherExpr "return Ok(results |> Seq.toList)" ]
-
-  let memberName = $"{methodName} ({parameters}) (tx: SqliteTransaction)"
-  let returnType = $"Task<Result<{typeName} list, SqliteException>>"
-  let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
-  generateStaticMemberCode typeName memberName returnType body
+  $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
+    queryList
+      "SELECT {columnNames} FROM {table.name} WHERE {whereClause}"
+      (fun cmd ->
+        {asyncParamBindings})
+      (fun reader ->
+        {{ {fieldMappings} }})
+      tx"""
 
 let generateQueryLike (table: CreateTable) (annotation: QueryLikeAnnotation) : string =
   let typeName = capitalizeName table.name
@@ -118,27 +110,18 @@ let generateQueryLike (table: CreateTable) (annotation: QueryLikeAnnotation) : s
 
   let asyncParamBindingExpr =
     if isNullable then
-      OtherExpr
-        $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
+      $"cmd.Parameters.AddWithValue(\"@{col}\", match {col} with Some v -> box v | None -> box DBNull.Value) |> ignore"
     else
-      OtherExpr $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore"
+      $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore"
 
-  let whileLoopBody =
-    $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
-
-  let asyncBodyExprs =
-    [ OtherExpr
-        $"use cmd = new SqliteCommand(\"SELECT {columnNames} FROM {table.name} WHERE {whereClause}\", tx.Connection, tx)"
-      asyncParamBindingExpr
-      OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
-      OtherExpr $"let results = ResizeArray<{typeName}>()"
-      OtherExpr whileLoopBody
-      OtherExpr "return Ok(results |> Seq.toList)" ]
-
-  let memberName = $"{methodName} ({parameters}) (tx: SqliteTransaction)"
-  let returnType = $"Task<Result<{typeName} list, SqliteException>>"
-  let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
-  generateStaticMemberCode typeName memberName returnType body
+  $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
+    queryList
+      "SELECT {columnNames} FROM {table.name} WHERE {whereClause}"
+      (fun cmd ->
+        {asyncParamBindingExpr})
+      (fun reader ->
+        {{ {fieldMappings} }})
+      tx"""
 
 let validateQueryByOrCreateAnnotation
   (table: CreateTable)

@@ -189,20 +189,13 @@ let generateGetAll (table: CreateTable) : string =
       let fieldName = capitalizeName col.name in $"{fieldName} = {TypeGenerator.readColumnExpr col i}")
     |> String.concat "; "
 
-  let whileLoopBody =
-    $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
-
-  let asyncBodyExprs =
-    [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
-      OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
-      OtherExpr $"let results = ResizeArray<{typeName}>()"
-      OtherExpr whileLoopBody
-      OtherExpr "return Ok(results |> Seq.toList)" ]
-
-  let memberName = "SelectAll (tx: SqliteTransaction)"
-  let returnType = $"Task<Result<{typeName} list, SqliteException>>"
-  let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
-  generateStaticMemberCode typeName memberName returnType body
+  $"""  static member SelectAll (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
+    queryList
+      "{getSql}"
+      (fun _ -> ())
+      (fun reader ->
+        {{ {fieldMappings} }})
+      tx"""
 
 let generateGetOne (table: CreateTable) : string =
   let typeName = capitalizeName table.name

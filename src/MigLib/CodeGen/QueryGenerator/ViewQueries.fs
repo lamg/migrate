@@ -18,20 +18,13 @@ let generateViewGetAll (viewName: string) (columns: ViewColumn list) : string =
       let fieldName = capitalizeName col.name in $"{fieldName} = {TypeGenerator.readViewColumnExpr col i}")
     |> String.concat "; "
 
-  let whileLoopBody =
-    $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
-
-  let asyncBodyExprs =
-    [ OtherExpr $"use cmd = new SqliteCommand(\"{getSql}\", tx.Connection, tx)"
-      OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
-      OtherExpr $"let results = ResizeArray<{typeName}>()"
-      OtherExpr whileLoopBody
-      OtherExpr "return Ok(results |> Seq.toList)" ]
-
-  let memberName = "SelectAll (tx: SqliteTransaction)"
-  let returnType = $"Task<Result<{typeName} list, SqliteException>>"
-  let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
-  generateStaticMemberCode typeName memberName returnType body
+  $"""  static member SelectAll (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
+    queryList
+      "{getSql}"
+      (fun _ -> ())
+      (fun reader ->
+        {{ {fieldMappings} }})
+      tx"""
 
 let generateViewGetOne (viewName: string) (columns: ViewColumn list) : string =
   let typeName = capitalizeName viewName
@@ -122,28 +115,21 @@ let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotatio
       let fieldName = capitalizeName col.name in $"{fieldName} = {TypeGenerator.readViewColumnExpr col i}")
     |> String.concat "; "
 
-  let asyncParamBindingExprs =
+  let asyncParamBindings =
     annotation.columns
     |> List.map (fun col ->
       let columnDef = findViewColumn columns col |> Option.get in
-      OtherExpr $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toViewDbValueExpr columnDef col}) |> ignore")
+      $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toViewDbValueExpr columnDef col}) |> ignore")
+    |> String.concat "\n        "
 
-  let whileLoopBody =
-    $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
-
-  let asyncBodyExprs =
-    [ OtherExpr
-        $"use cmd = new SqliteCommand(\"SELECT {columnNames} FROM {viewName} WHERE {whereClause}\", tx.Connection, tx)" ]
-    @ asyncParamBindingExprs
-    @ [ OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
-        OtherExpr $"let results = ResizeArray<{typeName}>()"
-        OtherExpr whileLoopBody
-        OtherExpr "return Ok(results |> Seq.toList)" ]
-
-  let memberName = $"{methodName} ({parameters}) (tx: SqliteTransaction)"
-  let returnType = $"Task<Result<{typeName} list, SqliteException>>"
-  let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
-  generateStaticMemberCode typeName memberName returnType body
+  $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
+    queryList
+      "SELECT {columnNames} FROM {viewName} WHERE {whereClause}"
+      (fun cmd ->
+        {asyncParamBindings})
+      (fun reader ->
+        {{ {fieldMappings} }})
+      tx"""
 
 let generateViewQueryLike (viewName: string) (columns: ViewColumn list) (annotation: QueryLikeAnnotation) : string =
   let typeName = capitalizeName viewName
@@ -162,21 +148,13 @@ let generateViewQueryLike (viewName: string) (columns: ViewColumn list) (annotat
     |> String.concat "; "
 
   let asyncParamBindingExpr =
-    OtherExpr $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore"
+    $"cmd.Parameters.AddWithValue(\"@{col}\", {col}) |> ignore"
 
-  let whileLoopBody =
-    $"let mutable hasMore = true in while hasMore do let! next = reader.ReadAsync() in hasMore <- next; if hasMore then results.Add({{ {fieldMappings} }})"
-
-  let asyncBodyExprs =
-    [ OtherExpr
-        $"use cmd = new SqliteCommand(\"SELECT {columnNames} FROM {viewName} WHERE {whereClause}\", tx.Connection, tx)"
-      asyncParamBindingExpr
-      OtherExpr "use! reader = cmd.ExecuteReaderAsync()"
-      OtherExpr $"let results = ResizeArray<{typeName}>()"
-      OtherExpr whileLoopBody
-      OtherExpr "return Ok(results |> Seq.toList)" ]
-
-  let memberName = $"{methodName} ({parameters}) (tx: SqliteTransaction)"
-  let returnType = $"Task<Result<{typeName} list, SqliteException>>"
-  let body = taskExpr [ OtherExpr(trySqliteExceptionAsync asyncBodyExprs) ]
-  generateStaticMemberCode typeName memberName returnType body
+  $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
+    queryList
+      "SELECT {columnNames} FROM {viewName} WHERE {whereClause}"
+      (fun cmd ->
+        {asyncParamBindingExpr})
+      (fun reader ->
+        {{ {fieldMappings} }})
+      tx"""

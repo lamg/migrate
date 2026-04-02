@@ -204,23 +204,14 @@ let generateGetAll (normalized: NormalizedTable) : string =
     generateCaseSelection 14 normalized.baseTable normalized.extensions typeName
 
   $"""  static member SelectAll (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("{getSql}", tx.Connection, tx)
-        use! reader = cmd.ExecuteReaderAsync()
-        let results = ResizeArray<{typeName}>()
-        let mutable hasMore = true
-        while hasMore do
-          let! next = reader.ReadAsync()
-          hasMore <- next
-          if hasMore then
-            let item =
+    queryList
+      "{getSql}"
+      (fun _ -> ())
+      (fun reader ->
+        let item =
 {caseSelection}
-            results.Add item
-        return Ok(results |> Seq.toList)
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+        item)
+      tx"""
 
 let generateGetById (normalized: NormalizedTable) : string option =
   let pkCols = getPrimaryKeyColumns normalized.baseTable

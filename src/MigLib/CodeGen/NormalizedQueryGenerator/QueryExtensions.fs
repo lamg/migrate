@@ -66,24 +66,15 @@ let generateNormalizedQueryBy (normalized: NormalizedTable) (annotation: QueryBy
     generateCaseSelection 14 normalized.baseTable normalized.extensions typeName
 
   $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("{sql}", tx.Connection, tx)
-        {asyncParamBindings}
-        use! reader = cmd.ExecuteReaderAsync()
-        let results = ResizeArray<{typeName}>()
-        let mutable hasMore = true
-        while hasMore do
-          let! next = reader.ReadAsync()
-          hasMore <- next
-          if hasMore then
-            let record =
+    queryList
+      "{sql}"
+      (fun cmd ->
+        {asyncParamBindings})
+      (fun reader ->
+        let record =
 {caseSelection}
-            results.Add(record)
-        return Ok(results |> Seq.toList)
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+        record)
+      tx"""
 
 let generateNormalizedQueryLike (normalized: NormalizedTable) (annotation: QueryLikeAnnotation) : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
@@ -134,24 +125,15 @@ let generateNormalizedQueryLike (normalized: NormalizedTable) (annotation: Query
     generateCaseSelection 14 normalized.baseTable normalized.extensions typeName
 
   $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
-    task {{
-      try
-        use cmd = new SqliteCommand("{sql}", tx.Connection, tx)
-        {asyncParamBindings}
-        use! reader = cmd.ExecuteReaderAsync()
-        let results = ResizeArray<{typeName}>()
-        let mutable hasMore = true
-        while hasMore do
-          let! next = reader.ReadAsync()
-          hasMore <- next
-          if hasMore then
-            let record =
+    queryList
+      "{sql}"
+      (fun cmd ->
+        {asyncParamBindings})
+      (fun reader ->
+        let record =
 {caseSelection}
-            results.Add(record)
-        return Ok(results |> Seq.toList)
-      with
-      | :? SqliteException as ex -> return Error ex
-    }}"""
+        record)
+      tx"""
 
 let generateNormalizedQueryByOrCreate (normalized: NormalizedTable) (annotation: QueryByOrCreateAnnotation) : string =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
