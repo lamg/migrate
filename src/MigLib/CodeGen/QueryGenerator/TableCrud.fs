@@ -42,7 +42,7 @@ let generateInsert (table: CreateTable) : string =
   let rowDataPairs =
     (insertCols |> List.map (rowDataPairExprForItem "item"))
     @ (match autoPkColName with
-       | Some colName -> [ $"(\"{colName}\", box newId)" ]
+       | Some colName -> [ $"\"{colName}\", box newId" ]
        | None -> [])
     |> String.concat "; "
     |> fun pairs -> $"[{pairs}]"
@@ -55,9 +55,7 @@ let generateInsert (table: CreateTable) : string =
       tx
       (fun _ ->
         task {{
-          use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
-          let! lastId = lastIdCmd.ExecuteScalarAsync()
-          let newId = lastId |> unbox<int64>
+          let! newId = getLastInsertRowId tx
           MigrationLog.recordInsert tx "{table.name}" {rowDataPairs}
           return Ok newId
         }})"""
@@ -97,7 +95,7 @@ let generateInsertOrIgnore (table: CreateTable) : string =
   let rowDataPairs =
     (insertCols |> List.map (rowDataPairExprForItem "item"))
     @ (match autoPkColName with
-       | Some colName -> [ $"(\"{colName}\", box newId)" ]
+       | Some colName -> [ $"\"{colName}\", box newId" ]
        | None -> [])
     |> String.concat "; "
     |> fun pairs -> $"[{pairs}]"
@@ -113,9 +111,7 @@ let generateInsertOrIgnore (table: CreateTable) : string =
           if rows = 0 then
             return Ok None
           else
-            use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
-            let! lastId = lastIdCmd.ExecuteScalarAsync()
-            let newId = lastId |> unbox<int64>
+            let! newId = getLastInsertRowId tx
             MigrationLog.recordInsert tx "{table.name}" {rowDataPairs}
             return Ok (Some newId)
         }})"""

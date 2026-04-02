@@ -122,6 +122,13 @@ let executeWrite
       return Error ex
   }
 
+let getLastInsertRowId (tx: SqliteTransaction) : Task<int64> =
+  task {
+    use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
+    let! lastId = lastIdCmd.ExecuteScalarAsync()
+    return lastId |> unbox<int64>
+  }
+
 type StartupDatabaseState =
   | Missing
   | Ready

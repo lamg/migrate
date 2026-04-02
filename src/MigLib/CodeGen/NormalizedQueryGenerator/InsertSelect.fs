@@ -23,9 +23,7 @@ let private generateBaseCase (baseTable: CreateTable) (typeName: string) : strin
               tx
               (fun _ ->
                 task {{
-                  use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
-                  let! lastId = lastIdCmd.ExecuteScalarAsync()
-                  let {baseTable.name}Id = lastId |> unbox<int64>
+                  let! {baseTable.name}Id = getLastInsertRowId tx
                   return Ok {baseTable.name}Id
                 }})"""
 
@@ -50,9 +48,7 @@ let private generateBaseCaseInsertOrIgnore (baseTable: CreateTable) (typeName: s
                   if rows = 0 then
                     return Ok None
                   else
-                    use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
-                    let! lastId = lastIdCmd.ExecuteScalarAsync()
-                    let {baseTable.name}Id = lastId |> unbox<int64>
+                    let! {baseTable.name}Id = getLastInsertRowId tx
                     return Ok (Some {baseTable.name}Id)
                 }})"""
 
@@ -95,9 +91,7 @@ let private generateExtensionCase (baseTable: CreateTable) (extension: Extension
               tx
               (fun _ ->
                 task {{
-                  use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
-                  let! lastId = lastIdCmd.ExecuteScalarAsync()
-                  let {baseTable.name}Id = lastId |> unbox<int64>
+                  let! {baseTable.name}Id = getLastInsertRowId tx
                   return Ok {baseTable.name}Id
                 }})
 
@@ -162,9 +156,7 @@ let private generateExtensionCaseInsertOrIgnore
                   if rows = 0 then
                     return Ok None
                   else
-                    use lastIdCmd = new SqliteCommand("SELECT last_insert_rowid()", tx.Connection, tx)
-                    let! lastId = lastIdCmd.ExecuteScalarAsync()
-                    let {baseTable.name}Id = lastId |> unbox<int64>
+                    let! {baseTable.name}Id = getLastInsertRowId tx
                     return Ok (Some {baseTable.name}Id)
                 }})
 

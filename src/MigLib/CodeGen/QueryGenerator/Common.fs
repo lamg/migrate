@@ -83,10 +83,10 @@ let rowDataPairExprForItem (itemExpr: string) (column: ColumnDef) : string =
 
   if isNullable then
     let storedValueExpr = TypeGenerator.toDbValueExpr column "v"
-    $"(\"{column.name}\", match {itemFieldExpr} with Some v -> box ({storedValueExpr}) | None -> null)"
+    $"\"{column.name}\", match {itemFieldExpr} with Some v -> box {storedValueExpr} | None -> null"
   else
     let storedValueExpr = TypeGenerator.toDbValueExpr column itemFieldExpr
-    $"(\"{column.name}\", box ({storedValueExpr}))"
+    $"\"{column.name}\", box {storedValueExpr}"
 
 let rowDataListExprForItem (itemExpr: string) (columns: ColumnDef list) : string =
   columns
@@ -96,7 +96,7 @@ let rowDataListExprForItem (itemExpr: string) (columns: ColumnDef list) : string
 
 let rowDataListExprForParams (columns: ColumnDef list) : string =
   columns
-  |> List.map (fun column -> $"(\"{column.name}\", box ({TypeGenerator.toDbValueExpr column column.name}))")
+  |> List.map (fun column -> $"\"{column.name}\", box {TypeGenerator.toDbValueExpr column column.name}")
   |> String.concat "; "
   |> fun pairs -> $"[{pairs}]"
 
