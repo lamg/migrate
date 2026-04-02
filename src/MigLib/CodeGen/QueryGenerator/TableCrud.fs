@@ -216,20 +216,24 @@ let generateUpdate (table: CreateTable) : string option =
     let asyncParamBindings =
       table.columns
       |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
-      |> joinBindings "        "
+      |> joinBindings "            "
 
     Some
       $"""  static member Update (item: {typeName}) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
-    executeWrite
-      "{updateSql}"
-      (fun cmd ->
-        {asyncParamBindings})
-      tx
-      (fun _ ->
-        task {{
-          MigrationLog.recordUpdate tx "{table.name}" {rowDataExpr}
-          return Ok()
-        }})"""
+    task {{
+      let! updateResult =
+        executeWriteUnit
+          "{updateSql}"
+          (fun cmd ->
+            {asyncParamBindings})
+          tx
+
+      match updateResult with
+      | Error ex -> return Error ex
+      | Ok () ->
+        MigrationLog.recordUpdate tx "{table.name}" {rowDataExpr}
+        return Ok()
+    }}"""
 
 let generateDelete (table: CreateTable) : string option =
   let typeName = capitalizeName table.name
@@ -252,20 +256,24 @@ let generateDelete (table: CreateTable) : string option =
     let asyncParamBindings =
       pks
       |> List.map (fun pk -> paramBindingExprForColumnVar "cmd" pk pk.name)
-      |> joinBindings "        "
+      |> joinBindings "            "
 
     Some
       $"""  static member Delete {paramList} (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
-    executeWrite
-      "{deleteSql}"
-      (fun cmd ->
-        {asyncParamBindings})
-      tx
-      (fun _ ->
-        task {{
-          MigrationLog.recordDelete tx "{table.name}" {rowDataExpr}
-          return Ok()
-        }})"""
+    task {{
+      let! deleteResult =
+        executeWriteUnit
+          "{deleteSql}"
+          (fun cmd ->
+            {asyncParamBindings})
+          tx
+
+      match deleteResult with
+      | Error ex -> return Error ex
+      | Ok () ->
+        MigrationLog.recordDelete tx "{table.name}" {rowDataExpr}
+        return Ok()
+    }}"""
 
 let generateUpsert (table: CreateTable) : string option =
   let typeName = capitalizeName table.name
