@@ -1,6 +1,7 @@
 module internal Mig.CodeGen.NormalizedQueryGeneratorGenerate
 
 open Mig.DeclarativeMigrations.Types
+open Mig.CodeGen.AstExprBuilders
 open Mig.CodeGen.NormalizedSchema
 open Mig.CodeGen.NormalizedQueryGeneratorCommon
 open Mig.CodeGen.NormalizedQueryGeneratorInsertSelect
@@ -78,7 +79,5 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
       @ (queryLikeMethods |> List.map Some)
       @ (queryByOrCreateMethods |> List.map Some)
       |> List.choose id
-      |> String.concat "\n\n"
 
-    let code = $"type {typeName} with\n{allMethods}"
-    Ok(FabulousAstHelpers.formatCode code)
+    Ok(generateAugmentationCode typeName allMethods)

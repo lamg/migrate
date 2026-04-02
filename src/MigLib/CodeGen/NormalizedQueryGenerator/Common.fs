@@ -235,6 +235,75 @@ let generateCaseSelection
 {matchPatterns}
 {baseCaseMatch}{defaultCase}"""
 
+let generateCaseSelectionExpr (baseTable: CreateTable) (extensions: ExtensionTable list) (typeName: string) : string =
+  let formatCaseExpr caseName fields =
+    let allFields = fields |> String.concat ", "
+    $"{typeName}.{caseName} ({allFields})"
+
+  let baseExpr =
+    generateBaseFieldReads baseTable 0
+    |> formatCaseExpr "Base"
+
+  match extensions with
+  | [] -> baseExpr
+  | _ ->
+    let flagNames =
+      extensions
+      |> List.map (fun ext -> $"has{TypeGenerator.toPascalCase ext.aspectName}")
+
+    let nullChecks =
+      extensions
+      |> List.mapi (fun i ext ->
+        let colIndex =
+          baseTable.columns.Length
+          + (extensions |> List.take i |> List.sumBy (fun e -> e.table.columns.Length - 1))
+
+        $"let has{TypeGenerator.toPascalCase ext.aspectName} = not (reader.IsDBNull {colIndex}) in")
+      |> String.concat " "
+
+    let extensionCases =
+      extensions
+      |> List.mapi (fun i ext ->
+        let caseName = TypeGenerator.toPascalCase ext.aspectName
+
+        let pattern =
+          extensions
+          |> List.mapi (fun j _ -> if i = j then "true" else "false")
+          |> String.concat ", "
+
+        let fields =
+          generateBaseFieldReads baseTable 0
+          @ generateExtensionFieldReads
+              ext
+              (baseTable.columns.Length
+               + (extensions |> List.take i |> List.sumBy (fun e -> e.table.columns.Length - 1)))
+
+        let caseExpr = formatCaseExpr ($"With{caseName}") fields
+        $"| {pattern} -> {caseExpr}"
+      )
+
+    let basePattern =
+      extensions |> List.map (fun _ -> "false") |> String.concat ", "
+
+    let defaultCase =
+      if extensions.Length > 1 then
+        [ $"| _ -> {baseExpr}" ]
+      else
+        []
+
+    let matchInput =
+      match flagNames with
+      | [ flagName ] -> flagName
+      | _ -> String.concat ", " flagNames
+
+    String.concat
+      " "
+      ([ nullChecks
+         $"match {matchInput} with" ]
+       @ extensionCases
+       @ [ $"| {basePattern} -> {baseExpr}" ]
+       @ defaultCase)
+
 let getAllNormalizedColumns (normalized: NormalizedTable) : (string * ColumnDef) list =
   let baseColumns = normalized.baseTable.columns |> List.map (fun c -> "Base", c)
 
