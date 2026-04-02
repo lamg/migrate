@@ -1,6 +1,7 @@
 module internal Mig.CodeGen.QueryGeneratorViewGenerate
 
 open Mig.DeclarativeMigrations.Types
+open Mig.CodeGen.AstExprBuilders
 open Mig.CodeGen.ViewIntrospection
 open Mig.CodeGen.QueryGeneratorCommon
 open Mig.CodeGen.QueryGeneratorViewQueries
@@ -40,11 +41,8 @@ let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<stri
 
       let allMethods =
         [ getAllMethod; getOneMethod ] @ queryByMethods @ queryLikeMethods
-        |> String.concat "\n\n"
 
-      Ok
-        $"""type {typeName} with
-{allMethods}"""
+      Ok(generateAugmentationCode typeName allMethods)
   | _ :: _, _, _ ->
     Error
       $"QueryByOrCreate annotation is not supported on views (view '{view.name}' is read-only). Use QueryBy instead."

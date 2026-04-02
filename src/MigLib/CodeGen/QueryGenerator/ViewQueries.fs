@@ -8,7 +8,7 @@ open Mig.CodeGen.AstExprBuilders
 open Mig.CodeGen.QueryGeneratorCommon
 open Mig.CodeGen.SqlParamBindings
 
-let generateViewGetAll (viewName: string) (columns: ViewColumn list) : string =
+let generateViewGetAll (viewName: string) (columns: ViewColumn list) =
   let typeName = capitalizeName viewName
 
   let columnNames, fieldMappings =
@@ -17,13 +17,15 @@ let generateViewGetAll (viewName: string) (columns: ViewColumn list) : string =
   let getSql = $"SELECT {columnNames} FROM {viewName}"
 
   renderSelectMember
-    $"SelectAll (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>>"
+    "SelectAll"
+    [ txParam ]
+    $"Task<Result<{typeName} list, SqliteException>>"
     "queryList"
     getSql
     "(fun _ -> ())"
     fieldMappings
 
-let generateViewGetOne (viewName: string) (columns: ViewColumn list) : string =
+let generateViewGetOne (viewName: string) (columns: ViewColumn list) =
   let typeName = capitalizeName viewName
 
   let columnNames, fieldMappings =
@@ -32,7 +34,9 @@ let generateViewGetOne (viewName: string) (columns: ViewColumn list) : string =
   let getSql = $"SELECT {columnNames} FROM {viewName} LIMIT 1"
 
   renderSelectMember
-    $"SelectOne (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>>"
+    "SelectOne"
+    [ txParam ]
+    $"Task<Result<{typeName} option, SqliteException>>"
     "querySingle"
     getSql
     "(fun _ -> ())"
@@ -78,7 +82,7 @@ let validateViewQueryLikeAnnotation
     let receivedCols = annotation.columns |> String.concat ", " in
     Error $"QueryLike annotation on view '{viewName}' supports exactly one column. Received: {receivedCols}"
 
-let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotation: QueryByAnnotation) : string =
+let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotation: QueryByAnnotation) =
   let typeName = capitalizeName viewName
 
   let methodName =
@@ -92,8 +96,7 @@ let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotatio
     |> List.map (fun col ->
       let columnDef = findViewColumn columns col |> Option.get in
       let fsharpType = TypeGenerator.mapViewColumnType columnDef in
-      $"{col}: {fsharpType}")
-    |> String.concat ", "
+      col, fsharpType)
 
   let whereClause =
     annotation.columns
@@ -110,19 +113,20 @@ let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotatio
     |> joinBindings "        "
 
   renderSelectMember
-    $"{methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>>"
+    methodName
+    [ typedTupledOrSingleParam parameters; txParam ]
+    $"Task<Result<{typeName} list, SqliteException>>"
     "queryList"
     $"SELECT {columnNames} FROM {viewName} WHERE {whereClause}"
     $"(fun cmd ->\n        {asyncParamBindings})"
     fieldMappings
 
-let generateViewQueryLike (viewName: string) (columns: ViewColumn list) (annotation: QueryLikeAnnotation) : string =
+let generateViewQueryLike (viewName: string) (columns: ViewColumn list) (annotation: QueryLikeAnnotation) =
   let typeName = capitalizeName viewName
   let col = annotation.columns |> List.head
   let methodName = $"Select{capitalizeName col}Like"
   let columnDef = findViewColumn columns col |> Option.get
   let fsharpType = TypeGenerator.mapSqlType columnDef.columnType false
-  let parameters = $"{col}: {fsharpType}"
   let whereClause = $"{col} LIKE '%%' || @{col} || '%%'"
 
   let columnNames, fieldMappings =
@@ -131,7 +135,9 @@ let generateViewQueryLike (viewName: string) (columns: ViewColumn list) (annotat
   let asyncParamBindingExpr = addPlainBinding "cmd" col col
 
   renderSelectMember
-    $"{methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>>"
+    methodName
+    [ typedParenParam col fsharpType; txParam ]
+    $"Task<Result<{typeName} list, SqliteException>>"
     "queryList"
     $"SELECT {columnNames} FROM {viewName} WHERE {whereClause}"
     $"(fun cmd ->\n        {asyncParamBindingExpr})"

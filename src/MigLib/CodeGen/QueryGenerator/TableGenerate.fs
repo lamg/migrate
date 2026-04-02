@@ -1,6 +1,7 @@
 module internal Mig.CodeGen.QueryGeneratorTableGenerate
 
 open Mig.DeclarativeMigrations.Types
+open Mig.CodeGen.AstExprBuilders
 open Mig.CodeGen.QueryGeneratorTableCrud
 open Mig.CodeGen.QueryGeneratorTableQueryExtensions
 open Mig.CodeGen.QueryGeneratorCommon
@@ -71,8 +72,5 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
       @ (queryLikeMethods |> List.map Some)
       @ (queryByOrCreateMethods |> List.map Some)
       |> List.choose id
-      |> String.concat "\n\n"
 
-    Ok
-      $"""type {typeName} with
-{allMethods}"""
+    Ok(generateAugmentationCode typeName allMethods)

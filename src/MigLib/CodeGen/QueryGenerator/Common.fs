@@ -1,5 +1,6 @@
 module internal Mig.CodeGen.QueryGeneratorCommon
 
+open Fabulous.AST
 open Mig.DeclarativeMigrations.Types
 open Mig.CodeGen.ViewIntrospection
 open Mig.CodeGen.AstExprBuilders
@@ -115,29 +116,37 @@ let paramBindingExprForItem (cmdVarName: string) (itemExpr: string) (column: Col
 let paramBindingExprForColumnVar (cmdVarName: string) (column: ColumnDef) (varExpr: string) =
   addColumnBinding cmdVarName column varExpr
 
-let buildRecordProjection (getName: 'a -> string) (readExpr: 'a -> int -> string) (columns: 'a list) : string * string =
+let buildRecordProjection
+  (getName: 'a -> string)
+  (readExpr: 'a -> int -> string)
+  (columns: 'a list)
+  : string * (string * string) list =
   let columnNames = columns |> List.map getName |> String.concat ", "
 
   let fieldMappings =
     columns
     |> List.mapi (fun i column ->
       let fieldName = capitalizeName (getName column)
-      $"{fieldName} = {readExpr column i}")
-    |> String.concat "; "
+      fieldName, readExpr column i)
 
   columnNames, fieldMappings
 
 let renderSelectMember
-  (memberSignature: string)
+  (memberName: string)
+  parameters
+  (returnType: string)
   (queryHelper: string)
   (sql: string)
   (configureExpr: string)
-  (fieldMappings: string)
+  (fieldMappings: (string * string) list)
   =
-  $"""  static member {memberSignature} =
-    {queryHelper}
-      "{sql}"
-      {configureExpr}
-      (fun reader ->
-        {{ {fieldMappings} }})
-      tx"""
+  let readerLambda =
+    fieldMappings
+    |> List.map (fun (fieldName, expr) -> Ast.RecordFieldExpr(fieldName, expr))
+    |> Ast.RecordExpr
+    |> lambdaExpr "reader"
+
+  let body =
+    Ast.AppExpr(queryHelper, [ Ast.ConstantExpr(Ast.String(sql)); rawExpr configureExpr; readerLambda; rawExpr "tx" ])
+
+  staticMember memberName parameters body returnType

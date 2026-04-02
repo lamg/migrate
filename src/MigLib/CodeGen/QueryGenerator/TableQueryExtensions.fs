@@ -7,6 +7,12 @@ open Mig.CodeGen.AstExprBuilders
 open Mig.CodeGen.QueryGeneratorCommon
 open Mig.CodeGen.SqlParamBindings
 
+let private readerRecordLambda (fieldMappings: (string * string) list) =
+  fieldMappings
+  |> List.map (fun (fieldName, expr) -> RecordFieldExpr(fieldName, expr))
+  |> RecordExpr
+  |> lambdaExpr "reader"
+
 let validateQueryByAnnotation (table: CreateTable) (annotation: QueryByAnnotation) : Result<unit, string> =
   let columnNames =
     table.columns |> List.map (fun c -> c.name.ToLowerInvariant()) |> Set.ofList
@@ -41,7 +47,7 @@ let validateQueryLikeAnnotation (table: CreateTable) (annotation: QueryLikeAnnot
     let receivedCols = annotation.columns |> String.concat ", " in
     Error $"QueryLike annotation on table '{table.name}' supports exactly one column. Received: {receivedCols}"
 
-let generateQueryBy (table: CreateTable) (annotation: QueryByAnnotation) : string =
+let generateQueryBy (table: CreateTable) (annotation: QueryByAnnotation) =
   let typeName = capitalizeName table.name
 
   let methodName =
@@ -53,56 +59,49 @@ let generateQueryBy (table: CreateTable) (annotation: QueryByAnnotation) : strin
   let parameters =
     annotation.columns
     |> List.map (fun col ->
-      let columnDef = findColumn table col |> Option.get in
-      let fsharpType = TypeGenerator.mapColumnType columnDef in
-      $"{col}: {fsharpType}")
-    |> String.concat ", "
+      let columnDef = findColumn table col |> Option.get
+      let fsharpType = TypeGenerator.mapColumnType columnDef
+      col, fsharpType)
 
   let whereClause =
     annotation.columns
     |> List.map (fun col -> $"{col} = @{col}")
     |> String.concat " AND "
 
-  let columnNames = table.columns |> List.map (fun c -> c.name) |> String.concat ", "
-
-  let fieldMappings =
-    table.columns
-    |> List.mapi (fun i col ->
-      let fieldName = capitalizeName col.name in $"{fieldName} = {TypeGenerator.readColumnExpr col i}")
-    |> String.concat "; "
+  let columnNames, fieldMappings =
+    buildRecordProjection (fun (c: ColumnDef) -> c.name) TypeGenerator.readColumnExpr table.columns
 
   let asyncParamBindings =
     annotation.columns
     |> List.map (fun col ->
       let columnDef = findColumn table col |> Option.get
       addColumnBinding "cmd" columnDef col)
+
+  let configureExpr =
+    asyncParamBindings
     |> joinBindings "        "
+    |> fun bindings -> $"(fun cmd ->\n        {bindings})"
 
-  $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
-    queryList
-      "SELECT {columnNames} FROM {table.name} WHERE {whereClause}"
-      (fun cmd ->
-        {asyncParamBindings})
-      (fun reader ->
-        {{ {fieldMappings} }})
-      tx"""
+  renderSelectMember
+    methodName
+    [ typedTupledOrSingleParam parameters; txParam ]
+    $"Task<Result<{typeName} list, SqliteException>>"
+    "queryList"
+    $"SELECT {columnNames} FROM {table.name} WHERE {whereClause}"
+    configureExpr
+    fieldMappings
 
-let generateQueryLike (table: CreateTable) (annotation: QueryLikeAnnotation) : string =
+let generateQueryLike (table: CreateTable) (annotation: QueryLikeAnnotation) =
   let typeName = capitalizeName table.name
   let col = annotation.columns |> List.head
   let methodName = $"Select{capitalizeName col}Like"
   let columnDef = findColumn table col |> Option.get
   let isNullable = TypeGenerator.isColumnNullable columnDef
   let fsharpType = TypeGenerator.mapSqlType columnDef.columnType isNullable
-  let parameters = $"{col}: {fsharpType}"
   let whereClause = $"{col} LIKE '%%' || @{col} || '%%'"
-  let columnNames = table.columns |> List.map (fun c -> c.name) |> String.concat ", "
 
-  let fieldMappings =
-    table.columns
-    |> List.mapi (fun i c ->
-      let fieldName = capitalizeName c.name in $"{fieldName} = {TypeGenerator.readColumnExpr c i}")
-    |> String.concat "; "
+  let columnNames, fieldMappings =
+    buildRecordProjection (fun (c: ColumnDef) -> c.name) TypeGenerator.readColumnExpr table.columns
 
   let asyncParamBindingExpr =
     if isNullable then
@@ -110,14 +109,14 @@ let generateQueryLike (table: CreateTable) (annotation: QueryLikeAnnotation) : s
     else
       addPlainBinding "cmd" col col
 
-  $"""  static member {methodName} ({parameters}) (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>> =
-    queryList
-      "SELECT {columnNames} FROM {table.name} WHERE {whereClause}"
-      (fun cmd ->
-        {asyncParamBindingExpr})
-      (fun reader ->
-        {{ {fieldMappings} }})
-      tx"""
+  renderSelectMember
+    methodName
+    [ typedParenParam col fsharpType; txParam ]
+    $"Task<Result<{typeName} list, SqliteException>>"
+    "queryList"
+    $"SELECT {columnNames} FROM {table.name} WHERE {whereClause}"
+    $"(fun cmd ->\n        {asyncParamBindingExpr})"
+    fieldMappings
 
 let validateQueryByOrCreateAnnotation
   (table: CreateTable)
@@ -138,7 +137,7 @@ let validateQueryByOrCreateAnnotation
     Error
       $"QueryByOrCreate annotation references non-existent column '{invalidCol}' in table '{table.name}'. Available columns: {availableCols}"
 
-let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnnotation) : string =
+let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnnotation) =
   let typeName = capitalizeName table.name
 
   let methodName =
@@ -152,42 +151,49 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
     |> List.map (fun col -> $"{col} = @{col}")
     |> String.concat " AND "
 
-  let columnNames = table.columns |> List.map (fun c -> c.name) |> String.concat ", "
+  let columnNames, fieldMappings =
+    buildRecordProjection (fun (c: ColumnDef) -> c.name) TypeGenerator.readColumnExpr table.columns
 
-  let fieldMappings =
-    table.columns
-    |> List.mapi (fun i col ->
-      let fieldName = capitalizeName col.name in $"{fieldName} = {TypeGenerator.readColumnExpr col i}")
-    |> String.concat "; "
-
-  let asyncValueExtractions =
+  let extractionBindings =
     annotation.columns
-    |> List.map (fun col -> let fieldName = capitalizeName col in $"let {col} = newItem.{fieldName}")
-    |> String.concat "\n    "
+    |> List.map (fun col ->
+      let fieldName = capitalizeName col
+      LetOrUseExpr(Value(col, rawExpr $"newItem.{fieldName}")))
 
-  let generateAsyncParamBindings (cmdVarName: string) (lineIndent: string) =
+  let paramBindings =
     annotation.columns
     |> List.map (fun col ->
       let columnDef = findColumn table col |> Option.get
-      addColumnBinding cmdVarName columnDef col)
-    |> joinBindings lineIndent
+      addColumnBinding "cmd" columnDef col)
 
-  let selectSql =
-    $"SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1"
+  let selectExpr =
+    AppExpr(
+      "querySingle",
+      [ ConstantExpr(String($"SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1"))
+        lambdaStatementsExpr "cmd" paramBindings
+        readerRecordLambda fieldMappings
+        rawExpr "tx" ]
+    )
 
-  let asyncParamBindings = generateAsyncParamBindings "cmd" "          "
+  let body =
+    CompExprBodyExpr(
+      seq {
+        yield! extractionBindings
+        yield LetOrUseExpr(Function("select", UnitPat(), selectExpr))
 
-  $"""  static member {methodName} (newItem: {typeName}) (tx: SqliteTransaction) : Task<Result<{typeName}, SqliteException>> =
-    // Extract query values from newItem
-    {asyncValueExtractions}
+        yield
+          OtherExpr(
+            AppExpr(
+              "querySingleOrInsert",
+              [ rawExpr "select"
+                lambdaRawExpr "()" $"{typeName}.Insert newItem tx" ]
+            )
+          )
+      }
+    )
 
-    let select () =
-      querySingle
-        "{selectSql}"
-        (fun cmd ->
-          {asyncParamBindings})
-        (fun reader ->
-          {{ {fieldMappings} }})
-        tx
-
-    querySingleOrInsert select (fun () -> {typeName}.Insert newItem tx)"""
+  staticMember
+    methodName
+    [ typedParenParam "newItem" typeName; txParam ]
+    body
+    $"Task<Result<{typeName}, SqliteException>>"

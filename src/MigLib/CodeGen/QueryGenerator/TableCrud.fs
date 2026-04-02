@@ -8,7 +8,27 @@ open Mig.CodeGen.AstExprBuilders
 open Mig.CodeGen.QueryGeneratorCommon
 open Mig.CodeGen.SqlParamBindings
 
-let generateInsert (table: CreateTable) : string =
+let private commandLambda (bindings: string list) =
+  match bindings with
+  | [] -> lambdaExpr "_" unitExpr
+  | _ -> lambdaStatementsExpr "cmd" bindings
+
+let private readerRecordLambda (fieldMappings: (string * string) list) =
+  fieldMappings
+  |> List.map (fun (fieldName, expr) -> RecordFieldExpr(fieldName, expr))
+  |> RecordExpr
+  |> lambdaExpr "reader"
+
+let private executeInsertExpr (sql: string) (bindings: string list) onSuccess =
+  AppExpr("executeInsert", [ ConstantExpr(String(sql)); commandLambda bindings; rawExpr "tx"; onSuccess ])
+
+let private executeInsertOrIgnoreExpr (sql: string) (bindings: string list) onSuccess =
+  AppExpr("executeInsertOrIgnore", [ ConstantExpr(String(sql)); commandLambda bindings; rawExpr "tx"; onSuccess ])
+
+let private executeWriteUnitExpr (sql: string) (bindings: string list) =
+  AppExpr("executeWriteUnit", [ ConstantExpr(String(sql)); commandLambda bindings; rawExpr "tx" ])
+
+let generateInsert (table: CreateTable) =
   let typeName = capitalizeName table.name
   let pkCols = getPrimaryKey table
   let autoPkColName = getAutoIncrementPrimaryKeyColumnName table
@@ -34,10 +54,9 @@ let generateInsert (table: CreateTable) : string =
 
   let insertSql = $"INSERT INTO {table.name} ({columnNames}) VALUES ({paramNames})"
 
-  let asyncParamBindings =
+  let paramBindings =
     insertCols
     |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
-    |> joinBindings "        "
 
   let rowDataPairs =
     (insertCols |> List.map (rowDataPairExprForItem "item"))
@@ -47,19 +66,20 @@ let generateInsert (table: CreateTable) : string =
     |> String.concat "; "
     |> fun pairs -> $"[{pairs}]"
 
-  $"""  static member Insert (item: {typeName}) (tx: SqliteTransaction) : Task<Result<int64, SqliteException>> =
-    executeInsert
-      "{insertSql}"
-      (fun cmd ->
-        {asyncParamBindings})
-      tx
-      (fun newId ->
-        task {{
-          MigrationLog.recordInsert tx "{table.name}" {rowDataPairs}
-          return Ok newId
-        }})"""
+  let onSuccess =
+    lambdaExpr
+      "newId"
+      (taskExpr
+        [ OtherExpr($"MigrationLog.recordInsert tx \"{table.name}\" {rowDataPairs}")
+          OtherExpr(returnExprRaw "Ok newId") ])
 
-let generateInsertOrIgnore (table: CreateTable) : string =
+  staticMember
+    "Insert"
+    [ typedParenParam "item" typeName; txParam ]
+    (executeInsertExpr insertSql paramBindings onSuccess)
+    "Task<Result<int64, SqliteException>>"
+
+let generateInsertOrIgnore (table: CreateTable) =
   let typeName = capitalizeName table.name
   let pkCols = getPrimaryKey table
   let autoPkColName = getAutoIncrementPrimaryKeyColumnName table
@@ -86,10 +106,9 @@ let generateInsertOrIgnore (table: CreateTable) : string =
   let insertSql =
     $"INSERT OR IGNORE INTO {table.name} ({columnNames}) VALUES ({paramNames})"
 
-  let asyncParamBindings =
+  let paramBindings =
     insertCols
     |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
-    |> joinBindings "        "
 
   let rowDataPairs =
     (insertCols |> List.map (rowDataPairExprForItem "item"))
@@ -99,22 +118,30 @@ let generateInsertOrIgnore (table: CreateTable) : string =
     |> String.concat "; "
     |> fun pairs -> $"[{pairs}]"
 
-  $"""  static member InsertOrIgnore (item: {typeName}) (tx: SqliteTransaction) : Task<Result<int64 option, SqliteException>> =
-    executeInsertOrIgnore
-      "{insertSql}"
-      (fun cmd ->
-        {asyncParamBindings})
-      tx
-      (fun newId ->
-        task {{
-          match newId with
-          | None -> return Ok None
-          | Some newId ->
-            MigrationLog.recordInsert tx "{table.name}" {rowDataPairs}
-            return Ok (Some newId)
-        }})"""
+  let onSuccess =
+    lambdaExpr
+      "newId"
+      (taskExpr
+        [ OtherExpr(
+            MatchExpr(
+              "newId",
+              [ MatchClauseExpr("None", returnExprRaw "Ok None")
+                MatchClauseExpr(
+                  "Some newId",
+                  rawStatementsExpr
+                    [ $"MigrationLog.recordInsert tx \"{table.name}\" {rowDataPairs}"
+                      "return Ok (Some newId)" ]
+                ) ]
+            )
+          ) ])
 
-let generateGet (table: CreateTable) : string option =
+  staticMember
+    "InsertOrIgnore"
+    [ typedParenParam "item" typeName; txParam ]
+    (executeInsertOrIgnoreExpr insertSql paramBindings onSuccess)
+    "Task<Result<int64 option, SqliteException>>"
+
+let generateGet (table: CreateTable) =
   let typeName = capitalizeName table.name
   let pkCols = getPrimaryKey table
 
@@ -129,10 +156,11 @@ let generateGet (table: CreateTable) : string option =
 
     let getSql = $"SELECT {columnNames} FROM {table.name} WHERE {whereClause}"
 
-    let paramList =
+    let parameters =
       pks
-      |> List.map (fun pk -> let pkType = TypeGenerator.mapColumnType pk in $"({pk.name}: {pkType})")
-      |> String.concat " "
+      |> List.map (fun pk ->
+        let pkType = TypeGenerator.mapColumnType pk
+        typedParenParam pk.name pkType)
 
     let asyncParamBindings =
       pks
@@ -141,14 +169,16 @@ let generateGet (table: CreateTable) : string option =
 
     Some(
       renderSelectMember
-        $"SelectById {paramList} (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>>"
+        "SelectById"
+        (parameters @ [ txParam ])
+        $"Task<Result<{typeName} option, SqliteException>>"
         "querySingle"
         getSql
         $"(fun cmd ->\n        {asyncParamBindings})"
         fieldMappings
     )
 
-let generateGetAll (table: CreateTable) : string =
+let generateGetAll (table: CreateTable) =
   let typeName = capitalizeName table.name
 
   let columnNames, fieldMappings =
@@ -157,13 +187,15 @@ let generateGetAll (table: CreateTable) : string =
   let getSql = $"SELECT {columnNames} FROM {table.name}"
 
   renderSelectMember
-    $"SelectAll (tx: SqliteTransaction) : Task<Result<{typeName} list, SqliteException>>"
+    "SelectAll"
+    [ txParam ]
+    $"Task<Result<{typeName} list, SqliteException>>"
     "queryList"
     getSql
     "(fun _ -> ())"
     fieldMappings
 
-let generateGetOne (table: CreateTable) : string =
+let generateGetOne (table: CreateTable) =
   let typeName = capitalizeName table.name
 
   let columnNames, fieldMappings =
@@ -172,13 +204,15 @@ let generateGetOne (table: CreateTable) : string =
   let getSql = $"SELECT {columnNames} FROM {table.name} LIMIT 1"
 
   renderSelectMember
-    $"SelectOne (tx: SqliteTransaction) : Task<Result<{typeName} option, SqliteException>>"
+    "SelectOne"
+    [ txParam ]
+    $"Task<Result<{typeName} option, SqliteException>>"
     "querySingle"
     getSql
     "(fun _ -> ())"
     fieldMappings
 
-let generateUpdate (table: CreateTable) : string option =
+let generateUpdate (table: CreateTable) =
   let typeName = capitalizeName table.name
   let pkCols = getPrimaryKey table
   let rowDataExpr = rowDataListExprForItem "item" table.columns
@@ -199,30 +233,35 @@ let generateUpdate (table: CreateTable) : string option =
 
     let updateSql = $"UPDATE {table.name} SET {setClauses} WHERE {whereClause}"
 
-    let asyncParamBindings =
+    let paramBindings =
       table.columns
       |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
-      |> joinBindings "            "
 
-    Some
-      $"""  static member Update (item: {typeName}) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
-    task {{
-      let! updateResult =
-        executeWriteUnit
-          "{updateSql}"
-          (fun cmd ->
-            {asyncParamBindings})
-          tx
+    let body =
+      taskExpr
+        [ LetOrUseBangExpr(NamedPat("updateResult"), executeWriteUnitExpr updateSql paramBindings)
+          OtherExpr(
+            MatchExpr(
+              "updateResult",
+              [ MatchClauseExpr("Error ex", returnExprRaw "Error ex")
+                MatchClauseExpr(
+                  "Ok ()",
+                  rawStatementsExpr
+                    [ $"MigrationLog.recordUpdate tx \"{table.name}\" {rowDataExpr}"
+                      "return Ok()" ]
+                ) ]
+            )
+          ) ]
 
-      match updateResult with
-      | Error ex -> return Error ex
-      | Ok () ->
-        MigrationLog.recordUpdate tx "{table.name}" {rowDataExpr}
-        return Ok()
-    }}"""
+    Some(
+      staticMember
+        "Update"
+        [ typedParenParam "item" typeName; txParam ]
+        body
+        "Task<Result<unit, SqliteException>>"
+    )
 
-let generateDelete (table: CreateTable) : string option =
-  let typeName = capitalizeName table.name
+let generateDelete (table: CreateTable) =
   let pkCols = getPrimaryKey table
   let rowDataExpr = rowDataListExprForParams pkCols
 
@@ -234,34 +273,35 @@ let generateDelete (table: CreateTable) : string option =
 
     let deleteSql = $"DELETE FROM {table.name} WHERE {whereClause}"
 
-    let paramList =
+    let parameters =
       pks
-      |> List.map (fun pk -> let pkType = TypeGenerator.mapColumnType pk in $"({pk.name}: {pkType})")
-      |> String.concat " "
+      |> List.map (fun pk ->
+        let pkType = TypeGenerator.mapColumnType pk
+        typedParenParam pk.name pkType)
 
-    let asyncParamBindings =
+    let paramBindings =
       pks
       |> List.map (fun pk -> paramBindingExprForColumnVar "cmd" pk pk.name)
-      |> joinBindings "            "
 
-    Some
-      $"""  static member Delete {paramList} (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
-    task {{
-      let! deleteResult =
-        executeWriteUnit
-          "{deleteSql}"
-          (fun cmd ->
-            {asyncParamBindings})
-          tx
+    let body =
+      taskExpr
+        [ LetOrUseBangExpr(NamedPat("deleteResult"), executeWriteUnitExpr deleteSql paramBindings)
+          OtherExpr(
+            MatchExpr(
+              "deleteResult",
+              [ MatchClauseExpr("Error ex", returnExprRaw "Error ex")
+                MatchClauseExpr(
+                  "Ok ()",
+                  rawStatementsExpr
+                    [ $"MigrationLog.recordDelete tx \"{table.name}\" {rowDataExpr}"
+                      "return Ok()" ]
+                ) ]
+            )
+          ) ]
 
-      match deleteResult with
-      | Error ex -> return Error ex
-      | Ok () ->
-        MigrationLog.recordDelete tx "{table.name}" {rowDataExpr}
-        return Ok()
-    }}"""
+    Some(staticMember "Delete" (parameters @ [ txParam ]) body "Task<Result<unit, SqliteException>>")
 
-let generateUpsert (table: CreateTable) : string option =
+let generateUpsert (table: CreateTable) =
   let typeName = capitalizeName table.name
   let pkCols = getPrimaryKey table
 
@@ -273,12 +313,21 @@ let generateUpsert (table: CreateTable) : string option =
       |> List.map (fun pk -> $"item.{capitalizeName pk.name}")
       |> String.concat " "
 
-    Some
-      $"""  static member Upsert (item: {typeName}) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
-    upsertByExisting
-      (fun () -> {typeName}.SelectById {selectByIdArgs} tx)
-      (fun () -> {typeName}.Update item tx)
-      (fun () -> {typeName}.Insert item tx)"""
+    let body =
+      AppExpr(
+        "upsertByExisting",
+        [ lambdaRawExpr "()" $"{typeName}.SelectById {selectByIdArgs} tx"
+          lambdaRawExpr "()" $"{typeName}.Update item tx"
+          lambdaRawExpr "()" $"{typeName}.Insert item tx" ]
+      )
+
+    Some(
+      staticMember
+        "Upsert"
+        [ typedParenParam "item" typeName; txParam ]
+        body
+        "Task<Result<unit, SqliteException>>"
+    )
 
 let validateUpsertAnnotation (table: CreateTable) : Result<unit, string> =
   if table.upsertAnnotations.IsEmpty then

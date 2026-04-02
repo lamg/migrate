@@ -8,6 +8,44 @@ open Fantomas.Core
 open Fantomas.Core.SyntaxOak
 open type Fabulous.AST.Ast
 
+let unitExpr = ConstantExpr(ConstantUnit())
+
+let rawExpr (value: string) = ConstantExpr(value)
+
+let rawStatementsExpr (statements: string seq) =
+  statements
+  |> Seq.map OtherExpr
+  |> CompExprBodyExpr
+
+let typedParenParam (name: string) (paramType: string) =
+  ParenPat(ParameterPat(name, paramType))
+
+let typedTupledOrSingleParam (parameters: (string * string) list) =
+  match parameters with
+  | [ name, paramType ] -> typedParenParam name paramType
+  | _ ->
+    parameters
+    |> List.map (fun (name, paramType) -> ParameterPat(name, paramType))
+    |> TuplePat
+    |> ParenPat
+
+let txParam = typedParenParam "tx" "SqliteTransaction"
+
+let returnExpr (expr: WidgetBuilder<Expr>) = SingleExpr("return", expr)
+
+let returnExprRaw (expr: string) = returnExpr (rawExpr expr)
+
+let returnFromExpr (expr: WidgetBuilder<Expr>) = SingleExpr("return!", expr)
+
+let returnFromExprRaw (expr: string) = returnFromExpr (rawExpr expr)
+
+let lambdaExpr (parameter: string) (body: WidgetBuilder<Expr>) = ParenLambdaExpr(parameter, body)
+
+let lambdaRawExpr (parameter: string) (body: string) = lambdaExpr parameter (rawExpr body)
+
+let lambdaStatementsExpr (parameter: string) (statements: string seq) =
+  lambdaExpr parameter (rawStatementsExpr statements)
+
 /// Build a try/with expression for async code that catches SqliteException and returns Error ex.
 /// bodyExprs: sequence of computation expression statements (OtherExpr values)
 let trySqliteExceptionAsync (bodyExprs: WidgetBuilder<ComputationExpressionStatement> seq) =
@@ -21,11 +59,17 @@ let taskExpr (bodyExprs: WidgetBuilder<ComputationExpressionStatement> seq) =
   NamedComputationExpr("task", CompExprBodyExpr bodyExprs)
 
 /// Build a static member on a type augmentation.
-/// name: method name with parameters e.g. "_.Delete (id: int64) (tx: SqliteTransaction)"
+/// name: method name e.g. "Delete"
+/// parameters: method parameters e.g. `(id: int64)` and `(tx: SqliteTransaction)`
 /// body: the method body expression
 /// returnType: the return type as string e.g. "Result<unit, SqliteException>"
-let staticMember (name: string) (body: WidgetBuilder<Expr>) (returnType: string) =
-  Member(name, body, returnType).toStatic ()
+let staticMember
+  (name: string)
+  (parameters: WidgetBuilder<Pattern> seq)
+  (body: WidgetBuilder<Expr>)
+  (returnType: string)
+  =
+  Member(name, parameters, body, returnType).toStatic ()
 
 /// Fantomas configuration: 2-space indentation, wide lines to match original output
 let private formatConfig =
@@ -34,14 +78,19 @@ let private formatConfig =
       MaxLineLength = 200
       SpaceBeforeMember = true }
 
-/// Generate code for a type augmentation with a single static member.
+/// Generate code for a type augmentation.
 /// typeName: the type name to augment e.g. "Student"
-/// memberName: method signature e.g. "Delete (id: int64) (tx: SqliteTransaction)"
-/// returnType: the return type as string e.g. "Result<unit, SqliteException>"
-/// body: the method body expression
-let generateStaticMemberCode typeName memberName returnType body =
+/// members: members to add to the augmentation
+let generateAugmentationCode typeName (members: WidgetBuilder<MemberDefn> seq) =
   let oak =
-    Ast.Oak() { AnonymousModule() { Augmentation typeName { staticMember memberName body returnType } } }
+    Ast.Oak() {
+      AnonymousModule() {
+        Augmentation(typeName) {
+          for memberDef in members do
+            memberDef
+        }
+      }
+    }
     |> Gen.mkOak
     |> Gen.run
 
@@ -49,7 +98,4 @@ let generateStaticMemberCode typeName memberName returnType body =
     CodeFormatter.FormatDocumentAsync(false, oak, formatConfig)
     |> Async.RunSynchronously
 
-  // Extract just the member part (skip "type {typeName} with\n")
-  let lines = formatted.Code.Split '\n'
-  let memberLines = lines |> Array.skip 1
-  memberLines |> String.concat "\n"
+  formatted.Code
