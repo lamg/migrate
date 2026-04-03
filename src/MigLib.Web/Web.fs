@@ -1,7 +1,11 @@
 module MigLib.Web
 
 open System
+open System.Diagnostics.CodeAnalysis
+open System.Text
 open System.Text.Json
+open System.Text.Json.Nodes
+open System.Text.Json.Serialization.Metadata
 open System.Threading.Tasks
 open Microsoft.AspNetCore.Http
 open Microsoft.Data.Sqlite
@@ -67,9 +71,70 @@ module CookieSpec =
     cookieOptions
 
 type JsonPayload =
-  { Value: obj option
-    ValueType: Type
+  { Serialize: JsonSerializerOptions -> string
     Options: JsonSerializerOptions option }
+
+module JsonContent =
+  [<Literal>]
+  let ContentType = "application/json; charset=utf-8"
+
+  let stringNode (value: string) =
+    if isNull value then
+      null
+    else
+      JsonValue.Create(value) :> JsonNode
+
+  let boolNode (value: bool) = JsonValue.Create(value) :> JsonNode
+
+  let intNode (value: int) = JsonValue.Create(value) :> JsonNode
+
+  let int64Node (value: int64) = JsonValue.Create(value) :> JsonNode
+
+  let floatNode (value: float) = JsonValue.Create(value) :> JsonNode
+
+  let decimalNode (value: decimal) = JsonValue.Create(value) :> JsonNode
+
+  let nullableInt64Node (value: Nullable<int64>) =
+    if value.HasValue then int64Node value.Value else null
+
+  let objectNode (properties: (string * JsonNode) list) =
+    let node = JsonObject()
+
+    for key, value in properties do
+      node[key] <- value
+
+    node :> JsonNode
+
+  let arrayNode (items: JsonNode seq) =
+    let node = JsonArray()
+
+    for item in items do
+      node.Add item
+
+    node :> JsonNode
+
+  let errorNode (code: string) (message: string) =
+    objectNode [ "code", stringNode code; "message", stringNode message ]
+
+  let fromObj (value: obj) =
+    match value with
+    | null -> null
+    | :? string as text -> stringNode text
+    | :? bool as flag -> boolNode flag
+    | :? int as number -> intNode number
+    | :? int64 as number -> int64Node number
+    | :? float as number -> floatNode number
+    | :? decimal as number -> decimalNode number
+    | :? Guid as guid -> stringNode (string guid)
+    | :? DateTimeOffset as timestamp -> stringNode (timestamp.ToString "O")
+    | :? Enum as enumValue -> stringNode (string enumValue)
+    | _ -> stringNode (string value)
+
+  let utf8Bytes (content: JsonNode) =
+    Encoding.UTF8.GetBytes(content.ToJsonString())
+
+  let result (statusCode: int) (content: JsonNode) : IResult =
+    Results.Text(content.ToJsonString(), ContentType, Encoding.UTF8, statusCode = statusCode)
 
 type ResponseEffect<'custom> =
   | SetStatusCode of int
@@ -423,34 +488,40 @@ module Respond =
   let bytes (contentType: string) (content: byte array) : WebOp<'env, 'appError, 'custom, unit> =
     Response.append (WriteBytes(contentType, content))
 
-  let json<'env, 'appError, 'custom, 'a> (value: 'a) : WebOp<'env, 'appError, 'custom, unit> =
-    let boxedValue =
-      match box value with
-      | null -> None
-      | boxed -> Some boxed
+  let jsonNode<'env, 'appError, 'custom> (content: JsonNode) : WebOp<'env, 'appError, 'custom, unit> =
+    bytes JsonContent.ContentType (JsonContent.utf8Bytes content)
 
+  [<RequiresDynamicCode("JSON serialization without source-generated metadata is not native AOT-safe. Use Respond.jsonWithTypeInfo instead.")>]
+  [<RequiresUnreferencedCode("JSON serialization without source-generated metadata may require runtime metadata that trimming cannot preserve. Use Respond.jsonWithTypeInfo instead.")>]
+  let json<'env, 'appError, 'custom, 'a> (value: 'a) : WebOp<'env, 'appError, 'custom, unit> =
     Response.append (
       (WriteJson
-        { Value = boxedValue
-          ValueType = typeof<'a>
+        { Serialize = fun options -> JsonSerializer.Serialize(value, options)
           Options = None }
       : ResponseEffect<'custom>)
     )
 
+  [<RequiresDynamicCode("JSON serialization without source-generated metadata is not native AOT-safe. Use Respond.jsonWithTypeInfo instead.")>]
+  [<RequiresUnreferencedCode("JSON serialization without source-generated metadata may require runtime metadata that trimming cannot preserve. Use Respond.jsonWithTypeInfo instead.")>]
   let jsonWith<'env, 'appError, 'custom, 'a>
     (options: JsonSerializerOptions)
     (value: 'a)
     : WebOp<'env, 'appError, 'custom, unit> =
-    let boxedValue =
-      match box value with
-      | null -> None
-      | boxed -> Some boxed
-
     Response.append (
       (WriteJson
-        { Value = boxedValue
-          ValueType = typeof<'a>
+        { Serialize = fun _ -> JsonSerializer.Serialize(value, options)
           Options = Some options }
+      : ResponseEffect<'custom>)
+    )
+
+  let jsonWithTypeInfo<'env, 'appError, 'custom, 'a>
+    (jsonTypeInfo: JsonTypeInfo<'a>)
+    (value: 'a)
+    : WebOp<'env, 'appError, 'custom, unit> =
+    Response.append (
+      (WriteJson
+        { Serialize = fun _ -> JsonSerializer.Serialize(value, jsonTypeInfo)
+          Options = None }
       : ResponseEffect<'custom>)
     )
 
@@ -513,13 +584,9 @@ let private applyEffect
       return Ok()
     | WriteJson payload ->
       let options = payload.Options |> Option.defaultValue runtime.JsonOptions
+      let json = payload.Serialize options
 
-      let json =
-        match payload.Value with
-        | Some value -> JsonSerializer.Serialize(value, payload.ValueType, options)
-        | None -> "null"
-
-      httpContext.Response.ContentType <- "application/json; charset=utf-8"
+      httpContext.Response.ContentType <- JsonContent.ContentType
       do! httpContext.Response.WriteAsync json
       return Ok()
     | Redirect(location, permanent) ->

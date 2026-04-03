@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.9] - 2026-04-03
+
+Added:
+
+- **AOT-Friendly Web JSON Helpers**: `MigLib.Web` now includes reusable `JsonContent` helpers and `Respond.jsonNode` for explicit JSON responses without generic runtime serialization
+  - adds `jsonWithTypeInfo` for source-generated or explicit metadata-backed JSON writes
+  - adds node/result helpers for strings, numbers, arrays, objects, nullable int64 values, boxed log fields, and common error payloads
+  - marks the reflection-based JSON response helpers as not AOT-safe so callers can choose the explicit path deliberately
+
+Changed:
+
+- **MigLib.Web AOT Metadata**: `MigLib.Web` now declares itself trimmable and AOT-compatible
+  - includes regression coverage for the explicit `jsonWithTypeInfo` response path
+
 ## [5.2.8] - 2026-04-03
 
 Fixed:

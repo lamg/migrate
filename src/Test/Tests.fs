@@ -5,7 +5,9 @@ open System.Diagnostics
 open System.IO
 open System.Security.Cryptography
 open System.Text
+open System.Text.Json
 open System.Text.Json.Nodes
+open System.Text.Json.Serialization.Metadata
 open System.Threading
 open System.Threading.Tasks
 open MigLib.Build
@@ -248,6 +250,9 @@ let private createTestHttpContext () =
   let ctx = DefaultHttpContext()
   ctx.Response.Body <- new MemoryStream()
   ctx
+
+type TestJsonResponse() =
+  member val Id = 0L with get, set
 
 let private assertCliHelpOutput (args: string list) (expectedUsage: string) (expectedFragments: string list) =
   let exitCode, stdOut, stdErr = runMigCli args
@@ -2313,6 +2318,48 @@ let ``webResult binds TxnStep<Result<_, _>> as app errors`` () =
   Assert.Equal(1L, count)
 
   verifyConn.Close()
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``runSimple applies jsonWithTypeInfo responses`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_web_json_typeinfo_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let dbPath = Path.Combine(tempDir, "web-json-typeinfo.db")
+  let env = createTestWebEnv dbPath
+  let httpContext = createTestHttpContext ()
+
+  let jsonTypeInfo =
+    let options = JsonSerializerOptions(JsonSerializerDefaults.Web)
+    options.TypeInfoResolver <- DefaultJsonTypeInfoResolver()
+    options.GetTypeInfo(typeof<TestJsonResponse>) :?> JsonTypeInfo<TestJsonResponse>
+
+  let operation: WebOp<TestWebEnv, string, unit, unit> =
+    webResult {
+      do!
+        (Respond.jsonWithTypeInfo jsonTypeInfo (TestJsonResponse(Id = 42L))
+         : WebOp<TestWebEnv, string, unit, unit>)
+
+      return ()
+    }
+
+  let result = runSimple env (Some httpContext) operation |> fun t -> t.Result
+
+  match result with
+  | Error error -> failwith $"Expected success from jsonWithTypeInfo response, got: {error}"
+  | Ok() -> ()
+
+  Assert.Equal("application/json; charset=utf-8", httpContext.Response.ContentType)
+  httpContext.Response.Body.Position <- 0L
+
+  use reader =
+    new StreamReader(httpContext.Response.Body, Encoding.UTF8, false, 1024, true)
+
+  let responseBody = reader.ReadToEnd()
+  Assert.Equal("""{"id":42}""", responseBody)
+
   Directory.Delete(tempDir, true)
 
 [<Fact>]
