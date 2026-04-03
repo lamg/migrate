@@ -107,6 +107,7 @@ module internal SchemaReflectionUnionExtensions =
                   queryLikeAnnotations = []
                   queryByOrCreateAnnotations = []
                   insertOrIgnoreAnnotations = []
+                  deleteAllAnnotations = []
                   upsertAnnotations = [] }
 
               return tables @ [ extensionTable ]

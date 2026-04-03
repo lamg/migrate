@@ -241,6 +241,7 @@ module internal HotMigrationSchemaIntrospection =
       queryLikeAnnotations = []
       queryByOrCreateAnnotations = []
       insertOrIgnoreAnnotations = []
+      deleteAllAnnotations = []
       upsertAnnotations = [] }
 
   let loadSchemaFromDatabase

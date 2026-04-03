@@ -109,6 +109,7 @@ module internal SchemaReflectionTable =
             queryLikeAnnotations,
             queryByOrCreateAnnotations,
             insertOrIgnoreAnnotations,
+            deleteAllAnnotations,
             upsertAnnotations) = readQueryAnnotations recordType resolver
 
       return
@@ -121,6 +122,7 @@ module internal SchemaReflectionTable =
           queryLikeAnnotations = queryLikeAnnotations
           queryByOrCreateAnnotations = queryByOrCreateAnnotations
           insertOrIgnoreAnnotations = insertOrIgnoreAnnotations
+          deleteAllAnnotations = deleteAllAnnotations
           upsertAnnotations = upsertAnnotations },
         indexes
     }

@@ -51,6 +51,13 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
     let getOneMethod = generateGetOne table
     let updateMethod = generateUpdate table
     let deleteMethod = generateDelete table
+
+    let deleteAllMethod =
+      if table.deleteAllAnnotations.IsEmpty then
+        None
+      else
+        generateDeleteAll table
+
     let queryByMethods = table.queryByAnnotations |> List.map (generateQueryBy table)
 
     let queryLikeMethods =
@@ -67,7 +74,8 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
         Some getAllMethod
         Some getOneMethod
         updateMethod
-        deleteMethod ]
+        deleteMethod
+        deleteAllMethod ]
       @ (queryByMethods |> List.map Some)
       @ (queryLikeMethods |> List.map Some)
       @ (queryByOrCreateMethods |> List.map Some)

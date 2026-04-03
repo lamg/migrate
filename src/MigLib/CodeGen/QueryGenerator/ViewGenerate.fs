@@ -9,8 +9,10 @@ open Mig.CodeGen.QueryGeneratorViewQueries
 let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<string, string> =
   let typeName = capitalizeName view.name
 
-  match view.queryByOrCreateAnnotations, view.insertOrIgnoreAnnotations, view.upsertAnnotations with
-  | [], [], [] ->
+  match
+    view.queryByOrCreateAnnotations, view.insertOrIgnoreAnnotations, view.deleteAllAnnotations, view.upsertAnnotations
+  with
+  | [], [], [], [] ->
     let queryByValidationResults =
       view.queryByAnnotations
       |> List.map (validateViewQueryByAnnotation view.name columns)
@@ -39,12 +41,12 @@ let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<stri
       let queryLikeMethods =
         view.queryLikeAnnotations |> List.map (generateViewQueryLike view.name columns)
 
-      let allMethods =
-        [ getAllMethod; getOneMethod ] @ queryByMethods @ queryLikeMethods
+      let allMethods = [ getAllMethod; getOneMethod ] @ queryByMethods @ queryLikeMethods
 
       Ok(generateAugmentationCode typeName allMethods)
-  | _ :: _, _, _ ->
+  | _ :: _, _, _, _ ->
     Error
       $"QueryByOrCreate annotation is not supported on views (view '{view.name}' is read-only). Use QueryBy instead."
-  | [], _ :: _, _ -> Error $"InsertOrIgnore annotation is not supported on views (view '{view.name}' is read-only)."
-  | [], [], _ :: _ -> Error $"Upsert annotation is not supported on views (view '{view.name}' is read-only)."
+  | [], _ :: _, _, _ -> Error $"InsertOrIgnore annotation is not supported on views (view '{view.name}' is read-only)."
+  | [], [], _ :: _, _ -> Error $"DeleteAll annotation is not supported on views (view '{view.name}' is read-only)."
+  | [], [], [], _ :: _ -> Error $"Upsert annotation is not supported on views (view '{view.name}' is read-only)."

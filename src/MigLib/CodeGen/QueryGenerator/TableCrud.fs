@@ -55,8 +55,7 @@ let generateInsert (table: CreateTable) =
   let insertSql = $"INSERT INTO {table.name} ({columnNames}) VALUES ({paramNames})"
 
   let paramBindings =
-    insertCols
-    |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
+    insertCols |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
 
   let rowDataPairs =
     (insertCols |> List.map (rowDataPairExprForItem "item"))
@@ -107,8 +106,7 @@ let generateInsertOrIgnore (table: CreateTable) =
     $"INSERT OR IGNORE INTO {table.name} ({columnNames}) VALUES ({paramNames})"
 
   let paramBindings =
-    insertCols
-    |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
+    insertCols |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
 
   let rowDataPairs =
     (insertCols |> List.map (rowDataPairExprForItem "item"))
@@ -234,8 +232,7 @@ let generateUpdate (table: CreateTable) =
     let updateSql = $"UPDATE {table.name} SET {setClauses} WHERE {whereClause}"
 
     let paramBindings =
-      table.columns
-      |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
+      table.columns |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
 
     let body =
       taskExpr
@@ -253,13 +250,7 @@ let generateUpdate (table: CreateTable) =
             )
           ) ]
 
-    Some(
-      staticMember
-        "Update"
-        [ typedParenParam "item" typeName; txParam ]
-        body
-        "Task<Result<unit, SqliteException>>"
-    )
+    Some(staticMember "Update" [ typedParenParam "item" typeName; txParam ] body "Task<Result<unit, SqliteException>>")
 
 let generateDelete (table: CreateTable) =
   let pkCols = getPrimaryKey table
@@ -280,8 +271,7 @@ let generateDelete (table: CreateTable) =
         typedParenParam pk.name pkType)
 
     let paramBindings =
-      pks
-      |> List.map (fun pk -> paramBindingExprForColumnVar "cmd" pk pk.name)
+      pks |> List.map (fun pk -> paramBindingExprForColumnVar "cmd" pk pk.name)
 
     let body =
       taskExpr
@@ -300,6 +290,15 @@ let generateDelete (table: CreateTable) =
           ) ]
 
     Some(staticMember "Delete" (parameters @ [ txParam ]) body "Task<Result<unit, SqliteException>>")
+
+let generateDeleteAll (table: CreateTable) =
+  Some(
+    staticMember
+      "DeleteAll"
+      [ txParam ]
+      (executeWriteUnitExpr $"DELETE FROM {table.name}" [])
+      "Task<Result<unit, SqliteException>>"
+  )
 
 let generateUpsert (table: CreateTable) =
   let typeName = capitalizeName table.name
@@ -321,13 +320,7 @@ let generateUpsert (table: CreateTable) =
           lambdaRawExpr "()" $"{typeName}.Insert item tx" ]
       )
 
-    Some(
-      staticMember
-        "Upsert"
-        [ typedParenParam "item" typeName; txParam ]
-        body
-        "Task<Result<unit, SqliteException>>"
-    )
+    Some(staticMember "Upsert" [ typedParenParam "item" typeName; txParam ] body "Task<Result<unit, SqliteException>>")
 
 let validateUpsertAnnotation (table: CreateTable) : Result<unit, string> =
   if table.upsertAnnotations.IsEmpty then

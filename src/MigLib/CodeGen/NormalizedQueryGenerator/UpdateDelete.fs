@@ -17,7 +17,8 @@ let private commandLambda (bindings: string list) =
 let private executeWriteUnitExpr (sql: string) (bindings: string list) =
   AppExpr("executeWriteUnit", [ ConstantExpr(Ast.String sql); commandLambda bindings; rawExpr "tx" ])
 
-let private unitThunk (bodyExpr: WidgetBuilder<Expr>) = ParenLambdaExpr([ UnitPat() ], bodyExpr)
+let private unitThunk (bodyExpr: WidgetBuilder<Expr>) =
+  ParenLambdaExpr([ UnitPat() ], bodyExpr)
 
 let private sequenceUnitResultsExpr (steps: WidgetBuilder<Expr> list) =
   AppExpr("sequenceUnitResults", [ ListExpr(steps) ])
@@ -57,24 +58,27 @@ let private getPrimaryKeyVarName (baseTable: CreateTable) =
 let private baseUpdateClause (baseTable: CreateTable) (extensions: ExtensionTable list) (typeName: string) =
   let updateSql = generateUpdateBaseSql baseTable
   let idVarName = getPrimaryKeyVarName baseTable
+
   let deleteSteps =
     extensions
     |> List.map (fun ext ->
-      unitThunk (executeWriteUnitExpr ($"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id") [ addPlainBinding "cmd" "id" idVarName ]))
+      unitThunk (
+        executeWriteUnitExpr
+          ($"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id")
+          [ addPlainBinding "cmd" "id" idVarName ]
+      ))
 
   let deleteExtensionsExpr = sequenceUnitResultsExpr deleteSteps
-  let updateStepExpr = unitThunk (executeWriteUnitExpr updateSql (generateParamBindings baseTable.columns "cmd"))
+
+  let updateStepExpr =
+    unitThunk (executeWriteUnitExpr updateSql (generateParamBindings baseTable.columns "cmd"))
 
   MatchClauseExpr(
     $"{typeName}.Base({generateFieldPattern baseTable.columns})",
     CompExprBodyExpr(
       [ LetOrUseExpr(Function("deleteExtensions", UnitPat(), deleteExtensionsExpr))
         OtherExpr(
-          returnFromExpr (
-            sequenceUnitResultsExpr
-              [ updateStepExpr
-                unitThunk (AppExpr("deleteExtensions", unitExpr)) ]
-          )
+          returnFromExpr (sequenceUnitResultsExpr [ updateStepExpr; unitThunk (AppExpr("deleteExtensions", unitExpr)) ])
         ) ]
     )
   )
@@ -92,8 +96,11 @@ let private extensionUpdateClause
     extension.table.columns
     |> List.filter (fun col -> col.name <> extension.fkColumn)
 
-  let extensionColumnNames = extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "
-  let extensionParamNames = extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "
+  let extensionColumnNames =
+    extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "
+
+  let extensionParamNames =
+    extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "
 
   let insertOrReplaceSql =
     $"INSERT OR REPLACE INTO {extension.table.name} ({extension.fkColumn}, {extensionColumnNames}) VALUES (@{extension.fkColumn}, {extensionParamNames})"
@@ -104,16 +111,24 @@ let private extensionUpdateClause
     allExtensions
     |> List.filter (fun ext -> ext.table.name <> extension.table.name)
     |> List.map (fun ext ->
-      unitThunk (executeWriteUnitExpr ($"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id") [ addPlainBinding "cmd" "id" idVarName ]))
+      unitThunk (
+        executeWriteUnitExpr
+          ($"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id")
+          [ addPlainBinding "cmd" "id" idVarName ]
+      ))
 
   let deleteOtherExtensionsExpr = sequenceUnitResultsExpr deleteOtherExtensionSteps
-  let updateStepExpr = unitThunk (executeWriteUnitExpr updateSql (generateParamBindings baseTable.columns "cmd"))
+
+  let updateStepExpr =
+    unitThunk (executeWriteUnitExpr updateSql (generateParamBindings baseTable.columns "cmd"))
 
   let insertBindings =
     addPlainBinding "cmd" extension.fkColumn idVarName
     :: generateParamBindings extensionInsertColumns "cmd"
 
-  let insertStepExpr = unitThunk (executeWriteUnitExpr insertOrReplaceSql insertBindings)
+  let insertStepExpr =
+    unitThunk (executeWriteUnitExpr insertOrReplaceSql insertBindings)
+
   let allColumns = baseTable.columns @ extensionInsertColumns
 
   MatchClauseExpr(
@@ -178,3 +193,10 @@ let generateDelete (normalized: NormalizedTable) =
         (executeWriteUnitExpr deleteSql bindings)
         "Task<Result<unit, SqliteException>>"
     )
+
+let generateDeleteAll (normalized: NormalizedTable) =
+  staticMember
+    "DeleteAll"
+    [ txParam ]
+    (executeWriteUnitExpr $"DELETE FROM {normalized.baseTable.name}" [])
+    "Task<Result<unit, SqliteException>>"

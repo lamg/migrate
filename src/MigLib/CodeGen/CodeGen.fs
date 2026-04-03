@@ -187,10 +187,13 @@ let private renderCreateView (view: CreateView) =
   let renderedInsertOrIgnoreAnnotations =
     renderList (fun _ -> "InsertOrIgnoreAnnotation") view.insertOrIgnoreAnnotations
 
+  let renderedDeleteAllAnnotations =
+    renderList (fun _ -> "DeleteAllAnnotation") view.deleteAllAnnotations
+
   let renderedUpsertAnnotations =
     renderList (fun _ -> "UpsertAnnotation") view.upsertAnnotations
 
-  $"{{ name = {renderStringLiteral view.name}; previousName = {renderedPreviousName}; sqlTokens = {renderedSqlTokens}; declaredColumns = {renderedDeclaredColumns}; dependencies = {renderedDependencies}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
+  $"{{ name = {renderStringLiteral view.name}; previousName = {renderedPreviousName}; sqlTokens = {renderedSqlTokens}; declaredColumns = {renderedDeclaredColumns}; dependencies = {renderedDependencies}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; deleteAllAnnotations = {renderedDeleteAllAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
 
 let private renderCreateTable (table: CreateTable) =
   let renderedPreviousName = renderOption renderStringLiteral table.previousName
@@ -210,10 +213,13 @@ let private renderCreateTable (table: CreateTable) =
   let renderedInsertOrIgnoreAnnotations =
     renderList (fun _ -> "InsertOrIgnoreAnnotation") table.insertOrIgnoreAnnotations
 
+  let renderedDeleteAllAnnotations =
+    renderList (fun _ -> "DeleteAllAnnotation") table.deleteAllAnnotations
+
   let renderedUpsertAnnotations =
     renderList (fun _ -> "UpsertAnnotation") table.upsertAnnotations
 
-  $"{{ name = {renderStringLiteral table.name}; previousName = {renderedPreviousName}; dropColumns = {renderedDropColumns}; columns = {renderedColumns}; constraints = {renderedConstraints}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
+  $"{{ name = {renderStringLiteral table.name}; previousName = {renderedPreviousName}; dropColumns = {renderedDropColumns}; columns = {renderedColumns}; constraints = {renderedConstraints}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; deleteAllAnnotations = {renderedDeleteAllAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
 
 let private renderCreateIndex (index: CreateIndex) =
   $"{{ name = {renderStringLiteral index.name}; table = {renderStringLiteral index.table}; columns = {renderList renderStringLiteral index.columns} }}"

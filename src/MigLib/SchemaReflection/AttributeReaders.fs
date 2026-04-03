@@ -296,6 +296,7 @@ module internal SchemaReflectionAttributes =
         QueryLikeAnnotation list *
         QueryByOrCreateAnnotation list *
         InsertOrIgnoreAnnotation list *
+        DeleteAllAnnotation list *
         UpsertAnnotation list,
         string
        >
@@ -308,6 +309,7 @@ module internal SchemaReflectionAttributes =
         getTypeAttributes<SelectByOrInsertAttribute> recordType
 
       let insertOrIgnoreAttributes = getTypeAttributes<InsertOrIgnoreAttribute> recordType
+      let deleteAllAttributes = getTypeAttributes<DeleteAllAttribute> recordType
       let upsertAttributes = getTypeAttributes<UpsertAttribute> recordType
 
       let! queryBy =
@@ -366,11 +368,17 @@ module internal SchemaReflectionAttributes =
         else
           [ InsertOrIgnoreAnnotation ]
 
+      let deleteAll =
+        if deleteAllAttributes.IsEmpty then
+          []
+        else
+          [ DeleteAllAnnotation ]
+
       let upsert =
         if upsertAttributes.IsEmpty then
           []
         else
           [ UpsertAnnotation ]
 
-      return queryBy, queryLike, queryByOrCreate, insertOrIgnore, upsert
+      return queryBy, queryLike, queryByOrCreate, insertOrIgnore, deleteAll, upsert
     }

@@ -44,6 +44,7 @@ let private mkTable name columns constraints =
     queryLikeAnnotations = []
     queryByOrCreateAnnotations = []
     insertOrIgnoreAnnotations = []
+    deleteAllAnnotations = []
     upsertAnnotations = [] }
 
 let private mkForeignKey refTable refColumns =
@@ -1625,6 +1626,7 @@ let ``non-table consistency report passes for valid target schema objects`` () =
               queryLikeAnnotations = []
               queryByOrCreateAnnotations = []
               insertOrIgnoreAnnotations = []
+              deleteAllAnnotations = []
               upsertAnnotations = [] } ]
         triggers =
           [ { name = "trg_student_insert"
@@ -1655,6 +1657,7 @@ let ``non-table consistency report flags invalid target schema objects`` () =
               queryLikeAnnotations = []
               queryByOrCreateAnnotations = []
               insertOrIgnoreAnnotations = []
+              deleteAllAnnotations = []
               upsertAnnotations = [] }
             { name = "student_view"
               previousName = None
@@ -1665,6 +1668,7 @@ let ``non-table consistency report flags invalid target schema objects`` () =
               queryLikeAnnotations = []
               queryByOrCreateAnnotations = []
               insertOrIgnoreAnnotations = []
+              deleteAllAnnotations = []
               upsertAnnotations = [] } ]
         triggers =
           [ { name = "trg_student_insert"
@@ -6015,6 +6019,7 @@ let ``codegen generates module and query methods from schema model`` () =
       queryLikeAnnotations = [ { columns = [ "name" ] } ]
       queryByOrCreateAnnotations = [ { columns = [ "name"; "age" ] } ]
       insertOrIgnoreAnnotations = [ InsertOrIgnoreAnnotation ]
+      deleteAllAnnotations = [ DeleteAllAnnotation ]
       upsertAnnotations = [ UpsertAnnotation ] }
 
   let schema =
@@ -6028,6 +6033,7 @@ let ``codegen generates module and query methods from schema model`` () =
     Assert.Contains("module Students", generated)
     Assert.Contains("open MigLib.Db", generated)
     Assert.Contains("static member Insert (item: Student) (tx: SqliteTransaction)", generated)
+    Assert.Contains("static member DeleteAll", generated)
     Assert.Contains("static member Upsert (item: Student) (tx: SqliteTransaction)", generated)
     Assert.Contains("static member SelectAll", generated)
     Assert.Contains("static member SelectByNameAge", generated)
@@ -6192,6 +6198,7 @@ let ``querybyorinsert works for composite primary keys without SelectById fallba
       queryLikeAnnotations = []
       queryByOrCreateAnnotations = [ { columns = [ "description" ] } ]
       insertOrIgnoreAnnotations = []
+      deleteAllAnnotations = []
       upsertAnnotations = [] }
 
   let schema =
@@ -6240,6 +6247,7 @@ let ``codegen rejects upsert annotation when table has no primary key`` () =
       queryLikeAnnotations = []
       queryByOrCreateAnnotations = []
       insertOrIgnoreAnnotations = []
+      deleteAllAnnotations = []
       upsertAnnotations = [ UpsertAnnotation ] }
 
   let schema = { emptyFile with tables = [ table ] }
@@ -6249,6 +6257,45 @@ let ``codegen rejects upsert annotation when table has no primary key`` () =
   | Error error ->
     Assert.Contains("Upsert annotation requires a primary key", error)
     Assert.Contains("no_pk", error)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``codegen allows deleteall annotation when table has no primary key`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_deleteall_nopk_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let outputPath = Path.Combine(tempDir, "NoPkDeleteAll.fs")
+
+  let table =
+    { name = "no_pk"
+      previousName = None
+      dropColumns = []
+      columns =
+        [ { name = "name"
+            previousName = None
+            columnType = SqlText
+            constraints = [ NotNull ]
+            enumLikeDu = None
+            unitOfMeasure = None } ]
+      constraints = []
+      queryByAnnotations = []
+      queryLikeAnnotations = []
+      queryByOrCreateAnnotations = []
+      insertOrIgnoreAnnotations = []
+      deleteAllAnnotations = [ DeleteAllAnnotation ]
+      upsertAnnotations = [] }
+
+  let schema = { emptyFile with tables = [ table ] }
+
+  match generateCodeFromModel "NoPkDeleteAllQueries" schema outputPath with
+  | Error error -> failwith $"Expected codegen success for DeleteAll without primary key, got: {error}"
+  | Ok _ ->
+    let generated = File.ReadAllText outputPath
+    Assert.Contains("static member DeleteAll", generated)
+    Assert.Contains("DELETE FROM no_pk", generated)
 
   Directory.Delete(tempDir, true)
 
@@ -6287,6 +6334,7 @@ let ``codegen rejects upsert annotation on views`` () =
       queryLikeAnnotations = []
       queryByOrCreateAnnotations = []
       insertOrIgnoreAnnotations = []
+      deleteAllAnnotations = []
       upsertAnnotations = [] }
 
   let view =
@@ -6299,6 +6347,7 @@ let ``codegen rejects upsert annotation on views`` () =
       queryLikeAnnotations = []
       queryByOrCreateAnnotations = []
       insertOrIgnoreAnnotations = []
+      deleteAllAnnotations = []
       upsertAnnotations = [ UpsertAnnotation ] }
 
   let schema =
@@ -6310,6 +6359,70 @@ let ``codegen rejects upsert annotation on views`` () =
   | Ok _ -> failwith "Expected codegen failure when Upsert is used on a view"
   | Error error ->
     Assert.Contains("Upsert annotation is not supported on views", error)
+    Assert.Contains("student_view", error)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``codegen rejects deleteall annotation on views`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_deleteall_view_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let outputPath = Path.Combine(tempDir, "ViewWithDeleteAll.fs")
+
+  let studentTable =
+    { name = "student"
+      previousName = None
+      dropColumns = []
+      columns =
+        [ { name = "id"
+            previousName = None
+            columnType = SqlInteger
+            constraints =
+              [ PrimaryKey
+                  { constraintName = None
+                    columns = []
+                    isAutoincrement = true } ]
+            enumLikeDu = None
+            unitOfMeasure = None }
+          { name = "name"
+            previousName = None
+            columnType = SqlText
+            constraints = [ NotNull ]
+            enumLikeDu = None
+            unitOfMeasure = None } ]
+      constraints = []
+      queryByAnnotations = []
+      queryLikeAnnotations = []
+      queryByOrCreateAnnotations = []
+      insertOrIgnoreAnnotations = []
+      deleteAllAnnotations = []
+      upsertAnnotations = [] }
+
+  let view =
+    { name = "student_view"
+      previousName = None
+      sqlTokens = [ "CREATE VIEW student_view AS SELECT id, name FROM student;" ]
+      declaredColumns = []
+      dependencies = [ "student" ]
+      queryByAnnotations = []
+      queryLikeAnnotations = []
+      queryByOrCreateAnnotations = []
+      insertOrIgnoreAnnotations = []
+      deleteAllAnnotations = [ DeleteAllAnnotation ]
+      upsertAnnotations = [] }
+
+  let schema =
+    { emptyFile with
+        tables = [ studentTable ]
+        views = [ view ] }
+
+  match generateCodeFromModel "ViewWithDeleteAllQueries" schema outputPath with
+  | Ok _ -> failwith "Expected codegen failure when DeleteAll is used on a view"
+  | Error error ->
+    Assert.Contains("DeleteAll annotation is not supported on views", error)
     Assert.Contains("student_view", error)
 
   Directory.Delete(tempDir, true)

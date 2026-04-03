@@ -55,6 +55,12 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
     let updateMethod = generateUpdate normalized
     let deleteMethod = generateDelete normalized
 
+    let deleteAllMethod =
+      if normalized.baseTable.deleteAllAnnotations.IsEmpty then
+        None
+      else
+        Some(generateDeleteAll normalized)
+
     let queryByMethods =
       normalized.baseTable.queryByAnnotations
       |> List.map (generateNormalizedQueryBy normalized)
@@ -74,7 +80,8 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
         getByIdMethod
         Some getOneMethod
         updateMethod
-        deleteMethod ]
+        deleteMethod
+        deleteAllMethod ]
       @ (queryByMethods |> List.map Some)
       @ (queryLikeMethods |> List.map Some)
       @ (queryByOrCreateMethods |> List.map Some)

@@ -76,6 +76,10 @@ module DbAttributes =
     member _.Column = column
 
   [<AttributeUsage(AttributeTargets.Class)>]
+  type DeleteAllAttribute() =
+    inherit Attribute()
+
+  [<AttributeUsage(AttributeTargets.Class)>]
   type InsertOrIgnoreAttribute() =
     inherit Attribute()
 

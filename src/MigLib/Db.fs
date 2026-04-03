@@ -19,6 +19,7 @@ type SelectLikeAttribute = DbAttributes.SelectLikeAttribute
 type SelectByOrInsertAttribute = DbAttributes.SelectByOrInsertAttribute
 type UpdateByAttribute = DbAttributes.UpdateByAttribute
 type DeleteByAttribute = DbAttributes.DeleteByAttribute
+type DeleteAllAttribute = DbAttributes.DeleteAllAttribute
 type InsertOrIgnoreAttribute = DbAttributes.InsertOrIgnoreAttribute
 type UpsertAttribute = DbAttributes.UpsertAttribute
 type OnDeleteCascadeAttribute = DbAttributes.OnDeleteCascadeAttribute

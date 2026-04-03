@@ -38,6 +38,7 @@ let Schema: SqlFile =
           queryLikeAnnotations = []
           queryByOrCreateAnnotations = []
           insertOrIgnoreAnnotations = []
+          deleteAllAnnotations = []
           upsertAnnotations = [] } ]
     indexes = []
     triggers = [] }
