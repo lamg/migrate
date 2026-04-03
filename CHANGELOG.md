@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.7] - 2026-04-03
+
+Added:
+
+- **Generated DeleteAll Helper**: schemas can now opt into a generated `DeleteAll` method with `[<DeleteAll>]`
+  - regular and normalized tables emit `DeleteAll(tx)` as a direct `DELETE FROM <table>` helper
+  - view code generation rejects `DeleteAll` explicitly so the read-only surface stays consistent
+  - `MigLib` schema reflection, compiled schema serialization, and `mig codegen` all understand the new annotation
+
 ## [5.2.6] - 2026-04-02
 
 Changed:
