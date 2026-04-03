@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.8] - 2026-04-03
+
+Fixed:
+
+- **Generated Result Returns**: code generation now emits valid F# `return Ok ...` and `return Error ...` statements
+  - fixes invalid generated output such as `returnOk newId` and `returnError ex` in `Db.fs`
+  - adds regression coverage so generated query helpers keep the correct computation-expression syntax
+
 ## [5.2.7] - 2026-04-03
 
 Added:

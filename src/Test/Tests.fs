@@ -6043,6 +6043,9 @@ let ``codegen generates module and query methods from schema model`` () =
     Assert.Contains("MigrationLog.recordInsert", generated)
     Assert.Contains("MigrationLog.recordUpdate", generated)
     Assert.Contains("MigrationLog.recordDelete", generated)
+    Assert.Contains("return Ok newId", generated)
+    Assert.DoesNotContain("returnOk", generated)
+    Assert.DoesNotContain("returnError", generated)
     Assert.DoesNotContain(": Result<", generated)
 
   Directory.Delete(tempDir, true)

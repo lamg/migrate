@@ -13,12 +13,9 @@ let unitExpr = ConstantExpr(ConstantUnit())
 let rawExpr (value: string) = ConstantExpr(value)
 
 let rawStatementsExpr (statements: string seq) =
-  statements
-  |> Seq.map OtherExpr
-  |> CompExprBodyExpr
+  statements |> Seq.map OtherExpr |> CompExprBodyExpr
 
-let typedParenParam (name: string) (paramType: string) =
-  ParenPat(ParameterPat(name, paramType))
+let typedParenParam (name: string) (paramType: string) = ParenPat(ParameterPat(name, paramType))
 
 let typedTupledOrSingleParam (parameters: (string * string) list) =
   match parameters with
@@ -33,7 +30,7 @@ let txParam = typedParenParam "tx" "SqliteTransaction"
 
 let returnExpr (expr: WidgetBuilder<Expr>) = SingleExpr("return", expr)
 
-let returnExprRaw (expr: string) = returnExpr (rawExpr expr)
+let returnExprRaw (expr: string) = rawExpr $"return {expr}"
 
 let returnFromExpr (expr: WidgetBuilder<Expr>) = SingleExpr("return!", expr)
 
