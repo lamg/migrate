@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.4.0] - 2026-04-07
+
+Added:
+
+- **Explicit FK Attribute**: foreign keys can now be declared explicitly with the `FK` attribute
+  - supports single and multiple columns via ParamArray: `[<FK("user", "userId")>]` or `[<FK("user", "tenantId", "userId")>]`
+  - optional `RefColumns` property to specify referenced columns: `[<FK("user", "tenantId", "userId", RefColumns = [|"tenant_id"; "user_id"|])>]`
+  - integrates with `OnDeleteCascade` and `OnDeleteSetNull` actions
+  - documented in `specs/database_dsl.md` with examples and SQL translations
+
 ## [5.3.0] - 2026-04-07
 
 Added:

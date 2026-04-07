@@ -6,7 +6,7 @@
     <IsTrimmable>true</IsTrimmable>
 
     <PackageId>MigLib.Web</PackageId>
-    <Version>5.3.0</Version>
+    <Version>5.4.0</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <AssemblyName>MigLib.Web</AssemblyName>
 
