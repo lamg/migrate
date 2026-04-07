@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.3.0] - 2026-04-07
+
+Added:
+
+- **Composite Primary Key Support**: `PK` attributes now support multi-column primary keys
+  - declare composite keys with `[<PK("col1", "col2")>]` or repeated `[<PK "col1">] [<PK "col2">]`
+  - composite foreign keys expand from record references with deterministic naming: single-column uses `field_id`, composite uses `field_<pkColumn>` for each PK part
+  - `OnDeleteCascade` and `OnDeleteSetNull` work at the relationship level for composite FKs
+  - seed generation expands nested composite-PK values into all FK columns
+  - synthesized views generate multi-column join predicates for composite relationships
+  - normalized/DU extension tables support composite FK/PK relationships throughout codegen
+  - documented in `specs/database_dsl.md` with examples and SQL translations
+
 ## [5.2.9] - 2026-04-03
 
 Added:
