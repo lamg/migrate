@@ -11,10 +11,10 @@ module DbAttributes =
     inherit Attribute()
     member _.Column = column
 
-  [<AttributeUsage(AttributeTargets.Class)>]
-  type PKAttribute(column: string) =
+  [<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+  type PKAttribute([<ParamArray>] columns: string array) =
     inherit Attribute()
-    member _.Column = column
+    member _.Columns = columns
 
   [<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
   type UniqueAttribute([<ParamArray>] columns: string array) =

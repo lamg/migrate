@@ -54,11 +54,12 @@ let private getExtensionCaseColumns
   (includeAutoIncrementPk: bool)
   : ColumnDef list =
   let baseColumns = getBaseCaseColumns baseTable includeAutoIncrementPk
+  let extensionFkColumns = extension.fkColumns |> Set.ofList
 
-  // Extension columns excluding the FK column (which duplicates base PK)
+  // Extension columns excluding the FK columns (which duplicate the base PK)
   let extensionColumns =
     extension.table.columns
-    |> List.filter (fun col -> col.name <> extension.fkColumn)
+    |> List.filter (fun col -> not (extensionFkColumns.Contains col.name))
 
   baseColumns @ extensionColumns
 

@@ -57,12 +57,12 @@ module internal SchemaReflectionAssembly =
                 let! pkInfo = readPrimaryKeyInfo recordType
 
                 match pkInfo with
-                | Some pk -> return pairs @ [ recordType, pk ]
-                | None -> return pairs
+                | [] -> return pairs
+                | pks -> return pairs @ [ recordType, pks ]
               })
             []
           |> Result.map (fun pairs ->
-            let dictionary = Dictionary<Type, PrimaryKeyInfo>()
+            let dictionary = Dictionary<Type, PrimaryKeyInfo list>()
 
             for key, value in pairs do
               dictionary[key] <- value

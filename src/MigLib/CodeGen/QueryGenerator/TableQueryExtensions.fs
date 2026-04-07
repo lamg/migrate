@@ -183,11 +183,7 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
 
         yield
           OtherExpr(
-            AppExpr(
-              "querySingleOrInsert",
-              [ rawExpr "select"
-                lambdaRawExpr "()" $"{typeName}.Insert newItem tx" ]
-            )
+            AppExpr("querySingleOrInsert", [ rawExpr "select"; lambdaRawExpr "()" $"{typeName}.Insert newItem tx" ])
           )
       }
     )

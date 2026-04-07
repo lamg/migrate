@@ -78,6 +78,23 @@ module internal SchemaReflectionAttributes =
       |> List.map (fun key -> key.ToLowerInvariant(), columnName))
     |> Map.ofList
 
+  let buildRelationshipResolver (fieldColumns: (string * string list) list) : Map<string, string list> =
+    fieldColumns
+    |> List.collect (fun (fieldName, columns) ->
+      [ fieldName
+        toSnakeCase fieldName
+        toCamelCaseFromSnake (toSnakeCase fieldName) ]
+      |> List.map (fun key -> key.ToLowerInvariant(), columns))
+    |> Map.ofList
+
+  let getForeignKeyColumnNamesForPrefix (prefix: string) (referencedPk: PrimaryKeyInfo list) : string list =
+    match referencedPk with
+    | [ _ ] -> [ $"{prefix}_id" ]
+    | pks -> pks |> List.map (fun pk -> $"{prefix}_{pk.columnName}")
+
+  let getForeignKeyColumnNames (fieldName: string) (referencedPk: PrimaryKeyInfo list) : string list =
+    getForeignKeyColumnNamesForPrefix (toSnakeCase fieldName) referencedPk
+
   let resolveColumnName
     (resolver: Map<string, string>)
     (typeName: string)
@@ -121,7 +138,7 @@ module internal SchemaReflectionAttributes =
     else
       Error $"Column '{columnName}' was not found while applying a constraint"
 
-  let readPrimaryKeyInfo (recordType: Type) : Result<PrimaryKeyInfo option, string> =
+  let readPrimaryKeyInfo (recordType: Type) : Result<PrimaryKeyInfo list, string> =
     let fields = FSharpType.GetRecordFields(recordType, true)
     let autoAttributes = getTypeAttributes<AutoIncPKAttribute> recordType
     let pkAttributes = getTypeAttributes<PKAttribute> recordType
@@ -137,28 +154,60 @@ module internal SchemaReflectionAttributes =
           match mapPrimitiveSqlType field.PropertyType with
           | Some SqlInteger ->
             return
-              Some
-                { columnName = toSnakeCase field.Name
+              [ { columnName = toSnakeCase field.Name
                   sqlType = SqlInteger
-                  isAutoIncrement = true }
+                  isAutoIncrement = true } ]
           | Some _ -> return! Error $"AutoIncPK on type '{recordType.Name}' must target an int64 field"
           | None -> return! Error $"AutoIncPK on type '{recordType.Name}' must target a primitive int64 field"
         }
-      | [], [ pk ] ->
+      | [], pkAttrs when not pkAttrs.IsEmpty ->
         result {
-          let! field = resolveFieldByName fields pk.Column
+          let requestedColumns =
+            pkAttrs |> List.collect (fun pk -> pk.Columns |> List.ofArray)
 
-          match mapPrimitiveSqlType field.PropertyType with
-          | Some sqlType ->
-            return
-              Some
-                { columnName = toSnakeCase field.Name
-                  sqlType = sqlType
-                  isAutoIncrement = false }
-          | None -> return! Error $"PK on type '{recordType.Name}' must target a primitive field (int64, string, float)"
+          if requestedColumns.IsEmpty then
+            return! Error $"Type '{recordType.Name}' defines PK attributes without any columns."
+
+          let duplicateColumns =
+            requestedColumns
+            |> List.groupBy (fun column -> column.ToLowerInvariant())
+            |> List.filter (fun (_, entries) -> entries.Length > 1)
+            |> List.map (fun (_, entries) -> entries.Head)
+
+          if not duplicateColumns.IsEmpty then
+            let duplicates = duplicateColumns |> String.concat ", "
+            return! Error $"Type '{recordType.Name}' defines duplicate PK columns: {duplicates}"
+
+          let! primaryKeyInfo =
+            requestedColumns
+            |> traverseResultM (fun column ->
+              result {
+                let! field = resolveFieldByName fields column
+
+                match mapPrimitiveSqlType field.PropertyType with
+                | Some sqlType ->
+                  return
+                    { columnName = toSnakeCase field.Name
+                      sqlType = sqlType
+                      isAutoIncrement = false }
+                | None ->
+                  return! Error $"PK on type '{recordType.Name}' must target a primitive field (int64, string, float)"
+              })
+
+          let duplicateResolvedColumns =
+            primaryKeyInfo
+            |> List.groupBy (fun pk -> pk.columnName.ToLowerInvariant())
+            |> List.filter (fun (_, entries) -> entries.Length > 1)
+            |> List.map (fun (_, entries) -> entries.Head.columnName)
+
+          if not duplicateResolvedColumns.IsEmpty then
+            let duplicates = duplicateResolvedColumns |> String.concat ", "
+            return! Error $"Type '{recordType.Name}' defines duplicate PK columns: {duplicates}"
+
+          return primaryKeyInfo
         }
-      | [], [] -> Ok None
-      | _ -> Error $"Type '{recordType.Name}' defines multiple primary-key attributes"
+      | [], [] -> Ok []
+      | _ -> Error $"Type '{recordType.Name}' defines multiple AutoIncPK attributes"
 
   let applyConstraintAttributes
     (recordType: Type)
@@ -217,17 +266,39 @@ module internal SchemaReflectionAttributes =
       return columnsAfterUnique, tableConstraints
     }
 
-  let readOnDeleteActions (recordType: Type) (resolver: Map<string, string>) : Result<Map<string, FkAction>, string> =
+  let readOnDeleteActions
+    (recordType: Type)
+    (resolver: Map<string, string>)
+    (relationshipResolver: Map<string, string list>)
+    : Result<Map<string list, FkAction>, string> =
     result {
       let cascadeAttributes = getTypeAttributes<OnDeleteCascadeAttribute> recordType
       let setNullAttributes = getTypeAttributes<OnDeleteSetNullAttribute> recordType
+
+      let resolveOnDeleteTarget (rawTarget: string) : Result<string list, string> =
+        let key = rawTarget.ToLowerInvariant()
+
+        match relationshipResolver.TryFind key, resolver.TryFind key with
+        | Some columns, _ -> Ok columns
+        | None, Some column -> Ok [ column ]
+        | None, None ->
+          let availableColumns = resolver |> Map.toList |> List.map fst
+          let availableRelationships = relationshipResolver |> Map.toList |> List.map fst
+
+          let available =
+            availableColumns @ availableRelationships
+            |> List.distinct
+            |> List.sort
+            |> String.concat ", "
+
+          Error $"Column '{rawTarget}' was not found in type '{recordType.Name}'. Available names: {available}"
 
       let! cascades =
         cascadeAttributes
         |> foldResults
           (fun actions attr ->
             result {
-              let! resolved = resolveColumnName resolver recordType.Name attr.Column
+              let! resolved = resolveOnDeleteTarget attr.Column
               return actions @ [ resolved, Cascade ]
             })
           []
@@ -237,7 +308,7 @@ module internal SchemaReflectionAttributes =
         |> foldResults
           (fun actions attr ->
             result {
-              let! resolved = resolveColumnName resolver recordType.Name attr.Column
+              let! resolved = resolveOnDeleteTarget attr.Column
               return actions @ [ resolved, SetNull ]
             })
           []
@@ -250,7 +321,9 @@ module internal SchemaReflectionAttributes =
       if duplicates.IsEmpty then
         return allActions |> Map.ofList
       else
-        let columns = duplicates |> List.map fst |> String.concat ", "
+        let columns =
+          duplicates |> List.map (fst >> String.concat ", ") |> String.concat "; "
+
         return! Error $"Type '{recordType.Name}' has conflicting on-delete actions for columns: {columns}"
     }
 

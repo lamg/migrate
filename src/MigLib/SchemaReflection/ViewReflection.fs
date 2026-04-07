@@ -40,31 +40,63 @@ module internal SchemaReflectionView =
       |> Array.map (fun segment -> Char.ToLowerInvariant segment.[0])
       |> fun chars -> System.String chars
 
-  let tryGetPrimaryKeyColumn (table: CreateTable) : ColumnDef option =
-    table.columns
-    |> List.tryFind (fun column ->
-      column.constraints
-      |> List.exists (function
-        | PrimaryKey _ -> true
-        | _ -> false))
+  let getPrimaryKeyColumns (table: CreateTable) : string list =
+    let tableLevelPk =
+      table.constraints
+      |> List.tryPick (function
+        | PrimaryKey pk when not pk.columns.IsEmpty -> Some pk.columns
+        | _ -> None)
 
-  let getReferencedColumnName (referencedTable: CreateTable) (foreignKey: ForeignKey) =
-    match foreignKey.refColumns with
-    | head :: _ -> head
-    | [] ->
-      match tryGetPrimaryKeyColumn referencedTable with
-      | Some column -> column.name
-      | None -> "id"
+    match tableLevelPk with
+    | Some columns -> columns
+    | None ->
+      table.columns
+      |> List.filter (fun column ->
+        column.constraints
+        |> List.exists (function
+          | PrimaryKey _ -> true
+          | _ -> false))
+      |> List.map _.name
+
+  let normalizeReferencedColumns (referencedTable: CreateTable) (foreignKey: ForeignKey) (expectedCount: int) =
+    if not foreignKey.refColumns.IsEmpty then
+      if foreignKey.refColumns.Length = expectedCount then
+        Some foreignKey.refColumns
+      else
+        None
+    else
+      let primaryKeyColumns = getPrimaryKeyColumns referencedTable
+
+      if primaryKeyColumns.Length = expectedCount then
+        Some primaryKeyColumns
+      elif expectedCount = 1 then
+        Some [ "id" ]
+      else
+        None
 
   let getForeignKeyReferences (table: CreateTable) (refTableName: string) (refTable: CreateTable) =
-    table.columns
-    |> List.collect (fun column ->
-      column.constraints
+    let columnForeignKeys =
+      table.columns
+      |> List.collect (fun column ->
+        column.constraints
+        |> List.choose (function
+          | ForeignKey fk when String.Equals(fk.refTable, refTableName, StringComparison.OrdinalIgnoreCase) ->
+            normalizeReferencedColumns refTable fk 1
+            |> Option.map (fun referencedColumns -> [ column.name, referencedColumns.Head ])
+          | _ -> None))
+
+    let tableForeignKeys =
+      table.constraints
       |> List.choose (function
-        | ForeignKey fk when String.Equals(fk.refTable, refTableName, StringComparison.OrdinalIgnoreCase) ->
-          let referencedColumn = getReferencedColumnName refTable fk
-          Some(column.name, referencedColumn)
-        | _ -> None))
+        | ForeignKey fk when
+          not fk.columns.IsEmpty
+          && String.Equals(fk.refTable, refTableName, StringComparison.OrdinalIgnoreCase)
+          ->
+          normalizeReferencedColumns refTable fk fk.columns.Length
+          |> Option.map (List.zip fk.columns)
+        | _ -> None)
+
+    columnForeignKeys @ tableForeignKeys
 
   let inferJoinCondition
     (tablesByName: Map<string, CreateTable>)
@@ -87,7 +119,11 @@ module internal SchemaReflectionView =
       let leftToRight = getForeignKeyReferences leftTable rightTableName rightTable
 
       match leftToRight with
-      | [ (leftColumn, rightColumn) ] -> return $"{leftAlias}.{leftColumn} = {rightAlias}.{rightColumn}"
+      | [ pairs ] ->
+        return
+          pairs
+          |> List.map (fun (leftColumn, rightColumn) -> $"{leftAlias}.{leftColumn} = {rightAlias}.{rightColumn}")
+          |> String.concat " AND "
       | _ :: _ :: _ ->
         return!
           Error
@@ -96,7 +132,11 @@ module internal SchemaReflectionView =
         let rightToLeft = getForeignKeyReferences rightTable leftTableName leftTable
 
         match rightToLeft with
-        | [ (rightColumn, leftColumn) ] -> return $"{rightAlias}.{rightColumn} = {leftAlias}.{leftColumn}"
+        | [ pairs ] ->
+          return
+            pairs
+            |> List.map (fun (rightColumn, leftColumn) -> $"{rightAlias}.{rightColumn} = {leftAlias}.{leftColumn}")
+            |> String.concat " AND "
         | _ :: _ :: _ ->
           return!
             Error

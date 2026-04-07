@@ -152,15 +152,15 @@ type MigrationError =
 
 /// Represents an extension table that extends a base table in a 1:1 relationship.
 /// Extension tables follow the naming convention: {base_table}_{aspect}
-/// and have their FK column as the PK (enforcing at most one extension per base record).
+/// and have their FK columns as the PK (enforcing at most one extension per base record).
 type internal ExtensionTable =
   {
     /// The extension table definition
     table: CreateTable
     /// The aspect name derived from the table suffix (e.g., "address" from "student_address")
     aspectName: string
-    /// The FK column that references the base table (also the PK of this table)
-    fkColumn: string
+    /// The FK columns that reference the base table (also the PK of this table)
+    fkColumns: string list
   }
 
 /// Represents a base table with its detected extension tables.
@@ -181,7 +181,7 @@ type NormalizedSchemaError =
   | InvalidForeignKey of extension: string * expected: string * reason: string
   /// Extension table doesn't follow naming convention
   | InvalidNaming of table: string * expected: string
-  /// Extension table FK column is not the PK (must be 1:1 relationship)
-  | ForeignKeyNotPrimaryKey of extension: string * fkColumn: string
+  /// Extension table FK columns are not the PK (must be 1:1 relationship)
+  | ForeignKeyNotPrimaryKey of extension: string * fkColumns: string list
   /// Extension table has columns with same names as base table (excluding FK)
   | DuplicateColumnNames of extension: string * baseTable: string * columns: string list

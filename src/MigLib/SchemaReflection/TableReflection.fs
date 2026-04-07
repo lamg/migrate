@@ -12,7 +12,7 @@ open SchemaReflectionAttributes
 module internal SchemaReflectionTable =
   let buildTable
     (schemaTypes: HashSet<Type>)
-    (pkByType: Dictionary<Type, PrimaryKeyInfo>)
+    (pkByType: Dictionary<Type, PrimaryKeyInfo list>)
     (recordType: Type)
     : Result<CreateTable * CreateIndex list, string> =
     result {
@@ -20,29 +20,40 @@ module internal SchemaReflectionTable =
       let! previousTableName = tryReadPreviousName recordType
       let fields = FSharpType.GetRecordFields(recordType, true)
 
-      let! fieldColumnPairs =
+      let! fieldColumnPairs, relationshipColumnPairs =
         fields
         |> Array.toList
         |> foldResults
-          (fun pairs field ->
+          (fun (pairs, relationships) field ->
             match mapSupportedScalarType field.PropertyType with
-            | Some _ -> Ok(pairs @ [ field.Name, toSnakeCase field.Name ])
+            | Some _ -> Ok(pairs @ [ field.Name, toSnakeCase field.Name ], relationships)
             | None when isRecordType field.PropertyType ->
-              if schemaTypes.Contains field.PropertyType then
-                Ok(pairs @ [ field.Name, $"{toSnakeCase field.Name}_id" ])
-              else
+              if not (schemaTypes.Contains field.PropertyType) then
                 Error $"Field '{recordType.Name}.{field.Name}' references '{field.PropertyType.Name}' outside schema"
+              else
+                match pkByType.TryGetValue field.PropertyType with
+                | false, _ ->
+                  Error
+                    $"Field '{recordType.Name}.{field.Name}' references '{field.PropertyType.Name}' which does not declare PK or AutoIncPK"
+                | true, referencedPk ->
+                  let fkColumnNames = getForeignKeyColumnNames field.Name referencedPk
+
+                  let columnPairs =
+                    fkColumnNames |> List.map (fun columnName -> columnName, columnName)
+
+                  Ok(pairs @ columnPairs, relationships @ [ field.Name, fkColumnNames ])
             | None -> Error $"Field '{recordType.Name}.{field.Name}' has unsupported type '{field.PropertyType.Name}'")
-          []
+          ([], [])
 
       let resolver = buildColumnResolver fieldColumnPairs
-      let! onDeleteByColumn = readOnDeleteActions recordType resolver
+      let relationshipResolver = buildRelationshipResolver relationshipColumnPairs
+      let! onDeleteByColumns = readOnDeleteActions recordType resolver relationshipResolver
 
-      let! baseColumns =
+      let! baseColumns, relationshipConstraints =
         fields
         |> Array.toList
         |> foldResults
-          (fun cols field ->
+          (fun (cols, constraints) field ->
             let previousColumnNameResult = tryReadPreviousName field
 
             match previousColumnNameResult with
@@ -57,7 +68,8 @@ module internal SchemaReflectionTable =
                         columnType = sqlType
                         constraints = [ NotNull ]
                         enumLikeDu = enumLikeDu
-                        unitOfMeasure = None } ]
+                        unitOfMeasure = None } ],
+                  constraints
                 )
               | None when isRecordType field.PropertyType ->
                 match pkByType.TryGetValue field.PropertyType with
@@ -65,59 +77,96 @@ module internal SchemaReflectionTable =
                   Error
                     $"Field '{recordType.Name}.{field.Name}' references '{field.PropertyType.Name}' which does not declare PK or AutoIncPK"
                 | true, referencedPk ->
-                  let fkColumnName = $"{toSnakeCase field.Name}_id"
+                  let fkColumnNames = getForeignKeyColumnNames field.Name referencedPk
+                  let onDelete = onDeleteByColumns.TryFind fkColumnNames
 
-                  let foreignKey =
-                    { columns = []
-                      refTable = toSnakeCase field.PropertyType.Name
-                      refColumns = [ referencedPk.columnName ]
-                      onDelete = onDeleteByColumn.TryFind fkColumnName
-                      onUpdate = None }
-
-                  Ok(
-                    cols
-                    @ [ { name = fkColumnName
+                  if previousColumnName.IsSome && referencedPk.Length > 1 then
+                    Error
+                      $"Field '{recordType.Name}.{field.Name}' expands to multiple foreign-key columns and cannot also declare PreviousName."
+                  else
+                    let fkColumns =
+                      (fkColumnNames, referencedPk)
+                      ||> List.map2 (fun fkColumnName referencedPk ->
+                        { name = fkColumnName
                           previousName = previousColumnName
                           columnType = referencedPk.sqlType
-                          constraints = [ NotNull; ForeignKey foreignKey ]
+                          constraints = [ NotNull ]
                           enumLikeDu = None
-                          unitOfMeasure = None } ]
-                  )
+                          unitOfMeasure = None })
+
+                    match fkColumns, referencedPk with
+                    | [ fkColumn ], [ referencedPkColumn ] ->
+                      let foreignKey =
+                        { columns = []
+                          refTable = toSnakeCase field.PropertyType.Name
+                          refColumns = [ referencedPkColumn.columnName ]
+                          onDelete = onDelete
+                          onUpdate = None }
+
+                      let fkColumnWithConstraint =
+                        { fkColumn with
+                            constraints = fkColumn.constraints @ [ ForeignKey foreignKey ] }
+
+                      Ok(cols @ [ fkColumnWithConstraint ], constraints)
+                    | _ ->
+                      let foreignKey =
+                        { columns = fkColumnNames
+                          refTable = toSnakeCase field.PropertyType.Name
+                          refColumns = referencedPk |> List.map _.columnName
+                          onDelete = onDelete
+                          onUpdate = None }
+
+                      Ok(cols @ fkColumns, constraints @ [ ForeignKey foreignKey ])
               | None ->
                 Error $"Field '{recordType.Name}.{field.Name}' has unsupported type '{field.PropertyType.Name}'")
-          []
+          ([], [])
 
       let! primaryKeyInfo = readPrimaryKeyInfo recordType
 
-      let! columnsWithPrimaryKey =
+      let! columnsWithPrimaryKey, primaryKeyConstraints =
         match primaryKeyInfo with
-        | None -> Ok baseColumns
-        | Some pkInfo ->
-          addColumnConstraint
-            pkInfo.columnName
-            (PrimaryKey
-              { constraintName = None
-                columns = []
-                isAutoincrement = pkInfo.isAutoIncrement })
-            baseColumns
+        | [] -> Ok(baseColumns, [])
+        | [ pkInfo ] when pkInfo.isAutoIncrement ->
+          result {
+            let! columnsWithPrimaryKey =
+              addColumnConstraint
+                pkInfo.columnName
+                (PrimaryKey
+                  { constraintName = None
+                    columns = []
+                    isAutoincrement = true })
+                baseColumns
 
-      let! constrainedColumns, tableConstraints = applyConstraintAttributes recordType resolver columnsWithPrimaryKey
+            return columnsWithPrimaryKey, []
+          }
+        | pks ->
+          Ok(
+            baseColumns,
+            [ PrimaryKey
+                { constraintName = None
+                  columns = pks |> List.map _.columnName
+                  isAutoincrement = false } ]
+          )
+
+      let! constrainedColumns, attributeTableConstraints =
+        applyConstraintAttributes recordType resolver columnsWithPrimaryKey
+
       let! indexes = readIndexDefinitions tableName recordType resolver
       let! dropColumns = readDropColumns recordType
 
-      let! (queryByAnnotations,
-            queryLikeAnnotations,
-            queryByOrCreateAnnotations,
-            insertOrIgnoreAnnotations,
-            deleteAllAnnotations,
-            upsertAnnotations) = readQueryAnnotations recordType resolver
+      let! queryByAnnotations,
+           queryLikeAnnotations,
+           queryByOrCreateAnnotations,
+           insertOrIgnoreAnnotations,
+           deleteAllAnnotations,
+           upsertAnnotations = readQueryAnnotations recordType resolver
 
       return
         { name = tableName
           previousName = previousTableName
           dropColumns = dropColumns
           columns = constrainedColumns
-          constraints = tableConstraints
+          constraints = primaryKeyConstraints @ relationshipConstraints @ attributeTableConstraints
           queryByAnnotations = queryByAnnotations
           queryLikeAnnotations = queryLikeAnnotations
           queryByOrCreateAnnotations = queryByOrCreateAnnotations

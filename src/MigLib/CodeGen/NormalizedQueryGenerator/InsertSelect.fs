@@ -15,13 +15,31 @@ let private commandLambda (bindings: string list) =
   | _ -> lambdaStatementsExpr "cmd" bindings
 
 let private executeInsertExpr (sql: string) (bindings: string list) onSuccess =
-  AppExpr("executeInsert", [ ConstantExpr(Ast.String sql); commandLambda bindings; rawExpr "tx"; onSuccess ])
+  AppExpr(
+    "executeInsert",
+    [ ConstantExpr(Ast.String sql)
+      commandLambda bindings
+      rawExpr "tx"
+      onSuccess ]
+  )
 
 let private executeInsertOrIgnoreExpr (sql: string) (bindings: string list) onSuccess =
-  AppExpr("executeInsertOrIgnore", [ ConstantExpr(Ast.String sql); commandLambda bindings; rawExpr "tx"; onSuccess ])
+  AppExpr(
+    "executeInsertOrIgnore",
+    [ ConstantExpr(Ast.String sql)
+      commandLambda bindings
+      rawExpr "tx"
+      onSuccess ]
+  )
 
 let private executeWriteExpr (sql: string) (bindings: string list) onSuccess =
-  AppExpr("executeWrite", [ ConstantExpr(Ast.String sql); commandLambda bindings; rawExpr "tx"; onSuccess ])
+  AppExpr(
+    "executeWrite",
+    [ ConstantExpr(Ast.String sql)
+      commandLambda bindings
+      rawExpr "tx"
+      onSuccess ]
+  )
 
 let private readerLambda (caseSelectionExpr: string) =
   lambdaExpr "reader" (rawExpr caseSelectionExpr)
@@ -35,9 +53,7 @@ let private baseCaseInsertClause (baseTable: CreateTable) (typeName: string) =
   let fieldPattern = generateFieldPattern insertColumns
 
   let onSuccess =
-    lambdaExpr
-      $"{baseTable.name}Id"
-      (taskExpr [ OtherExpr(returnExprRaw $"Ok {baseTable.name}Id") ])
+    lambdaExpr $"{baseTable.name}Id" (taskExpr [ OtherExpr(returnExprRaw $"Ok {baseTable.name}Id") ])
 
   MatchClauseExpr(
     $"New{typeName}.Base({fieldPattern})",
@@ -50,9 +66,7 @@ let private baseCaseInsertOrIgnoreClause (baseTable: CreateTable) (typeName: str
   let fieldPattern = generateFieldPattern insertColumns
 
   let onSuccess =
-    lambdaExpr
-      $"{baseTable.name}Id"
-      (taskExpr [ OtherExpr(returnExprRaw $"Ok {baseTable.name}Id") ])
+    lambdaExpr $"{baseTable.name}Id" (taskExpr [ OtherExpr(returnExprRaw $"Ok {baseTable.name}Id") ])
 
   MatchClauseExpr(
     $"New{typeName}.Base({fieldPattern})",
@@ -63,36 +77,43 @@ let private extensionInsertClause (baseTable: CreateTable) (extension: Extension
   let caseName = TypeGenerator.toPascalCase extension.aspectName
   let baseInsertColumns = getInsertColumns baseTable
   let baseInsertSql = generateInsertSql baseTable.name baseInsertColumns
-  let basePkColumn = getSinglePrimaryKeyColumn baseTable
+  let basePkColumns = getPrimaryKeyColumns baseTable
 
-  let extensionFkValueExpr =
-    match basePkColumn with
-    | Some pkCol when not (isAutoIncrementPrimaryKey pkCol) -> getColumnVarName pkCol
-    | _ -> $"{baseTable.name}Id"
+  let autoIncrementBasePkColumn =
+    getSinglePrimaryKeyColumn baseTable |> Option.filter isAutoIncrementPrimaryKey
 
-  let extensionInsertColumns =
-    extension.table.columns
-    |> List.filter (fun col -> col.name <> extension.fkColumn)
+  let extensionInsertColumns = getExtensionNonKeyColumns extension
 
   let fieldPattern = generateFieldPattern (baseInsertColumns @ extensionInsertColumns)
 
-  let extensionColumnNames = extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "
-  let extensionParamNames = extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "
+  let allInsertColumns =
+    extension.fkColumns @ (extensionInsertColumns |> List.map (fun c -> c.name))
+
+  let extensionColumnNames = allInsertColumns |> String.concat ", "
+
+  let extensionParamNames =
+    allInsertColumns |> List.map (fun c -> $"@{c}") |> String.concat ", "
 
   let extensionSql =
-    $"INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionColumnNames}) VALUES (@{extension.fkColumn}, {extensionParamNames})"
+    $"INSERT INTO {extension.table.name} ({extensionColumnNames}) VALUES ({extensionParamNames})"
 
   let baseInsertResultExpr =
     executeInsertExpr
       baseInsertSql
       (generateParamBindings baseInsertColumns "cmd")
-      (lambdaExpr
-        $"{baseTable.name}Id"
-        (taskExpr [ OtherExpr(returnExprRaw $"Ok {baseTable.name}Id") ]))
+      (lambdaExpr $"{baseTable.name}Id" (taskExpr [ OtherExpr(returnExprRaw $"Ok {baseTable.name}Id") ]))
 
   let extensionBindings =
-    addPlainBinding "cmd" extension.fkColumn extensionFkValueExpr
-    :: generateParamBindings extensionInsertColumns "cmd"
+    match autoIncrementBasePkColumn with
+    | Some _ ->
+      addPlainBinding "cmd" extension.fkColumns.Head $"{baseTable.name}Id"
+      :: generateParamBindings extensionInsertColumns "cmd"
+    | None ->
+      let fkBindings =
+        (extension.fkColumns, basePkColumns)
+        ||> List.map2 (fun fkColumn pkColumn -> addPlainBinding "cmd" fkColumn (getColumnVarName pkColumn))
+
+      fkBindings @ generateParamBindings extensionInsertColumns "cmd"
 
   let extensionWriteExpr =
     executeWriteExpr
@@ -118,36 +139,43 @@ let private extensionInsertOrIgnoreClause (baseTable: CreateTable) (extension: E
   let caseName = TypeGenerator.toPascalCase extension.aspectName
   let baseInsertColumns = getInsertColumns baseTable
   let baseInsertSql = generateInsertOrIgnoreSql baseTable.name baseInsertColumns
-  let basePkColumn = getSinglePrimaryKeyColumn baseTable
+  let basePkColumns = getPrimaryKeyColumns baseTable
 
-  let extensionFkValueExpr =
-    match basePkColumn with
-    | Some pkCol when not (isAutoIncrementPrimaryKey pkCol) -> getColumnVarName pkCol
-    | _ -> $"{baseTable.name}Id"
+  let autoIncrementBasePkColumn =
+    getSinglePrimaryKeyColumn baseTable |> Option.filter isAutoIncrementPrimaryKey
 
-  let extensionInsertColumns =
-    extension.table.columns
-    |> List.filter (fun col -> col.name <> extension.fkColumn)
+  let extensionInsertColumns = getExtensionNonKeyColumns extension
 
   let fieldPattern = generateFieldPattern (baseInsertColumns @ extensionInsertColumns)
 
-  let extensionColumnNames = extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "
-  let extensionParamNames = extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "
+  let allInsertColumns =
+    extension.fkColumns @ (extensionInsertColumns |> List.map (fun c -> c.name))
+
+  let extensionColumnNames = allInsertColumns |> String.concat ", "
+
+  let extensionParamNames =
+    allInsertColumns |> List.map (fun c -> $"@{c}") |> String.concat ", "
 
   let extensionSql =
-    $"INSERT INTO {extension.table.name} ({extension.fkColumn}, {extensionColumnNames}) VALUES (@{extension.fkColumn}, {extensionParamNames})"
+    $"INSERT INTO {extension.table.name} ({extensionColumnNames}) VALUES ({extensionParamNames})"
 
   let baseInsertResultExpr =
     executeInsertOrIgnoreExpr
       baseInsertSql
       (generateParamBindings baseInsertColumns "cmd")
-      (lambdaExpr
-        $"{baseTable.name}Id"
-        (taskExpr [ OtherExpr(returnExprRaw $"Ok {baseTable.name}Id") ]))
+      (lambdaExpr $"{baseTable.name}Id" (taskExpr [ OtherExpr(returnExprRaw $"Ok {baseTable.name}Id") ]))
 
   let extensionBindings =
-    addPlainBinding "cmd" extension.fkColumn extensionFkValueExpr
-    :: generateParamBindings extensionInsertColumns "cmd"
+    match autoIncrementBasePkColumn with
+    | Some _ ->
+      addPlainBinding "cmd" extension.fkColumns.Head $"{baseTable.name}Id"
+      :: generateParamBindings extensionInsertColumns "cmd"
+    | None ->
+      let fkBindings =
+        (extension.fkColumns, basePkColumns)
+        ||> List.map2 (fun fkColumn pkColumn -> addPlainBinding "cmd" fkColumn (getColumnVarName pkColumn))
+
+      fkBindings @ generateParamBindings extensionInsertColumns "cmd"
 
   let extensionWriteExpr =
     executeWriteExpr
@@ -208,13 +236,22 @@ let generateGetAll (normalized: NormalizedTable) =
     else
       "\n         " + generateLeftJoins normalized.baseTable normalized.extensions
 
-  let sql = $"SELECT {selectColumns}\n         FROM {normalized.baseTable.name}{leftJoins}"
-  let caseSelectionExpr = generateCaseSelectionExpr normalized.baseTable normalized.extensions typeName
+  let sql =
+    $"SELECT {selectColumns}\n         FROM {normalized.baseTable.name}{leftJoins}"
+
+  let caseSelectionExpr =
+    generateCaseSelectionExpr normalized.baseTable normalized.extensions typeName
 
   staticMember
     "SelectAll"
     [ txParam ]
-    (AppExpr("queryList", [ ConstantExpr(Ast.String sql); lambdaExpr "_" unitExpr; readerLambda caseSelectionExpr; rawExpr "tx" ]))
+    (AppExpr(
+      "queryList",
+      [ ConstantExpr(Ast.String sql)
+        lambdaExpr "_" unitExpr
+        readerLambda caseSelectionExpr
+        rawExpr "tx" ]
+    ))
     $"Task<Result<{typeName} list, SqliteException>>"
 
 let generateGetById (normalized: NormalizedTable) =
@@ -237,8 +274,11 @@ let generateGetById (normalized: NormalizedTable) =
       |> List.map (fun pk -> $"{normalized.baseTable.name}.{pk.name} = @{pk.name}")
       |> String.concat " AND "
 
-    let sql = $"SELECT {selectColumns}\n         FROM {normalized.baseTable.name}{leftJoins}\n         WHERE {whereClause}"
-    let caseSelectionExpr = generateCaseSelectionExpr normalized.baseTable normalized.extensions typeName
+    let sql =
+      $"SELECT {selectColumns}\n         FROM {normalized.baseTable.name}{leftJoins}\n         WHERE {whereClause}"
+
+    let caseSelectionExpr =
+      generateCaseSelectionExpr normalized.baseTable normalized.extensions typeName
 
     let parameters =
       pks
@@ -272,11 +312,20 @@ let generateGetOne (normalized: NormalizedTable) =
     else
       "\n         " + generateLeftJoins normalized.baseTable normalized.extensions
 
-  let sql = $"SELECT {selectColumns}\n         FROM {normalized.baseTable.name}{leftJoins}\n         LIMIT 1"
-  let caseSelectionExpr = generateCaseSelectionExpr normalized.baseTable normalized.extensions typeName
+  let sql =
+    $"SELECT {selectColumns}\n         FROM {normalized.baseTable.name}{leftJoins}\n         LIMIT 1"
+
+  let caseSelectionExpr =
+    generateCaseSelectionExpr normalized.baseTable normalized.extensions typeName
 
   staticMember
     "SelectOne"
     [ txParam ]
-    (AppExpr("querySingle", [ ConstantExpr(Ast.String sql); lambdaExpr "_" unitExpr; readerLambda caseSelectionExpr; rawExpr "tx" ]))
+    (AppExpr(
+      "querySingle",
+      [ ConstantExpr(Ast.String sql)
+        lambdaExpr "_" unitExpr
+        readerLambda caseSelectionExpr
+        rawExpr "tx" ]
+    ))
     $"Task<Result<{typeName} option, SqliteException>>"

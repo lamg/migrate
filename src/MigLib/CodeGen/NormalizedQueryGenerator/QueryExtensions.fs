@@ -21,6 +21,17 @@ let private tupledOrSingleNamePattern (names: string list) =
   | [ name ] -> NamedPat(name)
   | _ -> names |> List.map NamedPat |> TuplePat |> ParenPat
 
+let private generateAliasedSelectColumns (normalized: NormalizedTable) =
+  let baseColumns = normalized.baseTable.columns |> List.map (fun c -> $"b.{c.name}")
+
+  let extensionColumns =
+    normalized.extensions
+    |> List.collect (fun ext ->
+      getExtensionNonKeyColumns ext
+      |> List.map (fun c -> $"e{ext.aspectName}.{c.name}"))
+
+  (baseColumns @ extensionColumns) |> String.concat ", "
+
 let generateNormalizedQueryBy (normalized: NormalizedTable) (annotation: QueryByAnnotation) =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
 
@@ -42,19 +53,17 @@ let generateNormalizedQueryBy (normalized: NormalizedTable) (annotation: QueryBy
     |> List.map (fun col -> $"{col} = @{col}")
     |> String.concat " AND "
 
-  let baseColumns = normalized.baseTable.columns |> List.map (fun c -> $"b.{c.name}")
-
-  let extensionSelects =
-    normalized.extensions
-    |> List.collect (fun ext -> ext.table.columns |> List.map (fun c -> $"e{ext.aspectName}.{c.name}"))
-
-  let allSelects = (baseColumns @ extensionSelects) |> String.concat ", "
+  let allSelects = generateAliasedSelectColumns normalized
 
   let joins =
     normalized.extensions
     |> List.map (fun ext ->
-      let pk = getPrimaryKeyColumns normalized.baseTable |> List.head
-      $"LEFT JOIN {ext.table.name} AS e{ext.aspectName} ON b.{pk.name} = e{ext.aspectName}.{ext.fkColumn}")
+      let alias = $"e{ext.aspectName}"
+
+      let joinCondition =
+        generateExtensionJoinCondition "b" normalized.baseTable ext alias
+
+      $"LEFT JOIN {ext.table.name} AS {alias} ON {joinCondition}")
     |> String.concat "\n        "
 
   let sql =
@@ -69,7 +78,8 @@ let generateNormalizedQueryBy (normalized: NormalizedTable) (annotation: QueryBy
       let _, columnDef = findNormalizedColumn normalized col |> Option.get
       addColumnBinding "cmd" columnDef col)
 
-  let caseSelectionExpr = generateCaseSelectionExpr normalized.baseTable normalized.extensions typeName
+  let caseSelectionExpr =
+    generateCaseSelectionExpr normalized.baseTable normalized.extensions typeName
 
   staticMember
     methodName
@@ -94,19 +104,17 @@ let generateNormalizedQueryLike (normalized: NormalizedTable) (annotation: Query
     TypeGenerator.mapSqlType columnDef.columnType isNullable
 
   let whereClause = $"{col} LIKE '%%' || @{col} || '%%'"
-  let baseColumns = normalized.baseTable.columns |> List.map (fun c -> $"b.{c.name}")
-
-  let extensionSelects =
-    normalized.extensions
-    |> List.collect (fun ext -> ext.table.columns |> List.map (fun c -> $"e{ext.aspectName}.{c.name}"))
-
-  let allSelects = (baseColumns @ extensionSelects) |> String.concat ", "
+  let allSelects = generateAliasedSelectColumns normalized
 
   let joins =
     normalized.extensions
     |> List.map (fun ext ->
-      let pk = getPrimaryKeyColumns normalized.baseTable |> List.head
-      $"LEFT JOIN {ext.table.name} AS e{ext.aspectName} ON b.{pk.name} = e{ext.aspectName}.{ext.fkColumn}")
+      let alias = $"e{ext.aspectName}"
+
+      let joinCondition =
+        generateExtensionJoinCondition "b" normalized.baseTable ext alias
+
+      $"LEFT JOIN {ext.table.name} AS {alias} ON {joinCondition}")
     |> String.concat "\n        "
 
   let sql =
@@ -116,7 +124,9 @@ let generateNormalizedQueryLike (normalized: NormalizedTable) (annotation: Query
       $"SELECT {allSelects}\n        FROM {normalized.baseTable.name} AS b\n        {joins}\n        WHERE {whereClause}"
 
   let _, columnDef = findNormalizedColumn normalized col |> Option.get
-  let caseSelectionExpr = generateCaseSelectionExpr normalized.baseTable normalized.extensions typeName
+
+  let caseSelectionExpr =
+    generateCaseSelectionExpr normalized.baseTable normalized.extensions typeName
 
   staticMember
     methodName
@@ -133,12 +143,6 @@ let generateNormalizedQueryLike (normalized: NormalizedTable) (annotation: Query
 let generateNormalizedQueryByOrCreate (normalized: NormalizedTable) (annotation: QueryByOrCreateAnnotation) =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
   let newTypeName = $"New{typeName}"
-
-  let basePkColumn =
-    getPrimaryKeyColumns normalized.baseTable
-    |> List.tryHead
-    |> Option.map (fun pk -> pk.name)
-    |> Option.defaultValue "id"
 
   let methodName =
     annotation.columns
@@ -171,7 +175,7 @@ let generateNormalizedQueryByOrCreate (normalized: NormalizedTable) (annotation:
     normalized.extensions
     |> List.map (fun ext ->
       let caseName = $"With{TypeGenerator.toPascalCase ext.aspectName}"
-      let extensionCols = ext.table.columns |> List.filter (fun c -> c.name <> ext.fkColumn)
+      let extensionCols = getExtensionNonKeyColumns ext
       let allCols = baseInsertColumns @ extensionCols
       let extHasAllColumns = caseHasAllQueryColumns allCols annotation.columns
 
@@ -195,6 +199,7 @@ let generateNormalizedQueryByOrCreate (normalized: NormalizedTable) (annotation:
 
   let extractionExpr =
     let extensionMatches = generateExtensionMatches ()
+
     let matches =
       if extensionMatches = "" then
         generateBaseMatch ()
@@ -208,18 +213,17 @@ let generateNormalizedQueryByOrCreate (normalized: NormalizedTable) (annotation:
     |> List.map (fun col -> $"{col} = @{col}")
     |> String.concat " AND "
 
-  let baseColumns = normalized.baseTable.columns |> List.map (fun c -> $"b.{c.name}")
-
-  let extensionSelects =
-    normalized.extensions
-    |> List.collect (fun ext -> ext.table.columns |> List.map (fun c -> $"e{ext.aspectName}.{c.name}"))
-
-  let allSelects = (baseColumns @ extensionSelects) |> String.concat ", "
+  let allSelects = generateAliasedSelectColumns normalized
 
   let joins =
     normalized.extensions
     |> List.map (fun ext ->
-      $"LEFT JOIN {ext.table.name} e{ext.aspectName} ON b.{basePkColumn} = e{ext.aspectName}.{ext.fkColumn}")
+      let alias = $"e{ext.aspectName}"
+
+      let joinCondition =
+        generateExtensionJoinCondition "b" normalized.baseTable ext alias
+
+      $"LEFT JOIN {ext.table.name} {alias} ON {joinCondition}")
     |> String.concat "\n      "
 
   let selectSql =
@@ -239,7 +243,8 @@ let generateNormalizedQueryByOrCreate (normalized: NormalizedTable) (annotation:
       else
         $"cmd.Parameters.AddWithValue(\"@{col}\", {TypeGenerator.toDbValueExpr columnDef col}) |> ignore")
 
-  let caseSelectionExpr = generateCaseSelectionExpr normalized.baseTable normalized.extensions typeName
+  let caseSelectionExpr =
+    generateCaseSelectionExpr normalized.baseTable normalized.extensions typeName
 
   let selectExpr =
     AppExpr(
@@ -255,11 +260,7 @@ let generateNormalizedQueryByOrCreate (normalized: NormalizedTable) (annotation:
       [ LetOrUseExpr(Value(tupledOrSingleNamePattern annotation.columns, rawExpr extractionExpr))
         LetOrUseExpr(Function("select", UnitPat(), selectExpr))
         OtherExpr(
-          AppExpr(
-            "querySingleOrInsert",
-            [ rawExpr "select"
-              lambdaRawExpr "()" $"{typeName}.Insert newItem tx" ]
-          )
+          AppExpr("querySingleOrInsert", [ rawExpr "select"; lambdaRawExpr "()" $"{typeName}.Insert newItem tx" ])
         ) ]
     )
 

@@ -41,8 +41,30 @@ type File =
 [<PK "id">]
 type SeededStudent = { id: int64; name: string }
 
+[<PK("tenantId", "externalId")>]
+type SeededTenantUser =
+  { tenantId: string
+    externalId: string
+    name: string }
+
+[<AutoIncPK "id">]
+type SeededTenantSession =
+  { id: int64
+    user: SeededTenantUser
+    token: string }
+
 let alice = { id = 1L; name = "Alice" }
 
 let bob = { id = 2L; name = "Bob" }
+
+let tenantAlice =
+  { tenantId = "tenant-a"
+    externalId = "user-1"
+    name = "Tenant Alice" }
+
+let tenantAliceSession =
+  { id = 10L
+    user = tenantAlice
+    token = "session-1" }
 
 let ignoredSeedMarker = "not-a-seed"

@@ -147,6 +147,12 @@ let renderSelectMember
     |> lambdaExpr "reader"
 
   let body =
-    Ast.AppExpr(queryHelper, [ Ast.ConstantExpr(Ast.String(sql)); rawExpr configureExpr; readerLambda; rawExpr "tx" ])
+    Ast.AppExpr(
+      queryHelper,
+      [ Ast.ConstantExpr(Ast.String(sql))
+        rawExpr configureExpr
+        readerLambda
+        rawExpr "tx" ]
+    )
 
   staticMember memberName parameters body returnType

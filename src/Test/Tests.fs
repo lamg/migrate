@@ -893,7 +893,36 @@ type ReflectionUserWallet =
     user: ReflectionUser
     address: string }
 
+[<PK("tenantId", "userId")>]
+[<Upsert>]
+type ReflectionCompositeUser =
+  { tenantId: string
+    userId: string
+    name: string }
+
+[<PK "tenantId">]
+[<PK "sku">]
+type ReflectionSplitCompositeItem =
+  { tenantId: string
+    sku: string
+    name: string }
+
+[<AutoIncPK "id">]
+[<OnDeleteCascade "user">]
+type ReflectionCompositeWallet =
+  { id: int64
+    user: ReflectionCompositeUser
+    address: string }
+
 type ReflectionStudentOpt = WithEmail of ReflectionStudent * email: string
+
+[<View>]
+[<Join(typeof<ReflectionCompositeWallet>, typeof<ReflectionCompositeUser>)>]
+type ReflectionCompositeWalletView =
+  { userTenantId: string
+    userUserId: string
+    userName: string
+    address: string }
 
 [<ViewSql "SELECT id, name FROM reflection_student">]
 [<SelectBy "name">]
@@ -939,6 +968,14 @@ type SlugArticle = { slug: string; title: string }
 type Product = { code: string; name: string }
 
 type ProductOpt = WithStock of Product * stock: int64
+
+[<PK("tenantId", "code")>]
+type CompositeProduct =
+  { tenantId: string
+    code: string
+    name: string }
+
+type CompositeProductOpt = WithStock of CompositeProduct * stock: int64
 
 [<AutoIncPK "id">]
 [<PK "id">]
@@ -1044,6 +1081,70 @@ let ``schema reflection maps records, foreign keys, and query annotations`` () =
       match fk.onDelete with
       | Some Cascade -> ()
       | _ -> failwith "Expected ON DELETE CASCADE on reflection_user_wallet.user_id"
+
+[<Fact>]
+let ``schema reflection maps composite PKs and composite FKs`` () =
+  let types = [ typeof<ReflectionCompositeUser>; typeof<ReflectionCompositeWallet> ]
+
+  match buildSchemaFromTypes types with
+  | Error error -> failwith $"Expected schema reflection to succeed, got: {error}"
+  | Ok schema ->
+    let user =
+      schema.tables
+      |> List.find (fun table -> table.name = "reflection_composite_user")
+
+    let primaryKey =
+      user.constraints
+      |> List.tryPick (function
+        | PrimaryKey pk -> Some pk
+        | _ -> None)
+
+    match primaryKey with
+    | None -> failwith "Expected table-level primary key on reflection_composite_user"
+    | Some pk -> Assert.Equal<string list>([ "tenant_id"; "user_id" ], pk.columns)
+
+    let wallet =
+      schema.tables
+      |> List.find (fun table -> table.name = "reflection_composite_wallet")
+
+    Assert.True(wallet.columns |> List.exists (fun column -> column.name = "user_tenant_id"))
+    Assert.True(wallet.columns |> List.exists (fun column -> column.name = "user_user_id"))
+
+    let foreignKey =
+      wallet.constraints
+      |> List.tryPick (function
+        | ForeignKey fk -> Some fk
+        | _ -> None)
+
+    match foreignKey with
+    | None -> failwith "Expected table-level foreign key on reflection_composite_wallet"
+    | Some fk ->
+      Assert.Equal("reflection_composite_user", fk.refTable)
+      Assert.Equal<string list>([ "user_tenant_id"; "user_user_id" ], fk.columns)
+      Assert.Equal<string list>([ "tenant_id"; "user_id" ], fk.refColumns)
+
+      match fk.onDelete with
+      | Some Cascade -> ()
+      | _ -> failwith "Expected ON DELETE CASCADE on reflection_composite_wallet.user"
+
+[<Fact>]
+let ``schema reflection supports composite PK declared by repeated PK attributes`` () =
+  match buildSchemaFromTypes [ typeof<ReflectionSplitCompositeItem> ] with
+  | Error error -> failwith $"Expected schema reflection to succeed, got: {error}"
+  | Ok schema ->
+    let item =
+      schema.tables
+      |> List.find (fun table -> table.name = "reflection_split_composite_item")
+
+    let primaryKey =
+      item.constraints
+      |> List.tryPick (function
+        | PrimaryKey pk -> Some pk
+        | _ -> None)
+
+    match primaryKey with
+    | None -> failwith "Expected table-level primary key on reflection_split_composite_item"
+    | Some pk -> Assert.Equal<string list>([ "tenant_id"; "sku" ], pk.columns)
 
 [<Fact>]
 let ``schema diff detects renamed tables only when target declares PreviousName`` () =
@@ -2338,9 +2439,7 @@ let ``runSimple applies jsonWithTypeInfo responses`` () =
 
   let operation: WebOp<TestWebEnv, string, unit, unit> =
     webResult {
-      do!
-        (Respond.jsonWithTypeInfo jsonTypeInfo (TestJsonResponse(Id = 42L))
-         : WebOp<TestWebEnv, string, unit, unit>)
+      do! (Respond.jsonWithTypeInfo jsonTypeInfo (TestJsonResponse(Id = 42L)): WebOp<TestWebEnv, string, unit, unit>)
 
       return ()
     }
@@ -6028,6 +6127,32 @@ let ``schema reflection synthesizes SQL for View with Join attributes`` () =
     Assert.Contains("jcg.grade AS grade", sql)
 
 [<Fact>]
+let ``schema reflection synthesizes SQL for View with composite foreign-key joins`` () =
+  let types =
+    [ typeof<ReflectionCompositeUser>
+      typeof<ReflectionCompositeWallet>
+      typeof<ReflectionCompositeWalletView> ]
+
+  match buildSchemaFromTypes types with
+  | Error e -> failwith $"reflection failed: {e}"
+  | Ok schema ->
+    let view =
+      schema.views
+      |> List.find (fun item -> item.name = "reflection_composite_wallet_view")
+
+    let sql = view.sqlTokens |> Seq.head
+
+    Assert.Contains(
+      "JOIN reflection_composite_user rcu ON rcw.user_tenant_id = rcu.tenant_id AND rcw.user_user_id = rcu.user_id",
+      sql
+    )
+
+    Assert.Contains("rcu.tenant_id AS user_tenant_id", sql)
+    Assert.Contains("rcu.user_id AS user_user_id", sql)
+    Assert.Contains("rcu.name AS user_name", sql)
+    Assert.Contains("rcw.address AS address", sql)
+
+[<Fact>]
 let ``codegen generates module and query methods from schema model`` () =
   let tempDir = Path.Combine(Path.GetTempPath(), $"mig_codegen_{Guid.NewGuid()}")
   Directory.CreateDirectory tempDir |> ignore
@@ -6141,6 +6266,67 @@ let ``querybyorcreate for normalized tables uses base PK column in re-query join
     Assert.DoesNotContain("let! getResult = Product.SelectById newId tx", generated)
     Assert.Contains("querySingleOrInsert select", generated)
     Assert.DoesNotContain(": Result<", generated)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``codegen from reflected types uses composite primary keys in CRUD methods`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_reflection_composite_pk_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let outputPath = Path.Combine(tempDir, "ReflectionCompositeUser.fs")
+
+  match generateCodeFromTypes "ReflectionCompositeUserQueries" [ typeof<ReflectionCompositeUser> ] outputPath with
+  | Error error -> failwith $"codegen-from-types failed: {error}"
+  | Ok _ ->
+    let generated = File.ReadAllText outputPath
+
+    Assert.Contains(
+      "SELECT tenant_id, user_id, name FROM reflection_composite_user WHERE tenant_id = @tenant_id AND user_id = @user_id",
+      generated
+    )
+
+    Assert.Contains(
+      "UPDATE reflection_composite_user SET name = @name WHERE tenant_id = @tenant_id AND user_id = @user_id",
+      generated
+    )
+
+    Assert.Contains(
+      "DELETE FROM reflection_composite_user WHERE tenant_id = @tenant_id AND user_id = @user_id",
+      generated
+    )
+
+    Assert.Contains("ReflectionCompositeUser.SelectById item.TenantId item.UserId tx", generated)
+
+  Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``codegen from reflected normalized types uses composite extension joins`` () =
+  let tempDir =
+    Path.Combine(Path.GetTempPath(), $"mig_codegen_reflection_normalized_composite_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory tempDir |> ignore
+
+  let outputPath = Path.Combine(tempDir, "CompositeProduct.fs")
+
+  match
+    generateCodeFromTypes "CompositeProductQueries" [ typeof<CompositeProduct>; typeof<CompositeProductOpt> ] outputPath
+  with
+  | Error error -> failwith $"codegen-from-types failed: {error}"
+  | Ok _ ->
+    let generated = File.ReadAllText outputPath
+
+    Assert.Contains(
+      "LEFT JOIN composite_product_stock ext0 ON composite_product.tenant_id = ext0.composite_product_tenant_id AND composite_product.code = ext0.composite_product_code",
+      generated
+    )
+
+    Assert.Contains(
+      "INSERT INTO composite_product_stock (composite_product_tenant_id, composite_product_code, stock) VALUES (@composite_product_tenant_id, @composite_product_code, @stock)",
+      generated
+    )
 
   Directory.Delete(tempDir, true)
 
@@ -6774,6 +6960,24 @@ let ``compiled schema reflection derives inserts from module-level record lets``
     Assert.Equal<string list>([ "id"; "name" ], insert.columns)
 
     Assert.Equal<Expr list list>([ [ Integer 1; String "Alice" ]; [ Integer 2; String "Bob" ] ], insert.values)
+
+[<Fact>]
+let ``compiled schema reflection expands composite foreign keys in derived seed inserts`` () =
+  let assembly = typeof<SchemaReflectionFixture.Student>.Assembly
+
+  match buildSchemaFromAssemblyModule assembly "SchemaReflectionFixture" with
+  | Error error -> failwith $"Expected schema reflection from assembly module to succeed, got: {error}"
+  | Ok schema ->
+    let insert =
+      schema.inserts
+      |> List.find (fun candidate -> candidate.table = "seeded_tenant_session")
+
+    Assert.Equal<string list>([ "id"; "user_tenant_id"; "user_external_id"; "token" ], insert.columns)
+
+    Assert.Equal<Expr list list>(
+      [ [ Integer 10; String "tenant-a"; String "user-1"; String "session-1" ] ],
+      insert.values
+    )
 
 [<Fact>]
 let ``codegen from assembly module emits inserts derived from module-level record lets`` () =

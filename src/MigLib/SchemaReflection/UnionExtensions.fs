@@ -7,11 +7,12 @@ open DeclarativeMigrations.Types
 open MigLib.Util
 
 open SchemaReflectionNaming
+open SchemaReflectionAttributes
 
 module internal SchemaReflectionUnionExtensions =
   let buildUnionExtensionTables
     (schemaTypes: HashSet<Type>)
-    (pkByType: Dictionary<Type, PrimaryKeyInfo>)
+    (pkByType: Dictionary<Type, PrimaryKeyInfo list>)
     (unionType: Type)
     : Result<CreateTable list, string> =
     let unionCases = FSharpType.GetUnionCases(unionType, true) |> Array.toList
@@ -48,26 +49,49 @@ module internal SchemaReflectionUnionExtensions =
                   unionCase.Name
 
               let extensionTableName = $"{baseTableName}_{toSnakeCase aspectRaw}"
-              let fkColumnName = $"{baseTableName}_id"
+              let fkColumnNames = getForeignKeyColumnNamesForPrefix baseTableName referencedPk
 
-              let fkColumn =
-                { name = fkColumnName
-                  previousName = None
-                  columnType = referencedPk.sqlType
-                  constraints =
-                    [ NotNull
-                      PrimaryKey
-                        { constraintName = None
-                          columns = []
-                          isAutoincrement = false }
-                      ForeignKey
-                        { columns = []
-                          refTable = baseTableName
-                          refColumns = [ referencedPk.columnName ]
-                          onDelete = None
-                          onUpdate = None } ]
-                  enumLikeDu = None
-                  unitOfMeasure = None }
+              let fkColumns =
+                (fkColumnNames, referencedPk)
+                ||> List.map2 (fun fkColumnName referencedPk ->
+                  { name = fkColumnName
+                    previousName = None
+                    columnType = referencedPk.sqlType
+                    constraints = [ NotNull ]
+                    enumLikeDu = None
+                    unitOfMeasure = None })
+
+              let tableConstraints =
+                match fkColumns, referencedPk with
+                | [ fkColumn ], [ referencedPkColumn ] ->
+                  [ ForeignKey
+                      { columns = []
+                        refTable = baseTableName
+                        refColumns = [ referencedPkColumn.columnName ]
+                        onDelete = None
+                        onUpdate = None }
+                    PrimaryKey
+                      { constraintName = None
+                        columns = []
+                        isAutoincrement = false } ]
+                  |> fun constraints ->
+                    [ { fkColumn with
+                          constraints = fkColumn.constraints @ constraints } ],
+                    []
+                | _ ->
+                  fkColumns,
+                  [ PrimaryKey
+                      { constraintName = None
+                        columns = fkColumnNames
+                        isAutoincrement = false }
+                    ForeignKey
+                      { columns = fkColumnNames
+                        refTable = baseTableName
+                        refColumns = referencedPk |> List.map _.columnName
+                        onDelete = None
+                        onUpdate = None } ]
+
+              let fkColumns, extensionConstraints = tableConstraints
 
               let! extensionColumns =
                 caseFields
@@ -101,8 +125,8 @@ module internal SchemaReflectionUnionExtensions =
                 { name = extensionTableName
                   previousName = None
                   dropColumns = []
-                  columns = fkColumn :: extensionColumns
-                  constraints = []
+                  columns = fkColumns @ extensionColumns
+                  constraints = extensionConstraints
                   queryByAnnotations = []
                   queryLikeAnnotations = []
                   queryByOrCreateAnnotations = []

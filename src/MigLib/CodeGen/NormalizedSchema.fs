@@ -32,6 +32,12 @@ let private getPrimaryKeyColumns (table: CreateTable) : string list =
         | _ -> false))
     |> List.map (fun col -> col.name)
 
+let private sameColumnSet (left: string list) (right: string list) : bool =
+  let normalize columns =
+    columns |> List.map (fun (column: string) -> column.ToLowerInvariant())
+
+  normalize left = normalize right
+
 /// Get foreign key information from a table
 let private getForeignKeyInfo (table: CreateTable) : ForeignKey list =
   // Column-level foreign keys
@@ -62,20 +68,17 @@ let private getForeignKeyInfo (table: CreateTable) : ForeignKey list =
 
 /// Check if a table's primary key is also a foreign key to another table.
 /// This is the key indicator of a 1:1 extension relationship.
-let private isPrimaryKeyAlsoForeignKey (table: CreateTable) : (string * ForeignKey) option =
+let private isPrimaryKeyAlsoForeignKey (table: CreateTable) : (string list * ForeignKey) option =
   let pkCols = getPrimaryKeyColumns table
 
-  match pkCols with
-  | [ singlePk ] ->
-    // Single-column PK - check if it's also a FK
+  if pkCols.IsEmpty then
+    None
+  else
     let fks = getForeignKeyInfo table
 
     fks
-    |> List.tryFind (fun fk -> fk.columns = [ singlePk ])
-    |> Option.map (fun fk -> singlePk, fk)
-  | _ ->
-    // Composite PK or no PK - not an extension table pattern
-    None
+    |> List.tryFind (fun fk -> sameColumnSet fk.columns pkCols)
+    |> Option.map (fun fk -> pkCols, fk)
 
 /// Extract the aspect name from an extension table name.
 /// Given base table "student" and extension "student_address", returns "address".
@@ -102,13 +105,13 @@ let private tryMatchExtensionTable (baseTable: CreateTable) (potentialExtension:
       // Check 3: Extension's PK should be a FK to the base table
       match isPrimaryKeyAlsoForeignKey potentialExtension with
       | None -> None
-      | Some(fkCol, fk) ->
+      | Some(fkCols, fk) ->
         // Check 4: FK should reference the base table
         if fk.refTable = baseTable.name then
           Some
             { table = potentialExtension
               aspectName = aspectName
-              fkColumn = fkCol }
+              fkColumns = fkCols }
         else
           None
 
@@ -179,10 +182,12 @@ let formatError (error: NormalizedSchemaError) : string =
     + $"  Expected: '{expected}_<aspect>' (e.g., '{expected}_address', '{expected}_email_phone')\n"
     + $"  Suggestion: Rename the table to follow the pattern: '{expected}_<aspect>'"
 
-  | ForeignKeyNotPrimaryKey(extension, fkColumn) ->
-    $"Extension table '{extension}' has FK column '{fkColumn}' that is not the PRIMARY KEY\n"
-    + "  For 1:1 relationships, the FK must also be the PK (enforces at most one extension per base record)\n"
-    + $"  Suggestion: Make '{fkColumn}' the PRIMARY KEY of table '{extension}'"
+  | ForeignKeyNotPrimaryKey(extension, fkColumns) ->
+    let fkColumnText = String.concat ", " fkColumns
+
+    $"Extension table '{extension}' has FK columns '{fkColumnText}' that are not the PRIMARY KEY\n"
+    + "  For 1:1 relationships, the FK columns must also be the PK (enforces at most one extension per base record)\n"
+    + $"  Suggestion: Make '{fkColumnText}' the PRIMARY KEY of table '{extension}'"
 
   | DuplicateColumnNames(extension, baseTable, columns) ->
     let columnList = columns |> String.concat ", "
@@ -218,14 +223,8 @@ let private validateExtensionTable
     else
       // Check 3: Extension's PK should be a FK to the base table
       match isPrimaryKeyAlsoForeignKey potentialExtension with
-      | None ->
-        Error(
-          ForeignKeyNotPrimaryKey(
-            potentialExtension.name,
-            (getPrimaryKeyColumns potentialExtension |> String.concat ", ")
-          )
-        )
-      | Some(fkCol, fk) ->
+      | None -> Error(ForeignKeyNotPrimaryKey(potentialExtension.name, getPrimaryKeyColumns potentialExtension))
+      | Some(fkCols, fk) ->
         // Check 4: FK should reference the base table
         if fk.refTable <> baseTable.name then
           Error(
@@ -241,7 +240,7 @@ let private validateExtensionTable
 
           let extensionColumnNames =
             potentialExtension.columns
-            |> List.filter (fun c -> c.name <> fkCol)
+            |> List.filter (fun c -> not (List.contains c.name fkCols))
             |> List.map (fun c -> c.name)
 
           let duplicates =
@@ -255,7 +254,7 @@ let private validateExtensionTable
               Some
                 { table = potentialExtension
                   aspectName = aspectName
-                  fkColumn = fkCol }
+                  fkColumns = fkCols }
             )
 
 /// Validate and find all extension tables for a given base table.

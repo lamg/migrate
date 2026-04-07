@@ -27,45 +27,60 @@ let private catchSqliteTaskExpr (bodyExpr: WidgetBuilder<Expr>) =
   taskExpr [ OtherExpr(TryWithExpr(bodyExpr, MatchClauseExpr(":? SqliteException as ex", returnExprRaw "Error ex"))) ]
 
 let private generateUpdateBaseSql (baseTable: CreateTable) : string =
-  let pkCols =
-    getPrimaryKeyColumns baseTable |> List.map (fun c -> c.name) |> Set.ofList
+  let pkColumns = getPrimaryKeyColumns baseTable
+  let pkColumnNames = pkColumns |> List.map (fun c -> c.name) |> Set.ofList
 
   let updateCols =
-    baseTable.columns |> List.filter (fun col -> not (Set.contains col.name pkCols))
+    baseTable.columns
+    |> List.filter (fun col -> not (Set.contains col.name pkColumnNames))
 
   let setClauses =
     updateCols |> List.map (fun c -> $"{c.name} = @{c.name}") |> String.concat ", "
 
   let whereClause =
-    pkCols
-    |> Set.toList
-    |> List.map (fun pk -> $"{pk} = @{pk}")
+    pkColumns
+    |> List.map (fun pk -> $"{pk.name} = @{pk.name}")
     |> String.concat " AND "
 
   $"UPDATE {baseTable.name} SET {setClauses} WHERE {whereClause}"
 
-let private getPrimaryKeyVarName (baseTable: CreateTable) =
-  let idCol =
-    baseTable.columns
-    |> List.find (fun col ->
-      col.constraints
-      |> List.exists (function
-        | PrimaryKey _ -> true
-        | _ -> false))
+let private getPrimaryKeyVarBindings (baseTable: CreateTable) =
+  getPrimaryKeyColumns baseTable
+  |> List.map (fun pkColumn -> pkColumn.name, getColumnVarName pkColumn)
 
-  getColumnVarName idCol
+let private getExtensionKeyBindings (baseTable: CreateTable) (extension: ExtensionTable) =
+  let pkBindings = getPrimaryKeyVarBindings baseTable |> Map.ofList
+
+  extension.fkColumns
+  |> List.map (fun fkColumn ->
+    let baseColumnName =
+      getExtensionKeyPairs baseTable extension
+      |> List.find (fun (_, candidateFkColumn) -> candidateFkColumn = fkColumn)
+      |> fst
+      |> fun column -> column.name
+
+    let pkVarName = pkBindings[baseColumnName]
+    fkColumn, pkVarName)
+
+let private generateExtensionKeyWhereClause (extension: ExtensionTable) =
+  extension.fkColumns
+  |> List.map (fun fkColumn -> $"{fkColumn} = @{fkColumn}")
+  |> String.concat " AND "
+
+let private generateExtensionKeyParamBindings (baseTable: CreateTable) (extension: ExtensionTable) =
+  getExtensionKeyBindings baseTable extension
+  |> List.map (fun (fkColumn, pkVarName) -> addPlainBinding "cmd" fkColumn pkVarName)
 
 let private baseUpdateClause (baseTable: CreateTable) (extensions: ExtensionTable list) (typeName: string) =
   let updateSql = generateUpdateBaseSql baseTable
-  let idVarName = getPrimaryKeyVarName baseTable
 
   let deleteSteps =
     extensions
     |> List.map (fun ext ->
       unitThunk (
         executeWriteUnitExpr
-          ($"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id")
-          [ addPlainBinding "cmd" "id" idVarName ]
+          ($"DELETE FROM {ext.table.name} WHERE {generateExtensionKeyWhereClause ext}")
+          (generateExtensionKeyParamBindings baseTable ext)
       ))
 
   let deleteExtensionsExpr = sequenceUnitResultsExpr deleteSteps
@@ -92,20 +107,19 @@ let private extensionUpdateClause
   let caseName = TypeGenerator.toPascalCase extension.aspectName
   let updateSql = generateUpdateBaseSql baseTable
 
-  let extensionInsertColumns =
-    extension.table.columns
-    |> List.filter (fun col -> col.name <> extension.fkColumn)
+  let extensionInsertColumns = getExtensionNonKeyColumns extension
 
   let extensionColumnNames =
-    extensionInsertColumns |> List.map (fun c -> c.name) |> String.concat ", "
+    extension.fkColumns @ (extensionInsertColumns |> List.map (fun c -> c.name))
+    |> String.concat ", "
 
   let extensionParamNames =
-    extensionInsertColumns |> List.map (fun c -> $"@{c.name}") |> String.concat ", "
+    extension.fkColumns @ (extensionInsertColumns |> List.map (fun c -> c.name))
+    |> List.map (fun c -> $"@{c}")
+    |> String.concat ", "
 
   let insertOrReplaceSql =
-    $"INSERT OR REPLACE INTO {extension.table.name} ({extension.fkColumn}, {extensionColumnNames}) VALUES (@{extension.fkColumn}, {extensionParamNames})"
-
-  let idVarName = getPrimaryKeyVarName baseTable
+    $"INSERT OR REPLACE INTO {extension.table.name} ({extensionColumnNames}) VALUES ({extensionParamNames})"
 
   let deleteOtherExtensionSteps =
     allExtensions
@@ -113,8 +127,8 @@ let private extensionUpdateClause
     |> List.map (fun ext ->
       unitThunk (
         executeWriteUnitExpr
-          ($"DELETE FROM {ext.table.name} WHERE {ext.fkColumn} = @id")
-          [ addPlainBinding "cmd" "id" idVarName ]
+          ($"DELETE FROM {ext.table.name} WHERE {generateExtensionKeyWhereClause ext}")
+          (generateExtensionKeyParamBindings baseTable ext)
       ))
 
   let deleteOtherExtensionsExpr = sequenceUnitResultsExpr deleteOtherExtensionSteps
@@ -123,8 +137,8 @@ let private extensionUpdateClause
     unitThunk (executeWriteUnitExpr updateSql (generateParamBindings baseTable.columns "cmd"))
 
   let insertBindings =
-    addPlainBinding "cmd" extension.fkColumn idVarName
-    :: generateParamBindings extensionInsertColumns "cmd"
+    generateExtensionKeyParamBindings baseTable extension
+    @ generateParamBindings extensionInsertColumns "cmd"
 
   let insertStepExpr =
     unitThunk (executeWriteUnitExpr insertOrReplaceSql insertBindings)

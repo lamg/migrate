@@ -76,29 +76,11 @@ let generateParamBindings (columns: ColumnDef list) (cmdVarName: string) : strin
   columns
   |> List.map (fun col -> addColumnBinding cmdVarName col (getColumnVarName col))
 
-let getSinglePrimaryKeyColumn (table: CreateTable) : ColumnDef option =
-  let tableLevelPk =
-    table.constraints
-    |> List.tryPick (fun c ->
-      match c with
-      | PrimaryKey pk when pk.columns.Length > 0 -> Some pk.columns
-      | _ -> None)
+let getExtensionNonKeyColumns (extension: ExtensionTable) : ColumnDef list =
+  let extensionFkColumns = extension.fkColumns |> Set.ofList
 
-  let pkColumns =
-    match tableLevelPk with
-    | Some cols -> table.columns |> List.filter (fun col -> List.contains col.name cols)
-    | None ->
-      table.columns
-      |> List.filter (fun col ->
-        col.constraints
-        |> List.exists (fun c ->
-          match c with
-          | PrimaryKey _ -> true
-          | _ -> false))
-
-  match pkColumns with
-  | [ singlePk ] -> Some singlePk
-  | _ -> None
+  extension.table.columns
+  |> List.filter (fun col -> not (extensionFkColumns.Contains col.name))
 
 let isAutoIncrementPrimaryKey (column: ColumnDef) : bool =
   column.constraints
@@ -116,7 +98,9 @@ let getPrimaryKeyColumns (table: CreateTable) : ColumnDef list =
       | _ -> None)
 
   match tableLevelPk with
-  | Some cols -> table.columns |> List.filter (fun col -> List.contains col.name cols)
+  | Some cols ->
+    cols
+    |> List.choose (fun colName -> table.columns |> List.tryFind (fun col -> col.name = colName))
   | None ->
     table.columns
     |> List.filter (fun col ->
@@ -126,16 +110,35 @@ let getPrimaryKeyColumns (table: CreateTable) : ColumnDef list =
         | PrimaryKey _ -> true
         | _ -> false))
 
-let generateLeftJoins (baseTable: CreateTable) (extensions: ExtensionTable list) : string =
-  let basePkColumnName =
-    getSinglePrimaryKeyColumn baseTable
-    |> Option.map (fun pk -> pk.name)
-    |> Option.defaultValue "id"
+let getSinglePrimaryKeyColumn (table: CreateTable) : ColumnDef option =
+  match getPrimaryKeyColumns table with
+  | [ singlePk ] -> Some singlePk
+  | _ -> None
 
+let getExtensionKeyPairs (baseTable: CreateTable) (extension: ExtensionTable) : (ColumnDef * string) list =
+  let basePkColumns = getPrimaryKeyColumns baseTable
+
+  if basePkColumns.Length <> extension.fkColumns.Length then
+    failwith
+      $"Normalized extension '{extension.table.name}' has {extension.fkColumns.Length} FK columns but base table '{baseTable.name}' has {basePkColumns.Length} PK columns."
+
+  (basePkColumns, extension.fkColumns) ||> List.zip
+
+let generateExtensionJoinCondition
+  (baseAlias: string)
+  (baseTable: CreateTable)
+  (extension: ExtensionTable)
+  (extensionAlias: string)
+  : string =
+  getExtensionKeyPairs baseTable extension
+  |> List.map (fun (pkColumn, fkColumn) -> $"{baseAlias}.{pkColumn.name} = {extensionAlias}.{fkColumn}")
+  |> String.concat " AND "
+
+let generateLeftJoins (baseTable: CreateTable) (extensions: ExtensionTable list) : string =
   extensions
   |> List.mapi (fun i ext ->
     let alias = $"ext{i}"
-    $"LEFT JOIN {ext.table.name} {alias} ON {baseTable.name}.{basePkColumnName} = {alias}.{ext.fkColumn}")
+    $"LEFT JOIN {ext.table.name} {alias} ON {generateExtensionJoinCondition baseTable.name baseTable ext alias}")
   |> String.concat "\n         "
 
 let generateSelectColumns (baseTable: CreateTable) (extensions: ExtensionTable list) : string =
@@ -147,8 +150,7 @@ let generateSelectColumns (baseTable: CreateTable) (extensions: ExtensionTable l
   let extensionColumns =
     extensions
     |> List.mapi (fun i ext ->
-      ext.table.columns
-      |> List.filter (fun col -> col.name <> ext.fkColumn)
+      getExtensionNonKeyColumns ext
       |> List.map (fun c -> $"ext{i}.{c.name}")
       |> String.concat ", ")
     |> List.filter (fun s -> s <> "")
@@ -167,12 +169,14 @@ let generateBaseFieldReads (baseTable: CreateTable) (startIndex: int) : string l
     $"{fieldName} = {TypeGenerator.readColumnExpr col colIndex}")
 
 let generateExtensionFieldReads (extension: ExtensionTable) (startIndex: int) : string list =
-  extension.table.columns
-  |> List.filter (fun col -> col.name <> extension.fkColumn)
+  getExtensionNonKeyColumns extension
   |> List.mapi (fun i col ->
     let fieldName = TypeGenerator.toPascalCase col.name
     let colIndex = startIndex + i
     $"{fieldName} = {TypeGenerator.readColumnExpr col colIndex}")
+
+let private getExtensionReadWidth (extension: ExtensionTable) =
+  getExtensionNonKeyColumns extension |> List.length
 
 let generateCaseSelection
   (baseIndent: int)
@@ -188,7 +192,7 @@ let generateCaseSelection
     |> List.mapi (fun i ext ->
       let colIndex =
         baseTable.columns.Length
-        + (extensions |> List.take i |> List.sumBy (fun e -> e.table.columns.Length - 1))
+        + (extensions |> List.take i |> List.sumBy getExtensionReadWidth)
 
       $"let has{TypeGenerator.toPascalCase ext.aspectName} = not (reader.IsDBNull {colIndex})")
     |> String.concat $"\n{indent}"
@@ -210,7 +214,7 @@ let generateCaseSelection
         @ generateExtensionFieldReads
             ext
             (baseTable.columns.Length
-             + (extensions |> List.take i |> List.sumBy (fun e -> e.table.columns.Length - 1)))
+             + (extensions |> List.take i |> List.sumBy getExtensionReadWidth))
         |> String.concat $",\n{indent}"
 
       $"{indent}| {pattern} ->\n{indent4}{typeName}.With{caseName} ({allFields})")
@@ -240,9 +244,7 @@ let generateCaseSelectionExpr (baseTable: CreateTable) (extensions: ExtensionTab
     let allFields = fields |> String.concat ", "
     $"{typeName}.{caseName} ({allFields})"
 
-  let baseExpr =
-    generateBaseFieldReads baseTable 0
-    |> formatCaseExpr "Base"
+  let baseExpr = generateBaseFieldReads baseTable 0 |> formatCaseExpr "Base"
 
   match extensions with
   | [] -> baseExpr
@@ -256,7 +258,7 @@ let generateCaseSelectionExpr (baseTable: CreateTable) (extensions: ExtensionTab
       |> List.mapi (fun i ext ->
         let colIndex =
           baseTable.columns.Length
-          + (extensions |> List.take i |> List.sumBy (fun e -> e.table.columns.Length - 1))
+          + (extensions |> List.take i |> List.sumBy getExtensionReadWidth)
 
         $"let has{TypeGenerator.toPascalCase ext.aspectName} = not (reader.IsDBNull {colIndex}) in")
       |> String.concat " "
@@ -276,14 +278,12 @@ let generateCaseSelectionExpr (baseTable: CreateTable) (extensions: ExtensionTab
           @ generateExtensionFieldReads
               ext
               (baseTable.columns.Length
-               + (extensions |> List.take i |> List.sumBy (fun e -> e.table.columns.Length - 1)))
+               + (extensions |> List.take i |> List.sumBy getExtensionReadWidth))
 
         let caseExpr = formatCaseExpr ($"With{caseName}") fields
-        $"| {pattern} -> {caseExpr}"
-      )
+        $"| {pattern} -> {caseExpr}")
 
-    let basePattern =
-      extensions |> List.map (fun _ -> "false") |> String.concat ", "
+    let basePattern = extensions |> List.map (fun _ -> "false") |> String.concat ", "
 
     let defaultCase =
       if extensions.Length > 1 then
@@ -298,8 +298,7 @@ let generateCaseSelectionExpr (baseTable: CreateTable) (extensions: ExtensionTab
 
     String.concat
       " "
-      ([ nullChecks
-         $"match {matchInput} with" ]
+      ([ nullChecks; $"match {matchInput} with" ]
        @ extensionCases
        @ [ $"| {basePattern} -> {baseExpr}" ]
        @ defaultCase)

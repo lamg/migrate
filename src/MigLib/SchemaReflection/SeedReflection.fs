@@ -33,7 +33,7 @@ module internal SchemaReflectionSeed =
     let flags =
       BindingFlags.Public ||| BindingFlags.Static ||| BindingFlags.DeclaredOnly
 
-    let recordTypeSet = HashSet<Type>(recordTypes)
+    let recordTypeSet = HashSet<Type> recordTypes
 
     let properties =
       moduleType.GetProperties flags
@@ -57,7 +57,7 @@ module internal SchemaReflectionSeed =
     |> Array.sortBy (fun (name, _, _) -> name)
     |> Array.toList
 
-  let rec toSeedExpr (recordTypes: Type list) (fieldType: Type) (value: obj) : Result<Expr, string> =
+  let toSeedExpr (_recordTypes: Type list) (fieldType: Type) (value: obj) : Result<Expr, string> =
     if isNull value then
       Ok(Value "NULL")
     else
@@ -68,7 +68,7 @@ module internal SchemaReflectionSeed =
         if int64Value >= int64 Int32.MinValue && int64Value <= int64 Int32.MaxValue then
           Ok(Integer(int int64Value))
         else
-          Ok(Value(int64Value.ToString(CultureInfo.InvariantCulture)))
+          Ok(Value(int64Value.ToString CultureInfo.InvariantCulture))
       | Some(SqlText, Some _) ->
         let unionCase, unionFields = FSharpValue.GetUnionFields(value, fieldType, true)
 
@@ -81,44 +81,42 @@ module internal SchemaReflectionSeed =
       | Some(SqlTimestamp, _) -> Ok(String(string value))
       | Some(SqlString, _) -> Ok(String(string value))
       | Some(SqlFlexible, _) -> Ok(Value(string value))
-      | None when recordTypes |> List.contains fieldType ->
-        result {
-          let! primaryKey =
-            readPrimaryKeyInfo fieldType
-            |> Result.bind (function
-              | Some value -> Ok value
-              | None -> Error $"Seed value for nested record type '{fieldType.Name}' requires a primary key.")
-
-          let primaryKeyField =
-            FSharpType.GetRecordFields(fieldType, true)
-            |> Array.tryFind (fun field ->
-              String.Equals(toSnakeCase field.Name, primaryKey.columnName, StringComparison.Ordinal))
-
-          match primaryKeyField with
-          | None ->
-            return!
-              Error
-                $"Seed value for nested record type '{fieldType.Name}' could not resolve primary key field '{primaryKey.columnName}'."
-          | Some field ->
-            let primaryKeyValue = field.GetValue value
-            return! toSeedExpr recordTypes field.PropertyType primaryKeyValue
-        }
       | None -> Error $"Seed value field type '{fieldType.Name}' is not supported."
 
-  let toSeedColumnValue
+  let toSeedColumnValues
     (recordTypes: Type list)
     (field: PropertyInfo)
     (recordValue: obj)
-    : Result<string * Expr, string> =
+    : Result<(string * Expr) list, string> =
     result {
       let value = field.GetValue recordValue
 
       if recordTypes |> List.contains field.PropertyType then
-        let! expr = toSeedExpr recordTypes field.PropertyType value
-        return $"{toSnakeCase field.Name}_id", expr
+        let nestedFields = FSharpType.GetRecordFields(field.PropertyType, true)
+
+        let! referencedPk =
+          readPrimaryKeyInfo field.PropertyType
+          |> Result.bind (function
+            | [] -> Error $"Seed value for nested record type '{field.PropertyType.Name}' requires a primary key."
+            | xs -> Ok xs)
+
+        let fkColumnNames = getForeignKeyColumnNames field.Name referencedPk
+
+        let! columnValues =
+          (referencedPk, fkColumnNames)
+          ||> List.map2 (fun pkInfo fkColumnName ->
+            result {
+              let! pkField = resolveFieldByName nestedFields pkInfo.columnName
+              let pkValue = pkField.GetValue value
+              let! expr = toSeedExpr recordTypes pkField.PropertyType pkValue
+              return fkColumnName, expr
+            })
+          |> foldResults (fun acc valueResult -> Result.map (fun value -> acc @ [ value ]) valueResult) []
+
+        return columnValues
       else
         let! expr = toSeedExpr recordTypes field.PropertyType value
-        return toSnakeCase field.Name, expr
+        return [ toSnakeCase field.Name, expr ]
     }
 
   let buildSeedInsert (recordTypes: Type list) (recordType: Type) (recordValue: obj) : Result<InsertInto, string> =
@@ -129,8 +127,8 @@ module internal SchemaReflectionSeed =
         |> foldResults
           (fun values field ->
             result {
-              let! columnValue = toSeedColumnValue recordTypes field recordValue
-              return values @ [ columnValue ]
+              let! fieldValues = toSeedColumnValues recordTypes field recordValue
+              return values @ fieldValues
             })
           []
 
