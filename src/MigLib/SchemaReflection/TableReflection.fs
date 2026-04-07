@@ -151,6 +151,10 @@ module internal SchemaReflectionTable =
       let! constrainedColumns, attributeTableConstraints =
         applyConstraintAttributes recordType resolver columnsWithPrimaryKey
 
+      let! explicitForeignKeyConstraints =
+        readForeignKeyAttributes recordType resolver onDeleteByColumns
+        |> Result.map (List.map ForeignKey)
+
       let! indexes = readIndexDefinitions tableName recordType resolver
       let! dropColumns = readDropColumns recordType
 
@@ -166,7 +170,11 @@ module internal SchemaReflectionTable =
           previousName = previousTableName
           dropColumns = dropColumns
           columns = constrainedColumns
-          constraints = primaryKeyConstraints @ relationshipConstraints @ attributeTableConstraints
+          constraints =
+            primaryKeyConstraints
+            @ relationshipConstraints
+            @ attributeTableConstraints
+            @ explicitForeignKeyConstraints
           queryByAnnotations = queryByAnnotations
           queryLikeAnnotations = queryLikeAnnotations
           queryByOrCreateAnnotations = queryByOrCreateAnnotations

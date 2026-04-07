@@ -914,6 +914,25 @@ type ReflectionCompositeWallet =
     user: ReflectionCompositeUser
     address: string }
 
+[<AutoIncPK "id">]
+type ExplicitFkUser = { id: int64; name: string }
+
+[<AutoIncPK "id">]
+[<FK("explicit_fk_user", "userId")>]
+[<OnDeleteCascade "userId">]
+type ExplicitFkOrder =
+  { id: int64
+    userId: int64
+    amount: float }
+
+[<AutoIncPK "id">]
+[<FK("explicit_fk_user", "tenantId", "userId", RefColumns = [| "tenant_id"; "user_id" |])>]
+type ExplicitFkCompositeOrder =
+  { id: int64
+    tenantId: string
+    userId: string
+    amount: float }
+
 type ReflectionStudentOpt = WithEmail of ReflectionStudent * email: string
 
 [<View>]
@@ -1145,6 +1164,57 @@ let ``schema reflection supports composite PK declared by repeated PK attributes
     match primaryKey with
     | None -> failwith "Expected table-level primary key on reflection_split_composite_item"
     | Some pk -> Assert.Equal<string list>([ "tenant_id"; "sku" ], pk.columns)
+
+[<Fact>]
+let ``schema reflection supports explicit FK attribute with single column`` () =
+  let types = [ typeof<ExplicitFkUser>; typeof<ExplicitFkOrder> ]
+
+  match buildSchemaFromTypes types with
+  | Error error -> failwith $"Expected schema reflection to succeed, got: {error}"
+  | Ok schema ->
+    let order =
+      schema.tables |> List.find (fun table -> table.name = "explicit_fk_order")
+
+    let foreignKey =
+      order.constraints
+      |> List.tryPick (function
+        | ForeignKey fk -> Some fk
+        | _ -> None)
+
+    match foreignKey with
+    | None -> failwith "Expected foreign key on explicit_fk_order"
+    | Some fk ->
+      Assert.Equal("explicit_fk_user", fk.refTable)
+      Assert.Equal<string list>([ "user_id" ], fk.columns)
+      Assert.Equal<string list>([], fk.refColumns)
+
+      match fk.onDelete with
+      | Some Cascade -> ()
+      | _ -> failwith "Expected ON DELETE CASCADE on explicit_fk_order.userId"
+
+[<Fact>]
+let ``schema reflection supports explicit FK attribute with multiple columns`` () =
+  let types = [ typeof<ExplicitFkUser>; typeof<ExplicitFkCompositeOrder> ]
+
+  match buildSchemaFromTypes types with
+  | Error error -> failwith $"Expected schema reflection to succeed, got: {error}"
+  | Ok schema ->
+    let order =
+      schema.tables
+      |> List.find (fun table -> table.name = "explicit_fk_composite_order")
+
+    let foreignKey =
+      order.constraints
+      |> List.tryPick (function
+        | ForeignKey fk -> Some fk
+        | _ -> None)
+
+    match foreignKey with
+    | None -> failwith "Expected foreign key on explicit_fk_composite_order"
+    | Some fk ->
+      Assert.Equal("explicit_fk_user", fk.refTable)
+      Assert.Equal<string list>([ "tenant_id"; "user_id" ], fk.columns)
+      Assert.Equal<string list>([ "tenant_id"; "user_id" ], fk.refColumns)
 
 [<Fact>]
 let ``schema diff detects renamed tables only when target declares PreviousName`` () =

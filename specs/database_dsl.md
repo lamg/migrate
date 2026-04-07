@@ -499,6 +499,59 @@ This produces `ON DELETE CASCADE` on the composite foreign key `(user_tenant_id,
 
 Other attributes such as `Index`, `Unique`, `SelectBy`, and `SelectByOrInsert` use the generated FK column names directly for composite references.
 
+### Explicit foreign keys
+
+Foreign keys can also be declared explicitly with the `FK` attribute, which supports both single and composite foreign keys:
+
+```fsharp
+[<AutoIncPK "id">]
+type User = { id: int64; name: string }
+
+[<AutoIncPK "id">]
+[<FK("user", "userId")>]
+[<OnDeleteCascade "userId">]
+type Order =
+  { id: int64
+    userId: int64
+    amount: float }
+```
+
+translates to
+
+```sql
+CREATE TABLE user(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
+
+CREATE TABLE order(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, amount REAL NOT NULL, FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE CASCADE);
+```
+
+Composite foreign keys are declared by specifying multiple columns:
+
+```fsharp
+[<PK("tenantId", "userId")>]
+type User =
+  { tenantId: string
+    userId: string
+    name: string }
+
+[<AutoIncPK "id">]
+[<FK("user", "tenantId", "userId", RefColumns = [|"tenant_id"; "user_id"|])>]
+type Order =
+  { id: int64
+    tenantId: string
+    userId: string
+    amount: float }
+```
+
+translates to
+
+```sql
+CREATE TABLE user(tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(tenant_id, user_id));
+
+CREATE TABLE order(id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, amount REAL NOT NULL, FOREIGN KEY (tenant_id, user_id) REFERENCES user(tenant_id, user_id));
+```
+
+The `RefColumns` property is optional. When omitted, the foreign key references the primary key columns of the referenced table by default.
+
 ### Views
 
 Views are declared as record types with `Join` attributes specifying how tables are connected. The join conditions are inferred from foreign key relationships between the referenced types. Selected columns are determined by the fields of the view record.

@@ -327,6 +327,46 @@ module internal SchemaReflectionAttributes =
         return! Error $"Type '{recordType.Name}' has conflicting on-delete actions for columns: {columns}"
     }
 
+  let readForeignKeyAttributes
+    (recordType: Type)
+    (resolver: Map<string, string>)
+    (onDeleteByColumns: Map<string list, FkAction>)
+    : Result<ForeignKey list, string> =
+    let fkAttributes = getTypeAttributes<FKAttribute> recordType
+
+    fkAttributes
+    |> foldResults
+      (fun fks attr ->
+        result {
+          let! resolvedColumns =
+            attr.Columns
+            |> Seq.toList
+            |> foldResults
+              (fun cols raw ->
+                result {
+                  let! resolved = resolveColumnName resolver recordType.Name raw
+                  return cols @ [ resolved ]
+                })
+              []
+
+          let refColumns =
+            if attr.RefColumns.Length > 0 then
+              attr.RefColumns |> List.ofArray
+            else
+              []
+
+          let onDelete = onDeleteByColumns.TryFind resolvedColumns
+
+          return
+            fks
+            @ [ { columns = resolvedColumns
+                  refTable = attr.RefTable
+                  refColumns = refColumns
+                  onDelete = onDelete
+                  onUpdate = None } ]
+        })
+      []
+
   let readIndexDefinitions
     (tableName: string)
     (recordType: Type)

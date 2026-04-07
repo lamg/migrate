@@ -88,6 +88,13 @@ module DbAttributes =
     inherit Attribute()
 
   [<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+  type FKAttribute(refTable: string, [<ParamArray>] columns: string array) =
+    inherit Attribute()
+    member _.RefTable = refTable
+    member _.Columns = columns
+    member val RefColumns: string array = [||] with get, set
+
+  [<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
   type OnDeleteCascadeAttribute(column: string) =
     inherit Attribute()
     member _.Column = column

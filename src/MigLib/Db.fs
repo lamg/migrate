@@ -22,6 +22,7 @@ type DeleteByAttribute = DbAttributes.DeleteByAttribute
 type DeleteAllAttribute = DbAttributes.DeleteAllAttribute
 type InsertOrIgnoreAttribute = DbAttributes.InsertOrIgnoreAttribute
 type UpsertAttribute = DbAttributes.UpsertAttribute
+type FKAttribute = DbAttributes.FKAttribute
 type OnDeleteCascadeAttribute = DbAttributes.OnDeleteCascadeAttribute
 type OnDeleteSetNullAttribute = DbAttributes.OnDeleteSetNullAttribute
 type ViewAttribute = DbAttributes.ViewAttribute
