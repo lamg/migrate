@@ -11,8 +11,11 @@ open MigLib.CompiledSchema
 open MigLib.Db
 open MigLib.Util
 
-let deriveSchemaBoundDbFileName (schemaPath: string) : Result<string, string> =
-  deriveDatabaseFileNameFromSourcePath schemaPath
+let deriveSchemaBoundDbFileName
+  (dbFileNamePrefix: string)
+  (schemaPath: string)
+  : Result<string, string> =
+  deriveDatabaseFileNameFromSourcePath dbFileNamePrefix schemaPath
 
 let private formatExceptionDetails (ex: exn) =
   let rec loop (current: exn) (acc: string list) =
@@ -41,23 +44,26 @@ let private formatExceptionDetails (ex: exn) =
 
 let generateDbCodeFromTypes
   (moduleName: string)
+  (dbFileNamePrefix: string)
   (schemaPath: string)
   (types: Type list)
   (outputFilePath: string)
   : Result<CodeGenStats, string> =
-  generateCodeFromTypesWithDbFile moduleName schemaPath types outputFilePath
+  generateCodeFromTypesWithDbFile moduleName dbFileNamePrefix schemaPath types outputFilePath
 
 let generateDbCodeFromAssemblyModule
   (generatedModuleName: string)
+  (dbFileNamePrefix: string)
   (schemaPath: string)
   (assembly: Assembly)
   (schemaModuleName: string)
   (outputFilePath: string)
   : Result<CodeGenStats, string> =
-  generateCodeFromAssemblyModuleWithDbFile generatedModuleName schemaPath assembly schemaModuleName outputFilePath
+  generateCodeFromAssemblyModuleWithDbFile generatedModuleName dbFileNamePrefix schemaPath assembly schemaModuleName outputFilePath
 
 let generateDbCodeFromAssemblyModulePath
   (generatedModuleName: string)
+  (dbFileNamePrefix: string)
   (schemaPath: string)
   (assemblyPath: string)
   (schemaModuleName: string)
@@ -73,7 +79,7 @@ let generateDbCodeFromAssemblyModulePath
     else
       try
         let assembly = Assembly.LoadFrom fullAssemblyPath
-        generateDbCodeFromAssemblyModule generatedModuleName schemaPath assembly schemaModuleName outputFilePath
+        generateDbCodeFromAssemblyModule generatedModuleName dbFileNamePrefix schemaPath assembly schemaModuleName outputFilePath
       with ex ->
         Error $"Could not load compiled assembly '{fullAssemblyPath}': {ex.Message}"
 
@@ -103,12 +109,13 @@ let writeCodegenReport (writeLine: string -> unit) (report: CodegenReport) =
 
 let runCodegenFromAssemblyModule
   (generatedModuleName: string)
+  (dbFileNamePrefix: string)
   (schemaPath: string)
   (assembly: Assembly)
   (schemaModuleName: string)
   (outputFilePath: string)
   : Result<CodegenReport, string> =
-  generateDbCodeFromAssemblyModule generatedModuleName schemaPath assembly schemaModuleName outputFilePath
+  generateDbCodeFromAssemblyModule generatedModuleName dbFileNamePrefix schemaPath assembly schemaModuleName outputFilePath
   |> Result.map (fun stats ->
     { schemaPath = Path.GetFullPath schemaPath
       assemblyPath = assembly.Location
@@ -119,6 +126,7 @@ let runCodegenFromAssemblyModule
 
 let runCodegenFromAssemblyModulePath
   (generatedModuleName: string)
+  (dbFileNamePrefix: string)
   (schemaPath: string)
   (assemblyPath: string)
   (schemaModuleName: string)
@@ -126,7 +134,7 @@ let runCodegenFromAssemblyModulePath
   : Result<CodegenReport, string> =
   let fullAssemblyPath = Path.GetFullPath assemblyPath
 
-  generateDbCodeFromAssemblyModulePath generatedModuleName schemaPath fullAssemblyPath schemaModuleName outputFilePath
+  generateDbCodeFromAssemblyModulePath generatedModuleName dbFileNamePrefix schemaPath fullAssemblyPath schemaModuleName outputFilePath
   |> Result.map (fun stats ->
     { schemaPath = Path.GetFullPath schemaPath
       assemblyPath = fullAssemblyPath

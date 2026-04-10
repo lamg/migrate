@@ -48,26 +48,32 @@ type private SchemaGenerationMetadata =
   { schemaHash: string
     dbFileName: string }
 
-let private deriveSchemaGenerationMetadata (schemaPath: string) : Result<SchemaGenerationMetadata, string> =
+let private deriveSchemaGenerationMetadata
+  (dbFileNamePrefix: string)
+  (schemaPath: string)
+  : Result<SchemaGenerationMetadata, string> =
   result {
+    if String.IsNullOrWhiteSpace dbFileNamePrefix then
+      return! Error "Database file name prefix is empty."
+
     let! schemaHash = computeShortSchemaHash schemaPath
-    let schemaDirectory = Path.GetDirectoryName(Path.GetFullPath schemaPath)
-
-    if String.IsNullOrWhiteSpace schemaDirectory then
-      return! Error $"Could not determine the schema directory for '{schemaPath}'."
-
-    let directoryName = DirectoryInfo(schemaDirectory).Name
 
     return
       { schemaHash = schemaHash
-        dbFileName = $"{directoryName}-{schemaHash}.sqlite" }
+        dbFileName = $"{dbFileNamePrefix}-{schemaHash}.sqlite" }
   }
 
-let private deriveDatabaseFileName (schemaPath: string) : Result<string, string> =
-  deriveSchemaGenerationMetadata schemaPath |> Result.map _.dbFileName
+let private deriveDatabaseFileName
+  (dbFileNamePrefix: string)
+  (schemaPath: string)
+  : Result<string, string> =
+  deriveSchemaGenerationMetadata dbFileNamePrefix schemaPath |> Result.map _.dbFileName
 
-let internal deriveDatabaseFileNameFromSourcePath (schemaPath: string) : Result<string, string> =
-  deriveDatabaseFileName schemaPath
+let internal deriveDatabaseFileNameFromSourcePath
+  (dbFileNamePrefix: string)
+  (schemaPath: string)
+  : Result<string, string> =
+  deriveDatabaseFileName dbFileNamePrefix schemaPath
 
 let private renderBoolLiteral (value: bool) = if value then "true" else "false"
 
@@ -412,19 +418,21 @@ let internal generateCodeFromTypes
 
 let internal generateCodeFromTypesWithDbFile
   (moduleName: string)
+  (dbFileNamePrefix: string)
   (schemaPath: string)
   (types: Type list)
   (outputFilePath: string)
   : Result<CodeGenStats, string> =
   result {
     let! schema = buildSchemaFromTypes types
-    let! metadata = deriveSchemaGenerationMetadata schemaPath
+    let! metadata = deriveSchemaGenerationMetadata dbFileNamePrefix schemaPath
 
     return! generateCode moduleName schema outputFilePath (Some metadata.dbFileName) (Some metadata.schemaHash)
   }
 
 let internal generateCodeFromAssemblyModuleWithDbFile
   (generatedModuleName: string)
+  (dbFileNamePrefix: string)
   (schemaPath: string)
   (assembly: Assembly)
   (schemaModuleName: string)
@@ -432,7 +440,7 @@ let internal generateCodeFromAssemblyModuleWithDbFile
   : Result<CodeGenStats, string> =
   result {
     let! schema = buildSchemaFromAssemblyModule assembly schemaModuleName
-    let! metadata = deriveSchemaGenerationMetadata schemaPath
+    let! metadata = deriveSchemaGenerationMetadata dbFileNamePrefix schemaPath
 
     return! generateCode generatedModuleName schema outputFilePath (Some metadata.dbFileName) (Some metadata.schemaHash)
   }

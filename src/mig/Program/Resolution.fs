@@ -82,7 +82,9 @@ module internal ProgramResolution =
     (currentDirectory: string)
     (schemaSourcePath: string)
     : Result<SchemaBoundDbPath, string> =
-    match deriveSchemaBoundDbFileName schemaSourcePath with
+    let dbFileNamePrefix = DirectoryInfo(currentDirectory).Name
+
+    match deriveSchemaBoundDbFileName dbFileNamePrefix schemaSourcePath with
     | Error message ->
       Error
         $"Could not infer new database automatically from schema source '{schemaSourcePath}' for `{commandName}`: {message}."

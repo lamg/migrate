@@ -30,10 +30,10 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
     |> List.map (validateNormalizedQueryByOrCreateAnnotation normalized)
 
   let firstError =
-    ([ upsertValidationResult ]
-     @ queryByValidationResults
-     @ queryLikeValidationResults
-     @ queryByOrCreateValidationResults)
+    [ upsertValidationResult ]
+    @ queryByValidationResults
+    @ queryLikeValidationResults
+    @ queryByOrCreateValidationResults
     |> List.tryFind (function
       | Error _ -> true
       | _ -> false)

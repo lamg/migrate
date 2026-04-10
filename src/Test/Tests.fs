@@ -127,7 +127,9 @@ let private deriveShortSchemaHashFromSourceFile (schemaPath: string) =
   Convert.ToHexString(hashBytes).ToLowerInvariant().Substring(0, 16)
 
 let private deriveDeterministicNewDbPathFromSchemaFile (directoryPath: string) (schemaPath: string) =
-  match deriveSchemaBoundDbFileName schemaPath with
+  let dbFileNamePrefix = DirectoryInfo(directoryPath).Name
+
+  match deriveSchemaBoundDbFileName dbFileNamePrefix schemaPath with
   | Ok dbFileName -> Path.Combine(directoryPath, dbFileName)
   | Error error -> failwith $"Expected schema path to produce a deterministic DB file name, got: {error}"
 
@@ -6785,11 +6787,10 @@ let ``build api derives schema-bound db file name from Schema fs path`` () =
     "module Schema\n\nopen MigLib.Db\n\n[<AutoIncPK \"id\">]\ntype Student = { id: int64; name: string }\n"
   )
 
-  match deriveSchemaBoundDbFileName schemaPath with
+  match deriveSchemaBoundDbFileName "my-app" schemaPath with
   | Error error -> failwith $"deriveSchemaBoundDbFileName failed: {error}"
   | Ok dbFileName ->
-    let expectedDbFile =
-      $"{DirectoryInfo(tempDir).Name}-{deriveShortSchemaHashFromSourceFile schemaPath}.sqlite"
+    let expectedDbFile = $"my-app-{deriveShortSchemaHashFromSourceFile schemaPath}.sqlite"
 
     Assert.Equal(expectedDbFile, dbFileName)
 
@@ -6811,13 +6812,12 @@ let ``build api generates db code from reflected types without sibling project f
     "module Schema\n\nopen MigLib.Db\n\n[<AutoIncPK \"id\">]\ntype ReflectionStudent = { id: int64; name: string; age: int64 }\n"
   )
 
-  match generateDbCodeFromTypes "Db" schemaPath [ typeof<ReflectionStudent> ] outputPath with
+  match generateDbCodeFromTypes "Db" "students-app" schemaPath [ typeof<ReflectionStudent> ] outputPath with
   | Error error -> failwith $"generateDbCodeFromTypes failed: {error}"
   | Ok stats ->
     let generated = File.ReadAllText outputPath
 
-    let expectedDbFile =
-      $"{DirectoryInfo(tempDir).Name}-{deriveShortSchemaHashFromSourceFile schemaPath}.sqlite"
+    let expectedDbFile = $"students-app-{deriveShortSchemaHashFromSourceFile schemaPath}.sqlite"
 
     Assert.Equal<string list>([ outputPath ], stats.GeneratedFiles)
     Assert.Contains("module Db", generated)
@@ -7061,7 +7061,13 @@ let ``codegen from assembly module emits inserts derived from module-level recor
   let assembly = typeof<SchemaReflectionFixture.Student>.Assembly
 
   match
-    generateCodeFromAssemblyModuleWithDbFile "Generated" schemaPath assembly "SchemaReflectionFixture" outputPath
+    generateCodeFromAssemblyModuleWithDbFile
+      "Generated"
+      "seed-reflection"
+      schemaPath
+      assembly
+      "SchemaReflectionFixture"
+      outputPath
   with
   | Error error -> failwith $"Expected codegen from assembly module to succeed, got: {error}"
   | Ok _ ->

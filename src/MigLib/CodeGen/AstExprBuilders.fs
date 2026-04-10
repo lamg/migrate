@@ -82,7 +82,7 @@ let generateAugmentationCode typeName (members: WidgetBuilder<MemberDefn> seq) =
   let oak =
     Ast.Oak() {
       AnonymousModule() {
-        Augmentation(typeName) {
+        Augmentation typeName {
           for memberDef in members do
             memberDef
         }

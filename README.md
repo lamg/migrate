@@ -79,7 +79,7 @@ mig --help
 
 Assuming:
 
-- an existing SQLite database named `<dir>-<old-hash>.sqlite`
+- an existing SQLite database named `<app-name>-<old-hash>.sqlite`
 - a compiled generated `Db` module produced from `Schema.fs`
 - the recommended `Schema.fsproj` convention above
 
@@ -176,7 +176,7 @@ let startRuntime cancellationToken =
 
 ## Commands
 
-- `mig codegen` - Generate `Db.fs` from `Schema.fs` plus the compiled schema module, and emit a `DbFile` literal for the schema-bound SQLite filename.
+- `mig codegen` - Generate `Db.fs` from `Schema.fs` plus the compiled schema module, and emit a `DbFile` literal for the schema-bound SQLite filename using the caller-supplied app/database name prefix.
 - `mig init` - Create a schema-matched database from the compiled generated module and apply seed inserts when the database does not exist yet.
 - `mig plan` - Print inferred paths, schema diff summary, and replay prerequisites without mutating databases.
 - `mig migrate` - Create the new database, bulk-copy data, and start recording new writes on the old database.

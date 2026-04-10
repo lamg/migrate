@@ -1,6 +1,7 @@
 namespace Mig
 
 open Argu
+open System
 open System.IO
 open MigLib.Build
 open MigLib.Util
@@ -23,9 +24,10 @@ module internal ProgramBuildCommands =
             (args.TryGetResult CodegenArgs.Output)
 
         let schemaPath = defaultSchemaFsPathForCurrentDirectory currentDirectory
+        let dbFileNamePrefix = DirectoryInfo(currentDirectory).Name
 
         let! report =
-          runCodegenFromAssemblyModulePath generatedModuleName schemaPath assemblyPath schemaModuleName outputPath
+          runCodegenFromAssemblyModulePath generatedModuleName dbFileNamePrefix schemaPath assemblyPath schemaModuleName outputPath
 
         writeCodegenReport (printfn "%s") report
         return 0
