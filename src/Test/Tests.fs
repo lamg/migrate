@@ -36,6 +36,23 @@ let private mkColumn name columnType constraints =
     enumLikeDu = None
     unitOfMeasure = None }
 
+[<Fact>]
+let ``txn builder handles deep recursive bind chains without stack overflow`` () =
+  let rec buildSteps remaining current =
+    txn {
+      if remaining = 0 then
+        return current
+      else
+        let! next = txn { return current + 1 }
+        return! buildSteps (remaining - 1) next
+    }
+
+  let result = buildSteps 50000 0 Unchecked.defaultof<SqliteTransaction> |> fun task -> task.GetAwaiter().GetResult()
+
+  match result with
+  | Ok value -> Assert.Equal(50000, value)
+  | Error ex -> failwith ex.Message
+
 let private mkTable name columns constraints =
   { name = name
     previousName = None

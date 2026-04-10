@@ -19,13 +19,19 @@ module DbTransactions =
     let result (x: 'a) : TxnStep<'a> = fun _ -> Task.FromResult(Ok x)
     let returnFrom (m: TxnStep<'a>) : TxnStep<'a> = m
 
+    let private continueAsync (next: unit -> Task<Result<'a, SqliteException>>) : Task<Result<'a, SqliteException>> =
+      task {
+        do! Task.Yield()
+        return! next ()
+      }
+
     let bind (m: TxnStep<'a>) (f: 'a -> TxnStep<'b>) : TxnStep<'b> =
       fun txn ->
         task {
           let! result = m txn
 
           match result with
-          | Ok value -> return! f value txn
+          | Ok value -> return! continueAsync (fun () -> f value txn)
           | Error ex -> return Error ex
         }
 
@@ -33,7 +39,7 @@ module DbTransactions =
       fun txn ->
         task {
           let! value = m
-          return! f value txn
+          return! continueAsync (fun () -> f value txn)
         }
 
     let bindTaskResult (m: Task<Result<'a, 'e>>) (f: 'a -> TxnStep<'b>) : TxnStep<'b> =
@@ -42,7 +48,7 @@ module DbTransactions =
           let! result = m
 
           match result with
-          | Ok value -> return! f value txn
+          | Ok value -> return! continueAsync (fun () -> f value txn)
           | Error error -> return Error(toSqliteException error)
         }
 

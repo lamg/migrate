@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.1] - 2026-04-10
+
+Fixed:
+
+- **Deep Transaction Bind Chains**: avoid stack overflows in very large `txn` workflows
+  - `TxnStep.bind`, `bindTask`, and `bindTaskResult` now yield before continuing into next step
+  - prevents deep recursive transaction pipelines from exhausting stack during large insert workloads
+  - adds regression test covering a `50000`-step recursive `txn` chain
+
 ## [6.0.0] - 2026-04-10
 
 Changed:
