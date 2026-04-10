@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-04-10
+
+Changed:
+
+- **Explicit Schema-Bound DB Name Prefix**: code generation no longer derives the SQLite file name prefix from the schema directory
+  - `MigLib.Build` now requires callers to pass the desired database/app name prefix when deriving schema-bound database file names
+  - compiled-schema `generateDbCode*` and `runCodegen*` APIs now require that prefix explicitly
+  - generated `DbFile` values now use the caller-supplied prefix, producing names like `<app-name>-<schema-hash>.sqlite`
+  - `mig codegen` and schema-bound path resolution now pass an explicit prefix based on the working directory name
+
 ## [5.4.0] - 2026-04-07
 
 Added:
