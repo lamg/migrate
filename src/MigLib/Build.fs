@@ -12,10 +12,11 @@ open MigLib.Db
 open MigLib.Util
 
 let deriveSchemaBoundDbFileName
-  (dbFileNamePrefix: string)
+  (dbApp: string)
+  (instance: string option)
   (schemaPath: string)
   : Result<string, string> =
-  deriveDatabaseFileNameFromSourcePath dbFileNamePrefix schemaPath
+  deriveDatabaseFileNameFromSourcePath dbApp instance schemaPath
 
 let private formatExceptionDetails (ex: exn) =
   let rec loop (current: exn) (acc: string list) =
@@ -44,26 +45,26 @@ let private formatExceptionDetails (ex: exn) =
 
 let generateDbCodeFromTypes
   (moduleName: string)
-  (dbFileNamePrefix: string)
+  (dbApp: string)
   (schemaPath: string)
   (types: Type list)
   (outputFilePath: string)
   : Result<CodeGenStats, string> =
-  generateCodeFromTypesWithDbFile moduleName dbFileNamePrefix schemaPath types outputFilePath
+  generateCodeFromTypesWithDbFile moduleName dbApp schemaPath types outputFilePath
 
 let generateDbCodeFromAssemblyModule
   (generatedModuleName: string)
-  (dbFileNamePrefix: string)
+  (dbApp: string)
   (schemaPath: string)
   (assembly: Assembly)
   (schemaModuleName: string)
   (outputFilePath: string)
   : Result<CodeGenStats, string> =
-  generateCodeFromAssemblyModuleWithDbFile generatedModuleName dbFileNamePrefix schemaPath assembly schemaModuleName outputFilePath
+  generateCodeFromAssemblyModuleWithDbFile generatedModuleName dbApp schemaPath assembly schemaModuleName outputFilePath
 
 let generateDbCodeFromAssemblyModulePath
   (generatedModuleName: string)
-  (dbFileNamePrefix: string)
+  (dbApp: string)
   (schemaPath: string)
   (assemblyPath: string)
   (schemaModuleName: string)
@@ -79,7 +80,7 @@ let generateDbCodeFromAssemblyModulePath
     else
       try
         let assembly = Assembly.LoadFrom fullAssemblyPath
-        generateDbCodeFromAssemblyModule generatedModuleName dbFileNamePrefix schemaPath assembly schemaModuleName outputFilePath
+        generateDbCodeFromAssemblyModule generatedModuleName dbApp schemaPath assembly schemaModuleName outputFilePath
       with ex ->
         Error $"Could not load compiled assembly '{fullAssemblyPath}': {ex.Message}"
 
@@ -109,13 +110,13 @@ let writeCodegenReport (writeLine: string -> unit) (report: CodegenReport) =
 
 let runCodegenFromAssemblyModule
   (generatedModuleName: string)
-  (dbFileNamePrefix: string)
+  (dbApp: string)
   (schemaPath: string)
   (assembly: Assembly)
   (schemaModuleName: string)
   (outputFilePath: string)
   : Result<CodegenReport, string> =
-  generateDbCodeFromAssemblyModule generatedModuleName dbFileNamePrefix schemaPath assembly schemaModuleName outputFilePath
+  generateDbCodeFromAssemblyModule generatedModuleName dbApp schemaPath assembly schemaModuleName outputFilePath
   |> Result.map (fun stats ->
     { schemaPath = Path.GetFullPath schemaPath
       assemblyPath = assembly.Location
@@ -126,7 +127,7 @@ let runCodegenFromAssemblyModule
 
 let runCodegenFromAssemblyModulePath
   (generatedModuleName: string)
-  (dbFileNamePrefix: string)
+  (dbApp: string)
   (schemaPath: string)
   (assemblyPath: string)
   (schemaModuleName: string)
@@ -134,7 +135,7 @@ let runCodegenFromAssemblyModulePath
   : Result<CodegenReport, string> =
   let fullAssemblyPath = Path.GetFullPath assemblyPath
 
-  generateDbCodeFromAssemblyModulePath generatedModuleName dbFileNamePrefix schemaPath fullAssemblyPath schemaModuleName outputFilePath
+  generateDbCodeFromAssemblyModulePath generatedModuleName dbApp schemaPath fullAssemblyPath schemaModuleName outputFilePath
   |> Result.map (fun stats ->
     { schemaPath = Path.GetFullPath schemaPath
       assemblyPath = fullAssemblyPath
@@ -153,15 +154,22 @@ type InitDbReport =
 
 let private resolveInitDbPath
   (databaseDirectory: string)
+  (instance: string option)
   (moduleName: string)
   (generatedModule: GeneratedSchemaModule)
   : Result<string, string> =
-  match generatedModule.dbFile with
-  | Some dbFileName ->
-    resolveDatabaseFilePath databaseDirectory dbFileName
-    |> Result.mapError (fun message ->
-      $"Could not resolve DbFile '{dbFileName}' for compiled module '{moduleName}': {message}")
-  | None -> Error $"Compiled module '{moduleName}' does not define DbFile."
+  result {
+    match generatedModule.dbApp, generatedModule.schemaHash with
+    | Some dbApp, Some schemaHash ->
+      let! dbFileName = buildSchemaBoundDbFileName dbApp instance schemaHash
+
+      return!
+        resolveDatabaseFilePath databaseDirectory dbFileName
+        |> Result.mapError (fun message ->
+          $"Could not resolve database file '{dbFileName}' for compiled module '{moduleName}': {message}")
+    | None, _ -> return! Error $"Compiled module '{moduleName}' does not define DbApp."
+    | _, None -> return! Error $"Compiled module '{moduleName}' does not define SchemaHash."
+  }
 
 let getInitDbReportLines (report: InitDbReport) =
   let header = if report.skipped then "Init skipped." else "Init complete."
@@ -208,12 +216,13 @@ let private mapTaskResultError (mapError: 'error -> 'mappedError) (operation: Ta
 let private runInitWithGeneratedModule
   (assemblyPath: string)
   (databaseDirectory: string)
+  (instance: string option)
   (moduleName: string)
   (generatedModule: GeneratedSchemaModule)
   (initOperation: string -> Task<Result<InitResult, SqliteException>>)
   : Task<Result<InitDbReport, string>> =
   taskResult {
-    let! newDbPath = resolveInitDbPath databaseDirectory moduleName generatedModule
+    let! newDbPath = resolveInitDbPath databaseDirectory instance moduleName generatedModule
 
     if File.Exists newDbPath then
       return buildInitDbReport assemblyPath moduleName generatedModule newDbPath 0L true
@@ -225,6 +234,7 @@ let private runInitWithGeneratedModule
 
 let initDbFromAssemblyModule
   (databaseDirectory: string)
+  (instance: string option)
   (assembly: Assembly)
   (moduleName: string)
   : Task<Result<InitDbReport, string>> =
@@ -235,6 +245,7 @@ let initDbFromAssemblyModule
       runInitWithGeneratedModule
         assembly.Location
         databaseDirectory
+        instance
         moduleName
         generatedModule
         (runInitWithSchema generatedModule.schema)
@@ -244,6 +255,7 @@ let initDbFromAssemblyModule
 
 let initDbFromAssemblyModulePath
   (databaseDirectory: string)
+  (instance: string option)
   (assemblyPath: string)
   (moduleName: string)
   : Task<Result<InitDbReport, string>> =
@@ -257,6 +269,7 @@ let initDbFromAssemblyModulePath
       runInitWithGeneratedModule
         fullAssemblyPath
         databaseDirectory
+        instance
         moduleName
         generatedModule
         (runInitFromAssemblyPath fullAssemblyPath moduleName)

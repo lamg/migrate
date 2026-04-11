@@ -8,6 +8,7 @@ module ProgramArgs =
     | [<AltCommandLine("-d")>] Dir of path: string
     | [<AltCommandLine("-a")>] Assembly of path: string
     | [<AltCommandLine("-m")>] Module of name: string
+    | [<AltCommandLine("-i")>] Instance of name: string
 
     interface IArgParserTemplate with
       member this.Usage =
@@ -15,12 +16,14 @@ module ProgramArgs =
         | Dir _ -> "directory that contains existing sqlite files for the migration (default: current directory)"
         | Assembly _ -> "compiled assembly that contains a generated Db-style module"
         | Module _ -> "compiled module name when using --assembly (default: Db)"
+        | Instance _ -> "database instance name used in <app>-<instance>-<hash>.sqlite (default: main)"
 
   [<CliPrefix(CliPrefix.DoubleDash)>]
   type OfflineArgs =
     | [<AltCommandLine("-d")>] Dir of path: string
     | [<AltCommandLine("-a")>] Assembly of path: string
     | [<AltCommandLine("-m")>] Module of name: string
+    | [<AltCommandLine("-i")>] Instance of name: string
 
     interface IArgParserTemplate with
       member this.Usage =
@@ -28,12 +31,14 @@ module ProgramArgs =
         | Dir _ -> "directory that contains existing sqlite files for the migration (default: current directory)"
         | Assembly _ -> "compiled assembly that contains a generated Db-style module"
         | Module _ -> "compiled module name when using --assembly (default: Db)"
+        | Instance _ -> "database instance name used in <app>-<instance>-<hash>.sqlite (default: main)"
 
   [<CliPrefix(CliPrefix.DoubleDash)>]
   type InitArgs =
     | [<AltCommandLine("-d")>] Dir of path: string
     | [<AltCommandLine("-a")>] Assembly of path: string
     | [<AltCommandLine("-m")>] Module of name: string
+    | [<AltCommandLine("-i")>] Instance of name: string
 
     interface IArgParserTemplate with
       member this.Usage =
@@ -42,12 +47,14 @@ module ProgramArgs =
           "directory that contains the target sqlite location for the generated Db module (default: current directory)"
         | Assembly _ -> "compiled assembly that contains a generated Db-style module"
         | Module _ -> "compiled module name when using --assembly (default: Db)"
+        | Instance _ -> "database instance name used in <app>-<instance>-<hash>.sqlite (default: main)"
 
   [<CliPrefix(CliPrefix.DoubleDash)>]
   type PlanArgs =
     | [<AltCommandLine("-d")>] Dir of path: string
     | [<AltCommandLine("-a")>] Assembly of path: string
     | [<AltCommandLine("-m")>] Module of name: string
+    | [<AltCommandLine("-i")>] Instance of name: string
 
     interface IArgParserTemplate with
       member this.Usage =
@@ -55,12 +62,14 @@ module ProgramArgs =
         | Dir _ -> "directory that contains existing sqlite files for the migration (default: current directory)"
         | Assembly _ -> "compiled assembly that contains a generated Db-style module"
         | Module _ -> "compiled module name when using --assembly (default: Db)"
+        | Instance _ -> "database instance name used in <app>-<instance>-<hash>.sqlite (default: main)"
 
   [<CliPrefix(CliPrefix.DoubleDash)>]
   type DrainArgs =
     | [<AltCommandLine("-d")>] Dir of path: string
     | [<AltCommandLine("-a")>] Assembly of path: string
     | [<AltCommandLine("-m")>] Module of name: string
+    | [<AltCommandLine("-i")>] Instance of name: string
 
     interface IArgParserTemplate with
       member this.Usage =
@@ -68,12 +77,14 @@ module ProgramArgs =
         | Dir _ -> "directory that contains Schema.fs and <dir>-<hash>.sqlite files (default: current directory)"
         | Assembly _ -> "compiled assembly that contains a generated Db-style module"
         | Module _ -> "compiled module name when using --assembly (default: Db)"
+        | Instance _ -> "database instance name used in <app>-<instance>-<hash>.sqlite (default: main)"
 
   [<CliPrefix(CliPrefix.DoubleDash)>]
   type CutoverArgs =
     | [<AltCommandLine("-d")>] Dir of path: string
     | [<AltCommandLine("-a")>] Assembly of path: string
     | [<AltCommandLine("-m")>] Module of name: string
+    | [<AltCommandLine("-i")>] Instance of name: string
 
     interface IArgParserTemplate with
       member this.Usage =
@@ -81,12 +92,14 @@ module ProgramArgs =
         | Dir _ -> "directory that contains Schema.fs and <dir>-<hash>.sqlite files (default: current directory)"
         | Assembly _ -> "compiled assembly that contains a generated Db-style module"
         | Module _ -> "compiled module name when using --assembly (default: Db)"
+        | Instance _ -> "database instance name used in <app>-<instance>-<hash>.sqlite (default: main)"
 
   [<CliPrefix(CliPrefix.DoubleDash)>]
   type ArchiveOldArgs =
     | [<AltCommandLine("-d")>] Dir of path: string
     | [<AltCommandLine("-a")>] Assembly of path: string
     | [<AltCommandLine("-m")>] Module of name: string
+    | [<AltCommandLine("-i")>] Instance of name: string
 
     interface IArgParserTemplate with
       member this.Usage =
@@ -94,12 +107,14 @@ module ProgramArgs =
         | Dir _ -> "directory that contains Schema.fs and <dir>-<hash>.sqlite files (default: current directory)"
         | Assembly _ -> "compiled assembly that contains a generated Db-style module"
         | Module _ -> "compiled module name when using --assembly (default: Db)"
+        | Instance _ -> "database instance name used in <app>-<instance>-<hash>.sqlite (default: main)"
 
   [<CliPrefix(CliPrefix.DoubleDash)>]
   type ResetArgs =
     | [<AltCommandLine("-d")>] Dir of path: string
     | [<AltCommandLine("-a")>] Assembly of path: string
     | [<AltCommandLine("-m")>] Module of name: string
+    | [<AltCommandLine("-i")>] Instance of name: string
     | Dry_Run
 
     interface IArgParserTemplate with
@@ -108,6 +123,7 @@ module ProgramArgs =
         | Dir _ -> "directory that contains Schema.fs and <dir>-<hash>.sqlite files (default: current directory)"
         | Assembly _ -> "compiled assembly that contains a generated Db-style module"
         | Module _ -> "compiled module name when using --assembly (default: Db)"
+        | Instance _ -> "database instance name used in <app>-<instance>-<hash>.sqlite (default: main)"
         | Dry_Run -> "print reset impact without dropping old migration tables or deleting the new database"
 
   [<CliPrefix(CliPrefix.DoubleDash)>]
@@ -115,6 +131,7 @@ module ProgramArgs =
     | [<AltCommandLine("-d")>] Dir of path: string
     | [<AltCommandLine("-a")>] Assembly of path: string
     | [<AltCommandLine("-m")>] Module of name: string
+    | [<AltCommandLine("-i")>] Instance of name: string
 
     interface IArgParserTemplate with
       member this.Usage =
@@ -122,6 +139,7 @@ module ProgramArgs =
         | Dir _ -> "directory that contains Schema.fs and <dir>-<hash>.sqlite files (default: current directory)"
         | Assembly _ -> "compiled assembly that contains a generated Db-style module"
         | Module _ -> "compiled module name when using --assembly (default: Db)"
+        | Instance _ -> "database instance name used in <app>-<instance>-<hash>.sqlite (default: main)"
 
   [<CliPrefix(CliPrefix.DoubleDash)>]
   type CodegenArgs =

@@ -48,7 +48,7 @@ module internal ProgramBuildCommands =
             (args.TryGetResult InitArgs.Module)
 
         let! report =
-          initDbFromAssemblyModulePath currentDirectory assemblyPath moduleName
+          initDbFromAssemblyModulePath currentDirectory (args.TryGetResult InitArgs.Instance) assemblyPath moduleName
           |> fun task -> task.Result
 
         writeInitDbReport (printfn "%s") report

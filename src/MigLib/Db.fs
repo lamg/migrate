@@ -1,10 +1,65 @@
 module MigLib.Db
 
+open System
+open System.IO
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
+open MigLib.Util
 
 [<Literal>]
 let Rfc3339UtcNow = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'utc')"
+
+[<Literal>]
+let DefaultDatabaseInstance = "main"
+
+let resolveDatabaseInstance (instance: string option) =
+  match instance with
+  | Some value when not (String.IsNullOrWhiteSpace value) -> value.Trim()
+  | _ -> DefaultDatabaseInstance
+
+let private validateDatabaseFileSegment label (value: string) =
+  let trimmed = value.Trim()
+
+  if String.IsNullOrWhiteSpace trimmed then
+    Error $"Database {label} is empty."
+  elif trimmed.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 then
+    Error $"Database {label} '{trimmed}' contains invalid file name characters."
+  else
+    Ok trimmed
+
+let buildSchemaBoundDbFileName (app: string) (instance: string option) (schemaHash: string) : Result<string, string> =
+  result {
+    let! validatedApp = validateDatabaseFileSegment "app" app
+    let! validatedInstance = resolveDatabaseInstance instance |> validateDatabaseFileSegment "instance"
+
+    if String.IsNullOrWhiteSpace schemaHash then
+      return! Error "Schema hash is empty."
+    else
+      return $"{validatedApp}-{validatedInstance}-{schemaHash}.sqlite"
+  }
+
+let tryParseSchemaBoundDbFileName (app: string) (instance: string option) (filePathOrName: string) =
+  result {
+    let! validatedApp = validateDatabaseFileSegment "app" app
+    let! validatedInstance = resolveDatabaseInstance instance |> validateDatabaseFileSegment "instance"
+    let fileName = Path.GetFileName filePathOrName
+
+    if not (fileName.EndsWith(".sqlite", StringComparison.OrdinalIgnoreCase)) then
+      return None
+    else
+      let expectedPrefix = $"{validatedApp}-{validatedInstance}-"
+      let fileStem = Path.GetFileNameWithoutExtension fileName
+
+      if not (fileStem.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase)) then
+        return None
+      else
+        let hashSegment = fileStem.Substring expectedPrefix.Length
+
+        if hashSegment.Length = 16 && (hashSegment |> Seq.forall Uri.IsHexDigit) then
+          return Some hashSegment
+        else
+          return None
+  }
 
 type AutoIncPKAttribute = DbAttributes.AutoIncPKAttribute
 type PKAttribute = DbAttributes.PKAttribute

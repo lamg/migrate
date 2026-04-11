@@ -2,14 +2,22 @@ module CompiledSchemaFixture
 
 open Mig.DeclarativeMigrations.Types
 open Mig.HotMigration
+open MigLib.Db
+open MigLib.Util
 
 type Marker = class end
 
 [<Literal>]
-let DbFile = "compiled-fixture.sqlite"
+let DbApp = "compiled-fixture"
+
+[<Literal>]
+let DefaultDbInstance = "main"
 
 [<Literal>]
 let SchemaHash = "0123456789abcdef"
+
+let DbFileForInstance (instance: string option) =
+  buildSchemaBoundDbFileName DbApp instance SchemaHash |> ResultEx.orFail invalidOp
 
 let SchemaIdentity: SchemaIdentity =
   { schemaHash = SchemaHash

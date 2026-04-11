@@ -132,6 +132,12 @@ module internal HotMigrationMigration =
           Error(SqliteException($"Configured database file name must be a file name only, not a path: {dbFileName}", 0))
       else
         let resolvedDirectory = Path.GetFullPath sqliteDirectory
+        let dbFileStem = Path.GetFileNameWithoutExtension dbFileName
+
+        let dbFilePrefix =
+          match dbFileStem.LastIndexOf '-' with
+          | lastDashIndex when lastDashIndex > 0 -> Some dbFileStem[.. lastDashIndex - 1]
+          | _ -> None
 
         if not (Directory.Exists resolvedDirectory) then
           return! Error(SqliteException($"Database directory '{resolvedDirectory}' does not exist", 0))
@@ -141,6 +147,12 @@ module internal HotMigrationMigration =
           let candidatePaths =
             Directory.GetFiles(resolvedDirectory, "*.sqlite")
             |> Array.filter (fun path -> not (String.Equals(path, currentDbPath, StringComparison.OrdinalIgnoreCase)))
+            |> Array.filter (fun path ->
+              match dbFilePrefix with
+              | None -> true
+              | Some prefix ->
+                let candidateStem = Path.GetFileNameWithoutExtension path
+                candidateStem.StartsWith($"{prefix}-", StringComparison.OrdinalIgnoreCase))
             |> Array.sort
             |> Array.toList
 

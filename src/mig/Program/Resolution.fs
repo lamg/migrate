@@ -27,22 +27,17 @@ module internal ProgramResolution =
   let private isHexHashSegment (value: string) =
     value.Length = 16 && value |> Seq.forall Uri.IsHexDigit
 
-  let private isDirectoryHashNamedSqlite (directoryName: string) (path: string) =
-    if not (Path.GetExtension(path).Equals(".sqlite", StringComparison.OrdinalIgnoreCase)) then
-      false
-    else
-      let fileStem = Path.GetFileNameWithoutExtension path
-      let prefix = $"{directoryName}-"
+  let resolveInstanceName (candidate: string option) = resolveDatabaseInstance candidate
 
-      if fileStem.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) then
-        let hashSegment = fileStem.Substring prefix.Length
-        isHexHashSegment hashSegment
-      else
-        false
+  let private isAppInstanceHashNamedSqlite (appName: string) (instance: string option) (path: string) =
+    match tryParseSchemaBoundDbFileName appName instance path with
+    | Ok(Some hashSegment) -> isHexHashSegment hashSegment
+    | _ -> false
 
   let inferOldDbFromCurrentDirectory
     (currentDirectory: string)
-    (directoryName: string)
+    (appName: string)
+    (instance: string option)
     (excludePath: string option)
     : Result<string, string> =
     let shouldExclude (path: string) =
@@ -56,7 +51,9 @@ module internal ProgramResolution =
       |> Array.sort
 
     let candidates =
-      sqliteFiles |> Array.filter (isDirectoryHashNamedSqlite directoryName)
+      sqliteFiles |> Array.filter (isAppInstanceHashNamedSqlite appName instance)
+
+    let resolvedInstance = resolveInstanceName instance
 
     if candidates.Length = 1 then
       Ok candidates[0]
@@ -64,15 +61,13 @@ module internal ProgramResolution =
       let candidateList = String.concat ", " candidates
 
       Error
-        $"Could not infer old database automatically. Found multiple candidates matching '{directoryName}-<old-hash>.sqlite': {candidateList}."
+        $"Could not infer old database automatically. Found multiple candidates matching '{appName}-{resolvedInstance}-<old-hash>.sqlite': {candidateList}."
     elif sqliteFiles.Length > 0 then
-      let discoveredList = String.concat ", " sqliteFiles
-
       Error
-        $"Could not infer old database automatically. Found sqlite files that do not match '{directoryName}-<old-hash>.sqlite': {discoveredList}."
+        $"Could not infer old database automatically. No sqlite file matched '{appName}-{resolvedInstance}-<old-hash>.sqlite' in {currentDirectory}."
     else
       Error
-        $"Could not infer old database automatically. Expected exactly one source matching '{directoryName}-<old-hash>.sqlite' in {currentDirectory}."
+        $"Could not infer old database automatically. Expected exactly one source matching '{appName}-{resolvedInstance}-<old-hash>.sqlite' in {currentDirectory}."
 
   let private getSchemaSourceCandidates (currentDirectory: string) =
     [ Path.Combine(currentDirectory, "Schema.fs") ]
@@ -80,11 +75,12 @@ module internal ProgramResolution =
   let private resolveSchemaBoundDbPathFromKnownSource
     (commandName: string)
     (currentDirectory: string)
+    (instance: string option)
     (schemaSourcePath: string)
     : Result<SchemaBoundDbPath, string> =
-    let dbFileNamePrefix = DirectoryInfo(currentDirectory).Name
+    let dbApp = DirectoryInfo(currentDirectory).Name
 
-    match deriveSchemaBoundDbFileName dbFileNamePrefix schemaSourcePath with
+    match deriveSchemaBoundDbFileName dbApp instance schemaSourcePath with
     | Error message ->
       Error
         $"Could not infer new database automatically from schema source '{schemaSourcePath}' for `{commandName}`: {message}."
@@ -96,12 +92,13 @@ module internal ProgramResolution =
   let resolveDefaultSchemaBoundDbPath
     (commandName: string)
     (currentDirectory: string)
+    (instance: string option)
     : Result<SchemaBoundDbPath, string> =
     let existingSchemaSource =
       getSchemaSourceCandidates currentDirectory |> List.tryFind File.Exists
 
     match existingSchemaSource with
-    | Some schemaSourcePath -> resolveSchemaBoundDbPathFromKnownSource commandName currentDirectory schemaSourcePath
+    | Some schemaSourcePath -> resolveSchemaBoundDbPathFromKnownSource commandName currentDirectory instance schemaSourcePath
     | None ->
       let lookedFor =
         getSchemaSourceCandidates currentDirectory
@@ -335,6 +332,7 @@ module internal ProgramResolution =
   let resolveCompiledModuleForCommand
     (commandName: string)
     (currentDirectory: string)
+    (instance: string option)
     (assemblyPath: string)
     (moduleName: string)
     : Result<ResolvedCompiledModule, string> =
@@ -347,13 +345,13 @@ module internal ProgramResolution =
           $"Could not load compiled generated module '{moduleName}' from '{assemblyPath}' for `{commandName}`: {message}")
 
       let! dbFileName =
-        generatedModule.dbFile
-        |> ResultEx.requireSomeWith (fun () ->
-          $"Compiled generated module '{moduleName}' from '{assemblyPath}' does not define DbFile for `{commandName}`.")
+        resolveGeneratedModuleDbFileName generatedModule instance
+        |> Result.mapError (fun message ->
+          $"Could not resolve compiled generated module '{moduleName}' from '{assemblyPath}' for `{commandName}`: {message}")
 
       let! dbPath =
         resolveDatabaseFilePath currentDirectory dbFileName
-        |> Result.mapError (fun message -> $"Could not resolve DbFile '{dbFileName}' for `{commandName}`: {message}")
+        |> Result.mapError (fun message -> $"Could not resolve database file '{dbFileName}' for `{commandName}`: {message}")
 
       return
         { assemblyPath = fullAssemblyPath
@@ -365,12 +363,13 @@ module internal ProgramResolution =
   let resolveRequiredCompiledModuleForCommand
     (commandName: string)
     (currentDirectory: string)
+    (instance: string option)
     (assemblyPath: string option)
     (moduleName: string option)
     : Result<ResolvedCompiledModule, string> =
     result {
       let! assemblyPath, moduleName = resolveRequiredCompiledMode commandName currentDirectory assemblyPath moduleName
-      return! resolveCompiledModuleForCommand commandName currentDirectory assemblyPath moduleName
+      return! resolveCompiledModuleForCommand commandName currentDirectory instance assemblyPath moduleName
     }
 
   let printCompiledModuleInfo (compiledModule: ResolvedCompiledModule) =
@@ -384,32 +383,35 @@ module internal ProgramResolution =
   let private resolveTargetDbPathForCommand
     (commandName: string)
     (currentDirectory: string)
+    (instance: string option)
     (compiledMode: Result<(string * string) option, string>)
     : Result<string, string> =
     match compiledMode with
     | Error message -> Error message
     | Ok(Some(assemblyPath, moduleName)) ->
-      resolveCompiledModuleForCommand commandName currentDirectory assemblyPath moduleName
+      resolveCompiledModuleForCommand commandName currentDirectory instance assemblyPath moduleName
       |> Result.map _.newDbPath
     | Ok None ->
-      resolveDefaultSchemaBoundDbPath commandName currentDirectory
+      resolveDefaultSchemaBoundDbPath commandName currentDirectory instance
       |> Result.map _.path
 
   let inferOldDbWithExcludedTarget
     (currentDirectory: string)
-    (directoryName: string)
+    (appName: string)
+    (instance: string option)
     (newDb: string)
     : Result<string, string> =
-    inferOldDbFromCurrentDirectory currentDirectory directoryName (Some newDb)
+    inferOldDbFromCurrentDirectory currentDirectory appName instance (Some newDb)
     |> Result.mapError (fun message ->
       $"{message} Excluding target '{newDb}'. Use `-d` to select a different directory.")
 
   let resolveMigrationSourceDb
     (currentDirectory: string)
-    (directoryName: string)
+    (appName: string)
+    (instance: string option)
     (newDb: string)
     : Result<string option, string> =
-    match inferOldDbWithExcludedTarget currentDirectory directoryName newDb with
+    match inferOldDbWithExcludedTarget currentDirectory appName instance newDb with
     | Ok old -> Ok(Some old)
     | Error _ when File.Exists newDb -> Ok None
     | Error message -> Error message
@@ -417,15 +419,16 @@ module internal ProgramResolution =
   let private resolveOptionalTargetDbPathForCommand
     (commandName: string)
     (currentDirectory: string)
+    (instance: string option)
     (compiledMode: (string * string) option)
     : Result<string option, string> =
     result {
       match compiledMode with
       | Some _ ->
-        let! inferredTarget = resolveTargetDbPathForCommand commandName currentDirectory (Ok compiledMode)
+        let! inferredTarget = resolveTargetDbPathForCommand commandName currentDirectory instance (Ok compiledMode)
         return Some inferredTarget
       | None ->
-        match resolveDefaultSchemaBoundDbPath commandName currentDirectory with
+        match resolveDefaultSchemaBoundDbPath commandName currentDirectory instance with
         | Ok inferredTarget -> return Some inferredTarget.path
         | Error _ -> return None
     }
@@ -433,18 +436,20 @@ module internal ProgramResolution =
   let resolveCompiledModeTargetDbPathForCommand
     (commandName: string)
     (currentDirectory: string)
+    (instance: string option)
     (assemblyPath: string option)
     (moduleName: string option)
     : Result<string, string> =
-    resolveTargetDbPathForCommand commandName currentDirectory (resolveCompiledMode assemblyPath moduleName)
+    resolveTargetDbPathForCommand commandName currentDirectory instance (resolveCompiledMode assemblyPath moduleName)
 
   let resolveOptionalCompiledModeTargetDbPathForCommand
     (commandName: string)
     (currentDirectory: string)
+    (instance: string option)
     (assemblyPath: string option)
     (moduleName: string option)
     : Result<string option, string> =
     result {
       let! compiledMode = resolveCompiledMode assemblyPath moduleName
-      return! resolveOptionalTargetDbPathForCommand commandName currentDirectory compiledMode
+      return! resolveOptionalTargetDbPathForCommand commandName currentDirectory instance compiledMode
     }

@@ -105,17 +105,22 @@ module internal ProgramMigrationCommands =
     let result =
       result {
         let! currentDirectory = resolveCommandDirectory "migrate" (args.TryGetResult MigrateArgs.Dir)
-        let directoryName = DirectoryInfo(currentDirectory).Name
+        let instance = args.TryGetResult MigrateArgs.Instance
 
         let! compiledModule =
           resolveRequiredCompiledModuleForCommand
             "migrate"
             currentDirectory
+            instance
             (args.TryGetResult MigrateArgs.Assembly)
             (args.TryGetResult MigrateArgs.Module)
 
+        let! dbApp =
+          compiledModule.generatedModule.dbApp
+          |> ResultEx.requireSome "Compiled generated module does not define DbApp for `migrate`."
+
         let newDb = compiledModule.newDbPath
-        let! sourceDb = resolveMigrationSourceDb currentDirectory directoryName newDb
+        let! sourceDb = resolveMigrationSourceDb currentDirectory dbApp instance newDb
 
         match sourceDb with
         | None ->
@@ -145,23 +150,27 @@ module internal ProgramMigrationCommands =
 
       match currentDirectoryResult with
       | Ok currentDirectory ->
-        let directoryName = DirectoryInfo(currentDirectory).Name
+        let instance = args.TryGetResult MigrateArgs.Instance
 
         match
           resolveRequiredCompiledModuleForCommand
             "migrate"
             currentDirectory
+            instance
             (args.TryGetResult MigrateArgs.Assembly)
             (args.TryGetResult MigrateArgs.Module)
         with
         | Ok compiledModule ->
           let newDb = compiledModule.newDbPath
 
-          match resolveMigrationSourceDb currentDirectory directoryName newDb with
-          | Ok(Some old) ->
-            printMigrateRecoveryGuidance old newDb
-            finishCommand "migrate" (Error message)
-          | _ -> finishCommand "migrate" (Error message)
+          match compiledModule.generatedModule.dbApp with
+          | Some dbApp ->
+            match resolveMigrationSourceDb currentDirectory dbApp instance newDb with
+            | Ok(Some old) ->
+              printMigrateRecoveryGuidance old newDb
+              finishCommand "migrate" (Error message)
+            | _ -> finishCommand "migrate" (Error message)
+          | None -> finishCommand "migrate" (Error message)
         | Error _ -> finishCommand "migrate" (Error message)
       | Error _ -> finishCommand "migrate" (Error message)
     | Ok exitCode -> exitCode
@@ -170,17 +179,22 @@ module internal ProgramMigrationCommands =
     let result =
       result {
         let! currentDirectory = resolveCommandDirectory "offline" (args.TryGetResult OfflineArgs.Dir)
-        let directoryName = DirectoryInfo(currentDirectory).Name
+        let instance = args.TryGetResult OfflineArgs.Instance
 
         let! compiledModule =
           resolveRequiredCompiledModuleForCommand
             "offline"
             currentDirectory
+            instance
             (args.TryGetResult OfflineArgs.Assembly)
             (args.TryGetResult OfflineArgs.Module)
 
+        let! dbApp =
+          compiledModule.generatedModule.dbApp
+          |> ResultEx.requireSome "Compiled generated module does not define DbApp for `offline`."
+
         let newDb = compiledModule.newDbPath
-        let! sourceDb = resolveMigrationSourceDb currentDirectory directoryName newDb
+        let! sourceDb = resolveMigrationSourceDb currentDirectory dbApp instance newDb
 
         match sourceDb with
         | None ->
@@ -234,17 +248,22 @@ module internal ProgramMigrationCommands =
     let result =
       result {
         let! currentDirectory = resolveCommandDirectory "plan" (args.TryGetResult PlanArgs.Dir)
-        let directoryName = DirectoryInfo(currentDirectory).Name
+        let instance = args.TryGetResult PlanArgs.Instance
 
         let! compiledModule =
           resolveRequiredCompiledModuleForCommand
             "plan"
             currentDirectory
+            instance
             (args.TryGetResult PlanArgs.Assembly)
             (args.TryGetResult PlanArgs.Module)
 
+        let! dbApp =
+          compiledModule.generatedModule.dbApp
+          |> ResultEx.requireSome "Compiled generated module does not define DbApp for `plan`."
+
         let newDb = compiledModule.newDbPath
-        let! sourceDb = resolveMigrationSourceDb currentDirectory directoryName newDb
+        let! sourceDb = resolveMigrationSourceDb currentDirectory dbApp instance newDb
 
         match sourceDb with
         | None ->
@@ -288,18 +307,23 @@ module internal ProgramMigrationCommands =
       eprintfn $"drain failed: {message}"
       1
     | Ok currentDirectory ->
-      let directoryName = DirectoryInfo(currentDirectory).Name
+      let defaultAppName = DirectoryInfo(currentDirectory).Name
+      let instance = args.TryGetResult DrainArgs.Instance
 
       let setupResult =
         result {
-          let! newDb =
-            resolveCompiledModeTargetDbPathForCommand
+          let! compiledModule =
+            resolveRequiredCompiledModuleForCommand
               "drain"
               currentDirectory
+              instance
               (args.TryGetResult DrainArgs.Assembly)
               (args.TryGetResult DrainArgs.Module)
 
-          let! old = inferOldDbWithExcludedTarget currentDirectory directoryName newDb
+          let appName = compiledModule.generatedModule.dbApp |> Option.defaultValue defaultAppName
+          let newDb = compiledModule.newDbPath
+
+          let! old = inferOldDbWithExcludedTarget currentDirectory appName instance newDb
           return old, newDb
         }
 
@@ -325,17 +349,22 @@ module internal ProgramMigrationCommands =
     let result =
       result {
         let! currentDirectory = resolveCommandDirectory "cutover" (args.TryGetResult CutoverArgs.Dir)
-        let directoryName = DirectoryInfo(currentDirectory).Name
+        let defaultAppName = DirectoryInfo(currentDirectory).Name
+        let instance = args.TryGetResult CutoverArgs.Instance
 
-        let! newDb =
-          resolveCompiledModeTargetDbPathForCommand
+        let! compiledModule =
+          resolveRequiredCompiledModuleForCommand
             "cutover"
             currentDirectory
+            instance
             (args.TryGetResult CutoverArgs.Assembly)
             (args.TryGetResult CutoverArgs.Module)
 
+        let newDb = compiledModule.newDbPath
+        let appName = compiledModule.generatedModule.dbApp |> Option.defaultValue defaultAppName
+
         let oldDb =
-          inferOldDbFromCurrentDirectory currentDirectory directoryName (Some newDb)
+          inferOldDbFromCurrentDirectory currentDirectory appName instance (Some newDb)
           |> Result.toOption
 
         let! cutoverResult =
@@ -369,7 +398,21 @@ module internal ProgramMigrationCommands =
       eprintfn $"archive-old failed: {message}"
       1
     | Ok currentDirectory ->
-      let directoryName = DirectoryInfo(currentDirectory).Name
+      let defaultAppName = DirectoryInfo(currentDirectory).Name
+      let instance = args.TryGetResult ArchiveOldArgs.Instance
+      let compiledModule =
+        match args.TryGetResult ArchiveOldArgs.Assembly with
+        | Some _ ->
+          resolveRequiredCompiledModuleForCommand
+            "archive-old"
+            currentDirectory
+            instance
+            (args.TryGetResult ArchiveOldArgs.Assembly)
+            (args.TryGetResult ArchiveOldArgs.Module)
+          |> Result.toOption
+        | None -> None
+
+      let appName = compiledModule |> Option.bind (fun item -> item.generatedModule.dbApp) |> Option.defaultValue defaultAppName
 
       let setupResult =
         result {
@@ -377,11 +420,12 @@ module internal ProgramMigrationCommands =
             resolveOptionalCompiledModeTargetDbPathForCommand
               "archive-old"
               currentDirectory
+              instance
               (args.TryGetResult ArchiveOldArgs.Assembly)
               (args.TryGetResult ArchiveOldArgs.Module)
 
           let! old =
-            inferOldDbFromCurrentDirectory currentDirectory directoryName inferredNew
+            inferOldDbFromCurrentDirectory currentDirectory appName instance inferredNew
             |> Result.mapError (fun message ->
               match inferredNew with
               | Some inferredTarget ->
@@ -421,18 +465,22 @@ module internal ProgramMigrationCommands =
       eprintfn $"reset failed: {message}"
       1
     | Ok currentDirectory ->
-      let directoryName = DirectoryInfo(currentDirectory).Name
+      let defaultAppName = DirectoryInfo(currentDirectory).Name
+      let instance = args.TryGetResult ResetArgs.Instance
 
       let setupResult =
         result {
-          let! newDb =
-            resolveCompiledModeTargetDbPathForCommand
+          let! compiledModule =
+            resolveRequiredCompiledModuleForCommand
               "reset"
               currentDirectory
+              instance
               (args.TryGetResult ResetArgs.Assembly)
               (args.TryGetResult ResetArgs.Module)
 
-          let! old = inferOldDbWithExcludedTarget currentDirectory directoryName newDb
+          let appName = compiledModule.generatedModule.dbApp |> Option.defaultValue defaultAppName
+          let newDb = compiledModule.newDbPath
+          let! old = inferOldDbWithExcludedTarget currentDirectory appName instance newDb
           return old, newDb
         }
 
@@ -517,7 +565,21 @@ module internal ProgramMigrationCommands =
       eprintfn $"status failed: {message}"
       1
     | Ok currentDirectory ->
-      let directoryName = DirectoryInfo(currentDirectory).Name
+      let defaultAppName = DirectoryInfo(currentDirectory).Name
+      let instance = args.TryGetResult StatusArgs.Instance
+      let compiledModule =
+        match args.TryGetResult StatusArgs.Assembly with
+        | Some _ ->
+          resolveRequiredCompiledModuleForCommand
+            "status"
+            currentDirectory
+            instance
+            (args.TryGetResult StatusArgs.Assembly)
+            (args.TryGetResult StatusArgs.Module)
+          |> Result.toOption
+        | None -> None
+
+      let appName = compiledModule |> Option.bind (fun item -> item.generatedModule.dbApp) |> Option.defaultValue defaultAppName
 
       let setupResult =
         result {
@@ -527,6 +589,7 @@ module internal ProgramMigrationCommands =
                 resolveOptionalCompiledModeTargetDbPathForCommand
                   "status"
                   currentDirectory
+                  instance
                   (args.TryGetResult StatusArgs.Assembly)
                   (args.TryGetResult StatusArgs.Module)
 
@@ -542,7 +605,7 @@ module internal ProgramMigrationCommands =
         1
       | Ok inferredNew ->
         let inferredOld =
-          inferOldDbFromCurrentDirectory currentDirectory directoryName inferredNew
+          inferOldDbFromCurrentDirectory currentDirectory appName instance inferredNew
 
         match inferredOld, inferredNew with
         | Ok oldPath, _ ->

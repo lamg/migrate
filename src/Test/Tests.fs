@@ -146,9 +146,11 @@ let private deriveShortSchemaHashFromSourceFile (schemaPath: string) =
 let private deriveDeterministicNewDbPathFromSchemaFile (directoryPath: string) (schemaPath: string) =
   let dbFileNamePrefix = DirectoryInfo(directoryPath).Name
 
-  match deriveSchemaBoundDbFileName dbFileNamePrefix schemaPath with
+  match deriveSchemaBoundDbFileName dbFileNamePrefix None schemaPath with
   | Ok dbFileName -> Path.Combine(directoryPath, dbFileName)
   | Error error -> failwith $"Expected schema path to produce a deterministic DB file name, got: {error}"
+
+let private compiledFixtureDbFile = CompiledSchemaFixture.DbFileForInstance None
 
 let private loadSchemaIdentityFromSourceFile (schemaPath: string) =
   { schemaHash = deriveShortSchemaHashFromSourceFile schemaPath
@@ -480,7 +482,7 @@ let ``inferPreviousDatabasePath returns the only non-target sqlite file`` () =
 
   let dbFileName = "marketdesk-1111222233334444.sqlite"
   let targetDbPath = Path.Combine(envDir, dbFileName)
-  let oldDbPath = Path.Combine(envDir, "previous.sqlite")
+  let oldDbPath = Path.Combine(envDir, "marketdesk-0000111122223333.sqlite")
   createStudentDatabase targetDbPath [ "Alice" ] None
   createStudentDatabase oldDbPath [ "Bob" ] None
 
@@ -503,8 +505,8 @@ let ``inferPreviousDatabasePath fails when multiple non-target sqlite files exis
 
   let dbFileName = "marketdesk-1111222233334444.sqlite"
   let targetDbPath = Path.Combine(envDir, dbFileName)
-  let firstOldDbPath = Path.Combine(envDir, "previous-a.sqlite")
-  let secondOldDbPath = Path.Combine(envDir, "previous-b.sqlite")
+  let firstOldDbPath = Path.Combine(envDir, "marketdesk-0000111122223333.sqlite")
+  let secondOldDbPath = Path.Combine(envDir, "marketdesk-9999888877776666.sqlite")
   createStudentDatabase targetDbPath [ "Alice" ] None
   createStudentDatabase firstOldDbPath [ "Bob" ] None
   createStudentDatabase secondOldDbPath [ "Carol" ] None
@@ -518,6 +520,31 @@ let ``inferPreviousDatabasePath fails when multiple non-target sqlite files exis
     Assert.Contains(Path.GetFullPath targetDbPath, ex.Message)
     Assert.Contains(Path.GetFullPath firstOldDbPath, ex.Message)
     Assert.Contains(Path.GetFullPath secondOldDbPath, ex.Message)
+
+[<Fact>]
+let ``inferPreviousDatabasePath ignores sqlite files with other prefixes`` () =
+  let envDir =
+    Path.Combine(Path.GetTempPath(), $"mig_infer_previous_other_prefix_{Guid.NewGuid()}")
+
+  Directory.CreateDirectory envDir |> ignore
+
+  let dbFileName = "marketdesk-1111222233334444.sqlite"
+  let targetDbPath = Path.Combine(envDir, dbFileName)
+  let matchingOldDbPath = Path.Combine(envDir, "marketdesk-0000111122223333.sqlite")
+  let unrelatedDbPath = Path.Combine(envDir, "inventory-aaaaaaaaaaaaaaaa.sqlite")
+  createStudentDatabase targetDbPath [ "Alice" ] None
+  createStudentDatabase matchingOldDbPath [ "Bob" ] None
+  createStudentDatabase unrelatedDbPath [ "Carol" ] None
+
+  let inferenceResult =
+    withProcessStateLock (fun () -> inferPreviousDatabasePath envDir dbFileName)
+
+  match inferenceResult with
+  | Error ex -> failwith $"Expected previous-database inference to succeed, got: {ex.Message}"
+  | Ok(Some path) -> Assert.Equal(Path.GetFullPath matchingOldDbPath, path)
+  | Ok None -> failwith "Expected previous database to be inferred."
+
+  Directory.Delete(envDir, true)
 
 [<Fact>]
 let ``startService returns a DbTxnBuilder for an already ready target database`` () =
@@ -3746,7 +3773,7 @@ let ``cli status can use compiled generated module from assembly`` () =
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-0123456789abcdef.sqlite")
-  let newDbPath = Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+  let newDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   createStudentDatabase oldDbPath [ "Alice" ] None
@@ -3934,7 +3961,8 @@ let ``cli codegen defaults to Db fs and Db module in compiled mode`` () =
   let generated = File.ReadAllText outputPath
 
   Assert.Contains("module Db", generated)
-  Assert.Contains("let DbFile =", generated)
+  Assert.Contains("let DbApp =", generated)
+  Assert.Contains("let DbFileForInstance", generated)
   Assert.Contains("let Schema:", generated)
 
   Directory.Delete(tempDir, true)
@@ -3979,15 +4007,13 @@ let ``cli codegen can generate Db module from compiled schema assembly`` () =
 
   let generated = File.ReadAllText outputPath
 
-  let expectedDbFile =
-    $"{DirectoryInfo(tempDir).Name}-{deriveShortSchemaHashFromSourceFile schemaPath}.sqlite"
-
   Assert.Contains("module Db", generated)
-  Assert.Contains("let DbFile =", generated)
+  Assert.Contains($"let DbApp = \"{DirectoryInfo(tempDir).Name}\"", generated)
+  Assert.Contains("let DbApp =", generated)
+  Assert.Contains("let DbFileForInstance", generated)
   Assert.Contains("let SchemaHash =", generated)
   Assert.Contains("let SchemaIdentity:", generated)
   Assert.Contains("let Schema:", generated)
-  Assert.Contains(expectedDbFile, generated)
   Assert.Contains("static member SelectByName (name: string) (tx: SqliteTransaction)", generated)
 
   Directory.Delete(tempDir, true)
@@ -4574,7 +4600,7 @@ let ``cli reset dry-run can use compiled generated module from assembly`` () =
 
   let dirName = DirectoryInfo(tempDir).Name
   let oldDbPath = Path.Combine(tempDir, $"{dirName}-0011223344556677.sqlite")
-  let newDbPath = Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+  let newDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   use oldConn = openSqliteConnection oldDbPath
@@ -4801,7 +4827,7 @@ let ``cli init skips when compiled-module database already exists`` () =
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedDbPath =
-    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   use existingConn = openSqliteConnection expectedDbPath
 
@@ -4840,7 +4866,7 @@ let ``cli init can use compiled generated module from assembly`` () =
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedDbPath =
-    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   let exitCode, stdOut, stdErr =
     runMigCli
@@ -4909,7 +4935,7 @@ let ``cli init prefers non-schema project assembly when Schema fsproj is present
   File.Copy(schemaAssemblySourcePath, schemaAssemblyPath, true)
 
   let expectedDbPath =
-    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   let exitCode, stdOut, stdErr =
     runMigCliInDirectory (Some tempDir) [ "init"; "--module"; "CompiledSchemaFixture" ]
@@ -4990,7 +5016,7 @@ let ``cli migrate can use compiled generated module from assembly`` () =
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
-    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
@@ -5045,7 +5071,7 @@ let ``cli plan can use compiled generated module from assembly`` () =
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
-    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
@@ -5086,7 +5112,7 @@ let ``cli offline can use compiled generated module from assembly`` () =
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
-    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   let expectedArchivePath =
     Path.Combine(tempDir, "archive", Path.GetFileName oldDbPath)
@@ -5143,7 +5169,7 @@ let ``cli migrate stores compiled schema commit metadata`` () =
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
-    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
@@ -5192,7 +5218,7 @@ let ``cli migrate auto-discovers old db from current directory with compiled mod
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
-    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
@@ -5238,7 +5264,7 @@ let ``cli plan prints dry-run migration plan from compiled module without mutati
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
-    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
@@ -5301,7 +5327,7 @@ let ``cli plan reports blocking drift from compiled module and keeps databases u
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
-    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
@@ -5360,7 +5386,7 @@ let ``cli migrate failure from compiled module prints recovery snapshot and guid
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
-    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
@@ -5416,7 +5442,7 @@ let ``cli drain cutover status and archive-old use compiled-module target discov
     Path.Combine(tempDir, "archive", Path.GetFileName oldDbPath)
 
   let expectedNewDbPath =
-    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
@@ -5495,7 +5521,7 @@ let ``cli offline auto-discovers old db and archives after compiled-module copy`
     Path.Combine(tempDir, "archive", Path.GetFileName oldDbPath)
 
   let expectedNewDbPath =
-    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   use setupOldConn = openSqliteConnection oldDbPath
 
@@ -5555,7 +5581,7 @@ let ``cli migrate skips when compiled-module database already exists`` () =
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedDbPath =
-    Path.Combine(Path.GetFullPath tempDir, CompiledSchemaFixture.DbFile)
+    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   use existingConn = openSqliteConnection expectedDbPath
 
@@ -6804,10 +6830,10 @@ let ``build api derives schema-bound db file name from Schema fs path`` () =
     "module Schema\n\nopen MigLib.Db\n\n[<AutoIncPK \"id\">]\ntype Student = { id: int64; name: string }\n"
   )
 
-  match deriveSchemaBoundDbFileName "my-app" schemaPath with
+  match deriveSchemaBoundDbFileName "my-app" None schemaPath with
   | Error error -> failwith $"deriveSchemaBoundDbFileName failed: {error}"
   | Ok dbFileName ->
-    let expectedDbFile = $"my-app-{deriveShortSchemaHashFromSourceFile schemaPath}.sqlite"
+    let expectedDbFile = $"my-app-main-{deriveShortSchemaHashFromSourceFile schemaPath}.sqlite"
 
     Assert.Equal(expectedDbFile, dbFileName)
 
@@ -6834,15 +6860,14 @@ let ``build api generates db code from reflected types without sibling project f
   | Ok stats ->
     let generated = File.ReadAllText outputPath
 
-    let expectedDbFile = $"students-app-{deriveShortSchemaHashFromSourceFile schemaPath}.sqlite"
-
     Assert.Equal<string list>([ outputPath ], stats.GeneratedFiles)
     Assert.Contains("module Db", generated)
-    Assert.Contains("let DbFile =", generated)
+    Assert.Contains("let DbApp =", generated)
+    Assert.Contains("let DefaultDbInstance =", generated)
+    Assert.Contains("let DbFileForInstance", generated)
     Assert.Contains("let SchemaHash =", generated)
     Assert.Contains("let SchemaIdentity:", generated)
     Assert.Contains("let Schema:", generated)
-    Assert.Contains(expectedDbFile, generated)
     Assert.Contains("static member SelectByNameAge", generated)
     Assert.False(File.Exists projectPath, "Embedded Db.fs generation should not emit a sibling .fsproj file.")
 
@@ -6855,7 +6880,8 @@ let ``compiled schema loader reads generated schema values from assembly module`
   match tryLoadGeneratedSchemaModuleFromAssembly assembly "CompiledSchemaFixture" with
   | Error error -> failwith $"Expected compiled schema load to succeed, got: {error}"
   | Ok loaded ->
-    Assert.Equal(Some "compiled-fixture.sqlite", loaded.dbFile)
+    Assert.Equal(Some CompiledSchemaFixture.DbApp, loaded.dbApp)
+    Assert.Equal(Some CompiledSchemaFixture.DefaultDbInstance, loaded.defaultDbInstance)
     Assert.Equal(Some "0123456789abcdef", loaded.schemaHash)
     Assert.True(loaded.schemaIdentity.IsSome)
     Assert.Equal("0123456789abcdef", loaded.schemaIdentity.Value.schemaHash)
@@ -6917,10 +6943,10 @@ let ``build init wrapper creates schema-bound database and skips rerun`` () =
   Directory.CreateDirectory tempDir |> ignore
 
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
-  let expectedDbPath = Path.Combine(tempDir, CompiledSchemaFixture.DbFile)
+  let expectedDbPath = Path.Combine(tempDir, compiledFixtureDbFile)
 
   let firstRun =
-    initDbFromAssemblyModulePath tempDir assemblyPath "CompiledSchemaFixture"
+    initDbFromAssemblyModulePath tempDir None assemblyPath "CompiledSchemaFixture"
     |> fun t -> t.Result
 
   match firstRun with
@@ -6931,7 +6957,7 @@ let ``build init wrapper creates schema-bound database and skips rerun`` () =
     Assert.False(result.skipped)
 
   let secondRun =
-    initDbFromAssemblyModulePath tempDir assemblyPath "CompiledSchemaFixture"
+    initDbFromAssemblyModulePath tempDir None assemblyPath "CompiledSchemaFixture"
     |> fun t -> t.Result
 
   match secondRun with
@@ -7027,7 +7053,8 @@ let ``codegen can run directly from in-memory schema model`` () =
 
     Assert.Equal<string list>([ outputPath ], stats.GeneratedFiles)
     Assert.Contains("module Generated", generated)
-    Assert.DoesNotContain("let DbFile =", generated)
+    Assert.DoesNotContain("let DbApp =", generated)
+    Assert.DoesNotContain("let DbFileForInstance", generated)
     Assert.Contains("static member SelectByName (name: string) (tx: SqliteTransaction)", generated)
     Assert.False(File.Exists projectPath, "Code generation should not emit a sibling .fsproj file.")
 

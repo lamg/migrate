@@ -7,13 +7,15 @@ open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 open Mig.DeclarativeMigrations.Types
 open Mig.HotMigration
+open MigLib.Db
 open MigLib.Util
 
 type GeneratedSchemaModule =
   { schema: SqlFile
     schemaIdentity: SchemaIdentity option
     schemaHash: string option
-    dbFile: string option }
+    dbApp: string option
+    defaultDbInstance: string option }
 
 let private staticBindingFlags =
   BindingFlags.Public ||| BindingFlags.NonPublic ||| BindingFlags.Static
@@ -91,18 +93,25 @@ let tryLoadGeneratedSchemaModuleFromAssembly
   result {
     let! moduleType = tryFindModuleType assembly moduleName
 
-    let! schema, schemaIdentity, schemaHash, dbFile =
-      ResultEx.zip4
-        (tryReadRequiredStaticValue<SqlFile> moduleType "Schema")
-        (tryReadOptionalStaticValue<SchemaIdentity> moduleType "SchemaIdentity")
-        (tryReadOptionalStaticValue<string> moduleType "SchemaHash")
-        (tryReadOptionalStaticValue<string> moduleType "DbFile")
+    let! schema = tryReadRequiredStaticValue<SqlFile> moduleType "Schema"
+    let! schemaIdentity = tryReadOptionalStaticValue<SchemaIdentity> moduleType "SchemaIdentity"
+    let! schemaHash = tryReadOptionalStaticValue<string> moduleType "SchemaHash"
+    let! dbApp = tryReadOptionalStaticValue<string> moduleType "DbApp"
+    let! defaultDbInstance = tryReadOptionalStaticValue<string> moduleType "DefaultDbInstance"
 
     return
       { schema = schema
         schemaIdentity = schemaIdentity
         schemaHash = schemaHash
-        dbFile = dbFile }
+        dbApp = dbApp
+        defaultDbInstance = defaultDbInstance }
+  }
+
+let resolveGeneratedModuleDbFileName (generatedModule: GeneratedSchemaModule) (instance: string option) =
+  result {
+    let! dbApp = generatedModule.dbApp |> ResultEx.requireSome "Compiled generated module does not define DbApp."
+    let! schemaHash = generatedModule.schemaHash |> ResultEx.requireSome "Compiled generated module does not define SchemaHash."
+    return! buildSchemaBoundDbFileName dbApp instance schemaHash
   }
 
 let tryLoadGeneratedSchemaModuleFromAssemblyPath

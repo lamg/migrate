@@ -8,6 +8,7 @@ open System.Text
 open Mig.SchemaReflection
 open Mig.DeclarativeMigrations.Types
 open Mig.CodeGen.FabulousAstHelpers
+open MigLib.Db
 open MigLib.Util
 open Fantomas.Core
 
@@ -46,34 +47,39 @@ let private computeShortSchemaHash (schemaPath: string) : Result<string, string>
 
 type private SchemaGenerationMetadata =
   { schemaHash: string
-    dbFileName: string }
+    dbApp: string }
 
 let private deriveSchemaGenerationMetadata
-  (dbFileNamePrefix: string)
+  (dbApp: string)
   (schemaPath: string)
   : Result<SchemaGenerationMetadata, string> =
   result {
-    if String.IsNullOrWhiteSpace dbFileNamePrefix then
-      return! Error "Database file name prefix is empty."
+    if String.IsNullOrWhiteSpace dbApp then
+      return! Error "Database app name is empty."
 
     let! schemaHash = computeShortSchemaHash schemaPath
 
     return
       { schemaHash = schemaHash
-        dbFileName = $"{dbFileNamePrefix}-{schemaHash}.sqlite" }
+        dbApp = dbApp.Trim() }
   }
 
 let private deriveDatabaseFileName
-  (dbFileNamePrefix: string)
+  (dbApp: string)
+  (instance: string option)
   (schemaPath: string)
   : Result<string, string> =
-  deriveSchemaGenerationMetadata dbFileNamePrefix schemaPath |> Result.map _.dbFileName
+  result {
+    let! metadata = deriveSchemaGenerationMetadata dbApp schemaPath
+    return! buildSchemaBoundDbFileName metadata.dbApp instance metadata.schemaHash
+  }
 
 let internal deriveDatabaseFileNameFromSourcePath
-  (dbFileNamePrefix: string)
+  (dbApp: string)
+  (instance: string option)
   (schemaPath: string)
   : Result<string, string> =
-  deriveDatabaseFileName dbFileNamePrefix schemaPath
+  deriveDatabaseFileName dbApp instance schemaPath
 
 let private renderBoolLiteral (value: bool) = if value then "true" else "false"
 
@@ -252,9 +258,9 @@ let private renderSqlFile (schema: SqlFile) =
 /// can feed it from compiled schema reflection or their own schema builders.
 let private generateCode
   (moduleName: string)
+  (dbApp: string option)
   (schema: SqlFile)
   (outputFilePath: string)
-  (dbFileName: string option)
   (schemaHash: string option)
   : Result<CodeGenStats, string> =
   result {
@@ -325,11 +331,15 @@ let private generateCode
         yield "open Mig.DeclarativeMigrations.Types"
         yield "open Mig.HotMigration"
         yield "open MigLib.Db"
+        yield "open MigLib.Util"
         yield ""
-        match dbFileName with
-        | Some fileName ->
+        match dbApp with
+        | Some appName ->
           yield "[<Literal>]"
-          yield $"let DbFile = \"{fileName}\""
+          yield $"let DbApp = \"{appName}\""
+          yield ""
+          yield "[<Literal>]"
+          yield $"let DefaultDbInstance = \"{DefaultDatabaseInstance}\""
           yield ""
         | None -> ()
         match schemaHash with
@@ -340,6 +350,13 @@ let private generateCode
           yield "let SchemaIdentity : SchemaIdentity ="
           yield "  { schemaHash = SchemaHash"
           yield "    schemaCommit = None }"
+          yield ""
+          match dbApp with
+          | Some _ ->
+            yield "let DbFileForInstance (instance: string option) ="
+            yield "  buildSchemaBoundDbFileName DbApp instance SchemaHash"
+            yield "  |> ResultEx.orFail invalidOp"
+          | None -> ()
           yield ""
         | None -> ()
         yield $"let Schema : SqlFile = {renderSqlFile schema}"
@@ -402,7 +419,7 @@ let internal generateCodeFromModel
   (schema: SqlFile)
   (outputFilePath: string)
   : Result<CodeGenStats, string> =
-  generateCode moduleName schema outputFilePath None None
+  generateCode moduleName None schema outputFilePath None
 
 /// Generate F# code from a set of reflected CLR types.
 /// This is the bridge used by compiled-schema code generation.
@@ -413,26 +430,26 @@ let internal generateCodeFromTypes
   : Result<CodeGenStats, string> =
   result {
     let! schema = buildSchemaFromTypes types
-    return! generateCode moduleName schema outputFilePath None None
+    return! generateCode moduleName None schema outputFilePath None
   }
 
 let internal generateCodeFromTypesWithDbFile
   (moduleName: string)
-  (dbFileNamePrefix: string)
+  (dbApp: string)
   (schemaPath: string)
   (types: Type list)
   (outputFilePath: string)
   : Result<CodeGenStats, string> =
   result {
     let! schema = buildSchemaFromTypes types
-    let! metadata = deriveSchemaGenerationMetadata dbFileNamePrefix schemaPath
+    let! metadata = deriveSchemaGenerationMetadata dbApp schemaPath
 
-    return! generateCode moduleName schema outputFilePath (Some metadata.dbFileName) (Some metadata.schemaHash)
+    return! generateCode moduleName (Some metadata.dbApp) schema outputFilePath (Some metadata.schemaHash)
   }
 
 let internal generateCodeFromAssemblyModuleWithDbFile
   (generatedModuleName: string)
-  (dbFileNamePrefix: string)
+  (dbApp: string)
   (schemaPath: string)
   (assembly: Assembly)
   (schemaModuleName: string)
@@ -440,7 +457,7 @@ let internal generateCodeFromAssemblyModuleWithDbFile
   : Result<CodeGenStats, string> =
   result {
     let! schema = buildSchemaFromAssemblyModule assembly schemaModuleName
-    let! metadata = deriveSchemaGenerationMetadata dbFileNamePrefix schemaPath
+    let! metadata = deriveSchemaGenerationMetadata dbApp schemaPath
 
-    return! generateCode generatedModuleName schema outputFilePath (Some metadata.dbFileName) (Some metadata.schemaHash)
+    return! generateCode generatedModuleName (Some metadata.dbApp) schema outputFilePath (Some metadata.schemaHash)
   }
