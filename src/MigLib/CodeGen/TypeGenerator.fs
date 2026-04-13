@@ -27,7 +27,6 @@ let mapSqlType (sqlType: SqlType) (isNullable: bool) : string =
     | SqlReal -> "float"
     | SqlTimestamp -> "DateTime"
     | SqlString -> "string"
-    | SqlFlexible -> "obj"
 
   if isNullable then $"{baseType} option" else baseType
 

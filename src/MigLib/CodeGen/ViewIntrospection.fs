@@ -25,7 +25,6 @@ let getViewColumns (tables: CreateTable list) (view: CreateView) : Result<ViewCo
               | SqlReal -> "REAL"
               | SqlTimestamp -> "TIMESTAMP"
               | SqlString -> "TEXT"
-              | SqlFlexible -> "TEXT"
 
             let constraints =
               col.constraints
@@ -74,7 +73,7 @@ let getViewColumns (tables: CreateTable list) (view: CreateView) : Result<ViewCo
         | t when t.Contains "TEXT" || t.Contains "CHAR" || t.Contains "CLOB" -> SqlText
         | t when t.Contains "REAL" || t.Contains "FLOA" || t.Contains "DOUB" -> SqlReal
         | t when t.Contains "TIME" || t.Contains "DATE" -> SqlTimestamp
-        | _ -> SqlFlexible
+        | _ -> SqlText
 
       let enumLikeDu =
         view.declaredColumns

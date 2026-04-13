@@ -6,7 +6,6 @@ type SqlType =
   | SqlReal
   | SqlTimestamp
   | SqlString
-  | SqlFlexible
 
 type EnumLikeDu =
   { typeName: string; cases: string list }

@@ -98,9 +98,9 @@ module internal HotMigrationPrimitives =
     elif upper.Contains "CHAR" || upper.Contains "CLOB" || upper.Contains "TEXT" then
       SqlText
     elif upper.Contains "BLOB" then
-      SqlFlexible
+      SqlText
     else
-      SqlFlexible
+      SqlText
 
   let sqlTypeToSql (sqlType: SqlType) : string =
     match sqlType with
@@ -109,7 +109,6 @@ module internal HotMigrationPrimitives =
     | SqlReal -> "REAL"
     | SqlTimestamp -> "TEXT"
     | SqlString -> "TEXT"
-    | SqlFlexible -> "TEXT"
 
   let parseDefaultExpr (defaultSql: string) : Expr =
     let trimmed = defaultSql.Trim()

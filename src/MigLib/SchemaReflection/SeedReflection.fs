@@ -80,7 +80,6 @@ module internal SchemaReflectionSeed =
       | Some(SqlReal, _) -> Ok(Real(unbox<float> value))
       | Some(SqlTimestamp, _) -> Ok(String(string value))
       | Some(SqlString, _) -> Ok(String(string value))
-      | Some(SqlFlexible, _) -> Ok(Value(string value))
       | None -> Error $"Seed value field type '{fieldType.Name}' is not supported."
 
   let toSeedColumnValues

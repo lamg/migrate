@@ -149,7 +149,7 @@ let renderSelectMember
   let body =
     Ast.AppExpr(
       queryHelper,
-      [ Ast.ConstantExpr(Ast.String(sql))
+      [ Ast.ConstantExpr(Ast.String sql)
         rawExpr configureExpr
         readerLambda
         rawExpr "tx" ]

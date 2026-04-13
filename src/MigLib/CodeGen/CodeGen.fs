@@ -103,7 +103,6 @@ let private renderSqlType =
   | SqlReal -> "SqlType.SqlReal"
   | SqlTimestamp -> "SqlType.SqlTimestamp"
   | SqlString -> "SqlType.SqlString"
-  | SqlFlexible -> "SqlType.SqlFlexible"
 
 let private renderExpr =
   function
