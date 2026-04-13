@@ -196,16 +196,14 @@ module internal HotMigrationSchemaBootstrap =
         ()
 
       for view in targetSchema.views do
-        for sql in view.sqlTokens do
-          use createViewCmd = createCommand connection (Some tx) sql
-          let! _ = createViewCmd.ExecuteNonQueryAsync()
-          ()
+        use createViewCmd = createCommand connection (Some tx) view.sql
+        let! _ = createViewCmd.ExecuteNonQueryAsync()
+        ()
 
       for trigger in targetSchema.triggers do
-        for sql in trigger.sqlTokens do
-          use createTriggerCmd = createCommand connection (Some tx) sql
-          let! _ = createTriggerCmd.ExecuteNonQueryAsync()
-          ()
+        use createTriggerCmd = createCommand connection (Some tx) trigger.sql
+        let! _ = createTriggerCmd.ExecuteNonQueryAsync()
+        ()
     }
 
   let initializeNewDatabase

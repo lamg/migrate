@@ -1841,7 +1841,7 @@ let ``non-table consistency report passes for valid target schema objects`` () =
         views =
           [ { name = "student_view"
               previousName = None
-              sqlTokens = [ "CREATE VIEW student_view AS SELECT id, name FROM student;" ]
+              sql = "SELECT id, name FROM student"
               declaredColumns = []
               dependencies = [ "student" ]
               queryByAnnotations = []
@@ -1852,7 +1852,7 @@ let ``non-table consistency report passes for valid target schema objects`` () =
               upsertAnnotations = [] } ]
         triggers =
           [ { name = "trg_student_insert"
-              sqlTokens = [ "CREATE TRIGGER trg_student_insert AFTER INSERT ON student BEGIN SELECT 1; END;" ]
+              sql = "CREATE TRIGGER trg_student_insert AFTER INSERT ON student BEGIN SELECT 1; END;"
               dependencies = [ "student" ] } ] }
 
   let report = analyzeNonTableConsistency targetSchema
@@ -1872,7 +1872,7 @@ let ``non-table consistency report flags invalid target schema objects`` () =
         views =
           [ { name = "student_view"
               previousName = None
-              sqlTokens = [ "CREATE VIEW student_view AS SELECT id FROM student;" ]
+              sql = "SELECT id FROM student"
               declaredColumns = []
               dependencies = [ "student"; "missing_table" ]
               queryByAnnotations = []
@@ -1883,7 +1883,7 @@ let ``non-table consistency report flags invalid target schema objects`` () =
               upsertAnnotations = [] }
             { name = "student_view"
               previousName = None
-              sqlTokens = [ "CREATE VIEW student_view AS SELECT id FROM student;" ]
+              sql = "SELECT id FROM student"
               declaredColumns = []
               dependencies = [ "student" ]
               queryByAnnotations = []
@@ -1894,7 +1894,7 @@ let ``non-table consistency report flags invalid target schema objects`` () =
               upsertAnnotations = [] } ]
         triggers =
           [ { name = "trg_student_insert"
-              sqlTokens = []
+              sql = ""
               dependencies = [ "missing_table" ] } ] }
 
   let report = analyzeNonTableConsistency targetSchema
@@ -6213,7 +6213,7 @@ let ``schema reflection maps ViewSql views`` () =
     let view =
       schema.views |> List.find (fun item -> item.name = "reflection_student_view")
 
-    Assert.Equal("SELECT id, name FROM reflection_student", view.sqlTokens |> Seq.head)
+    Assert.Equal("CREATE VIEW reflection_student_view AS SELECT id, name FROM reflection_student", view.sql)
     Assert.True(view.queryByAnnotations |> List.exists (fun q -> q.columns = [ "name" ]))
 
 [<Fact>]
@@ -6230,7 +6230,7 @@ let ``schema reflection synthesizes SQL for View with Join attributes`` () =
     let view =
       schema.views |> List.find (fun item -> item.name = "join_student_course_grade")
 
-    let sql = view.sqlTokens |> Seq.head
+    let sql = view.sql
 
     Assert.Contains("CREATE VIEW join_student_course_grade AS", sql)
     Assert.Contains("FROM join_course jc", sql)
@@ -6255,7 +6255,7 @@ let ``schema reflection synthesizes SQL for View with composite foreign-key join
       schema.views
       |> List.find (fun item -> item.name = "reflection_composite_wallet_view")
 
-    let sql = view.sqlTokens |> Seq.head
+    let sql = view.sql
 
     Assert.Contains(
       "JOIN reflection_composite_user rcu ON rcw.user_tenant_id = rcu.tenant_id AND rcw.user_user_id = rcu.user_id",
@@ -6691,7 +6691,7 @@ let ``codegen rejects upsert annotation on views`` () =
   let view =
     { name = "student_view"
       previousName = None
-      sqlTokens = [ "CREATE VIEW student_view AS SELECT id, name FROM student;" ]
+      sql = "SELECT id, name FROM student"
       declaredColumns = []
       dependencies = [ "student" ]
       queryByAnnotations = []
@@ -6755,7 +6755,7 @@ let ``codegen rejects deleteall annotation on views`` () =
   let view =
     { name = "student_view"
       previousName = None
-      sqlTokens = [ "CREATE VIEW student_view AS SELECT id, name FROM student;" ]
+      sql = "SELECT id, name FROM student"
       declaredColumns = []
       dependencies = [ "student" ]
       queryByAnnotations = []

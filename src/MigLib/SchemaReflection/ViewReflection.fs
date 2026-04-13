@@ -445,22 +445,22 @@ module internal SchemaReflectionView =
             |> List.collect (fun join -> [ join.leftTable; join.rightTable ])
             |> List.distinct
 
-          Ok(single.Sql, dependencyNames)
+          Ok($"CREATE VIEW {tableName} AS {single.Sql}", dependencyNames)
         | [] when not viewAttributes.IsEmpty -> synthesizeViewSql tableName viewType joins tablesByName
         | [] -> Error $"""View type "{viewType.Name}" must define [<ViewSql>] or [<View>] with Join attributes."""
         | _ -> Error $"""View type "{viewType.Name}" defines multiple [<ViewSql>] attributes."""
 
-      let! (queryByAnnotations,
-            queryLikeAnnotations,
-            queryByOrCreateAnnotations,
-            insertOrIgnoreAnnotations,
-            deleteAllAnnotations,
-            upsertAnnotations) = readQueryAnnotations viewType resolver
+      let! queryByAnnotations,
+           queryLikeAnnotations,
+           queryByOrCreateAnnotations,
+           insertOrIgnoreAnnotations,
+           deleteAllAnnotations,
+           upsertAnnotations = readQueryAnnotations viewType resolver
 
       return
         { name = tableName
           previousName = previousViewName
-          sqlTokens = [ sql ]
+          sql = sql
           declaredColumns = declaredColumns
           dependencies = dependencies
           queryByAnnotations = queryByAnnotations

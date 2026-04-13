@@ -182,7 +182,7 @@ let private renderInsertInto (insert: InsertInto) =
 
 let private renderCreateView (view: CreateView) =
   let renderedPreviousName = renderOption renderStringLiteral view.previousName
-  let renderedSqlTokens = renderList renderStringLiteral (List.ofSeq view.sqlTokens)
+  let renderedSql = renderStringLiteral view.sql
   let renderedDeclaredColumns = renderList renderViewColumn view.declaredColumns
   let renderedDependencies = renderList renderStringLiteral view.dependencies
 
@@ -204,7 +204,7 @@ let private renderCreateView (view: CreateView) =
   let renderedUpsertAnnotations =
     renderList (fun _ -> "UpsertAnnotation") view.upsertAnnotations
 
-  $"{{ name = {renderStringLiteral view.name}; previousName = {renderedPreviousName}; sqlTokens = {renderedSqlTokens}; declaredColumns = {renderedDeclaredColumns}; dependencies = {renderedDependencies}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; deleteAllAnnotations = {renderedDeleteAllAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
+  $"{{ name = {renderStringLiteral view.name}; previousName = {renderedPreviousName}; sql = {renderedSql}; declaredColumns = {renderedDeclaredColumns}; dependencies = {renderedDependencies}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; deleteAllAnnotations = {renderedDeleteAllAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
 
 let private renderCreateTable (table: CreateTable) =
   let renderedPreviousName = renderOption renderStringLiteral table.previousName
@@ -236,11 +236,10 @@ let private renderCreateIndex (index: CreateIndex) =
   $"{{ name = {renderStringLiteral index.name}; table = {renderStringLiteral index.table}; columns = {renderList renderStringLiteral index.columns} }}"
 
 let private renderCreateTrigger (trigger: CreateTrigger) =
-  let renderedSqlTokens =
-    renderList renderStringLiteral (List.ofSeq trigger.sqlTokens)
+  let renderedSql = renderStringLiteral trigger.sql
 
   let renderedDependencies = renderList renderStringLiteral trigger.dependencies
-  $"{{ name = {renderStringLiteral trigger.name}; sqlTokens = {renderedSqlTokens}; dependencies = {renderedDependencies} }}"
+  $"{{ name = {renderStringLiteral trigger.name}; sql = {renderedSql}; dependencies = {renderedDependencies} }}"
 
 let private renderSqlFile (schema: SqlFile) =
   let renderedMeasureTypes = renderList renderStringLiteral schema.measureTypes

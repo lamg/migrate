@@ -80,7 +80,7 @@ type UpsertAnnotation = UpsertAnnotation
 type CreateView =
   { name: string
     previousName: string option
-    sqlTokens: string seq
+    sql: string
     declaredColumns: ViewColumn list
     dependencies: string list
     queryByAnnotations: QueryByAnnotation list
@@ -110,7 +110,7 @@ type CreateIndex =
 
 type CreateTrigger =
   { name: string
-    sqlTokens: string seq
+    sql: string
     dependencies: string list }
 
 type SqlFile =

@@ -48,7 +48,7 @@ let getViewColumns (tables: CreateTable list) (view: CreateView) : Result<ViewCo
       cmd.ExecuteNonQuery() |> ignore
 
     // Create the view
-    let viewSql = view.sqlTokens |> String.concat " "
+    let viewSql = view.sql
 
     use viewCmd = new SqliteCommand(viewSql, conn)
 

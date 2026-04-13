@@ -140,8 +140,8 @@ module internal HotMigrationPlanning =
           [ $"View '{view.name}' references missing dependencies: {missingDependencyText}." ]
 
       let tokenErrors =
-        if view.sqlTokens |> Seq.isEmpty then
-          [ $"View '{view.name}' has no SQL tokens." ]
+        if String.IsNullOrWhiteSpace view.sql then
+          [ $"View '{view.name}' has no SQL." ]
         else
           []
 
@@ -166,8 +166,8 @@ module internal HotMigrationPlanning =
           [ $"Trigger '{trigger.name}' references missing dependencies: {missingDependencyText}." ]
 
       let tokenErrors =
-        if trigger.sqlTokens |> Seq.isEmpty then
-          [ $"Trigger '{trigger.name}' has no SQL tokens." ]
+        if String.IsNullOrWhiteSpace trigger.sql then
+          [ $"Trigger '{trigger.name}' has no SQL." ]
         else
           []
 
