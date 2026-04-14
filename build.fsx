@@ -27,6 +27,9 @@ let cliArgs =
     | Some separatorIndex -> commandLineArgs |> List.skip (separatorIndex + 1)
     | None -> commandLineArgs |> List.skip 1
 
+[<Literal>]
+let installTool = "InstallTool"
+
 let requestedTarget =
     let rec loop args =
         match args with
@@ -34,7 +37,7 @@ let requestedTarget =
         | "-t" :: target :: _ -> target
         | arg :: _ when arg.StartsWith "--target=" -> arg.Substring "--target=".Length
         | _ :: rest -> loop rest
-        | [] -> "InstallGlobal"
+        | [] -> installTool
 
     loop cliArgs
 
@@ -50,15 +53,27 @@ let private runDotNetCommand command args =
     if not result.OK then
         failwithf "dotnet %s failed with args: %s" command args
 
-Target.create "Clean" (fun _ ->
+[<Literal>]
+let clean = "Clean"
+
+Target.create clean (fun _ ->
     Shell.cleanDirs [ nupkgDir ]
     Directory.CreateDirectory nupkgDir |> ignore)
 
-Target.create "Restore" (fun _ -> runDotNetCommand "restore" $"\"{srcDir}\"")
+[<Literal>]
+let restore = "Restore"
 
-Target.create "Build" (fun _ -> runDotNetCommand "build" $"\"{migProjectPath}\" -c Release --no-restore")
+Target.create restore (fun _ -> runDotNetCommand "restore" $"\"{srcDir}\"")
 
-Target.create "PackTool" (fun _ ->
+[<Literal>]
+let build = "Build"
+
+Target.create build (fun _ -> runDotNetCommand "build" $"\"{migProjectPath}\" -c Release --no-restore")
+
+[<Literal>]
+let packTool = "packTool"
+
+Target.create packTool (fun _ ->
     let packArgs =
         $"\"{migProjectPath}\" -c Release -o \"{nupkgDir}\" --no-restore /p:PackAsTool=true /p:ToolCommandName=mig /p:PackageId={packageId}"
 
@@ -66,7 +81,7 @@ Target.create "PackTool" (fun _ ->
 
     Trace.log $"Packed %s{packageId} to %s{nupkgDir}")
 
-Target.create "InstallGlobal" (fun _ ->
+Target.create installTool (fun _ ->
     let uninstallArgs = $"uninstall --global {packageId}"
     let uninstallResult = DotNet.exec id "tool" uninstallArgs
 
@@ -79,6 +94,6 @@ Target.create "InstallGlobal" (fun _ ->
     runDotNetToolCommand installArgs
     Trace.log $"Installed global %s{packageId} from local package output.")
 
-"Clean" ==> "Restore" ==> "Build" ==> "PackTool" ==> "InstallGlobal"
+clean ==> restore ==> build ==> packTool ==> installTool
 
 Target.runOrDefault requestedTarget
