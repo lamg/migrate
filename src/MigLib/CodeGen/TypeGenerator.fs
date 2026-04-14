@@ -146,9 +146,9 @@ let collectEnumLikeDusFromViewColumns (columns: #seq<ViewColumn>) : EnumLikeDu l
 let generateEnumType (enumLikeDu: EnumLikeDu) : string =
   Oak() {
     AnonymousModule() {
-      Union(enumLikeDu.typeName) {
+      Union enumLikeDu.typeName {
         for caseName in enumLikeDu.cases do
-          UnionCase(caseName)
+          UnionCase caseName
       }
     }
   }
@@ -156,7 +156,7 @@ let generateEnumType (enumLikeDu: EnumLikeDu) : string =
   |> Gen.run
 
 let generateMeasureType (measureType: string) =
-  Oak() { AnonymousModule() { Measure(measureType) } } |> Gen.mkOak |> Gen.run
+  Oak() { AnonymousModule() { Measure measureType } } |> Gen.mkOak |> Gen.run
 
 /// Generate a record field from a column definition
 let generateField (column: ColumnDef) =

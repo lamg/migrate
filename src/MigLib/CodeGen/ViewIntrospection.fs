@@ -75,19 +75,26 @@ let getViewColumns (tables: CreateTable list) (view: CreateView) : Result<ViewCo
         | t when t.Contains "TIME" || t.Contains "DATE" -> SqlTimestamp
         | _ -> SqlText
 
-      let enumLikeDu =
+      let declaredColumn =
         view.declaredColumns
         |> List.tryFind (fun declared -> String.Equals(declared.name, colName, StringComparison.OrdinalIgnoreCase))
+
+      let resolvedColumnType =
+        match declaredColumn with
+        | Some dc -> dc.columnType
+        | None -> sqlType
+
+      let enumLikeDu =
+        declaredColumn
         |> Option.bind _.enumLikeDu
 
       let unitOfMeasure =
-        view.declaredColumns
-        |> List.tryFind (fun declared -> String.Equals(declared.name, colName, StringComparison.OrdinalIgnoreCase))
+        declaredColumn
         |> Option.bind _.unitOfMeasure
 
       columns.Add
         { name = colName
-          columnType = sqlType
+          columnType = resolvedColumnType
           enumLikeDu = enumLikeDu
           unitOfMeasure = unitOfMeasure }
 
