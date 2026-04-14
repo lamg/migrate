@@ -240,6 +240,7 @@ module internal HotMigrationSchemaIntrospection =
       queryByAnnotations = []
       queryLikeAnnotations = []
       queryByOrCreateAnnotations = []
+      selectOneAnnotations = []
       insertOrIgnoreAnnotations = []
       deleteAllAnnotations = []
       upsertAnnotations = [] }

@@ -408,6 +408,7 @@ module internal SchemaReflectionAttributes =
         QueryByAnnotation list *
         QueryLikeAnnotation list *
         QueryByOrCreateAnnotation list *
+        SelectOneAnnotation list *
         InsertOrIgnoreAnnotation list *
         DeleteAllAnnotation list *
         UpsertAnnotation list,
@@ -420,6 +421,8 @@ module internal SchemaReflectionAttributes =
 
       let selectByOrInsertAttributes =
         getTypeAttributes<SelectByOrInsertAttribute> recordType
+
+      let selectOneAttributes = getTypeAttributes<SelectOneAttribute> recordType
 
       let insertOrIgnoreAttributes = getTypeAttributes<InsertOrIgnoreAttribute> recordType
       let deleteAllAttributes = getTypeAttributes<DeleteAllAttribute> recordType
@@ -475,6 +478,12 @@ module internal SchemaReflectionAttributes =
             })
           []
 
+      let selectOne =
+        if selectOneAttributes.IsEmpty then
+          []
+        else
+          [ SelectOneAnnotation ]
+
       let insertOrIgnore =
         if insertOrIgnoreAttributes.IsEmpty then
           []
@@ -493,5 +502,5 @@ module internal SchemaReflectionAttributes =
         else
           [ UpsertAnnotation ]
 
-      return queryBy, queryLike, queryByOrCreate, insertOrIgnore, deleteAll, upsert
+      return queryBy, queryLike, queryByOrCreate, selectOne, insertOrIgnore, deleteAll, upsert
     }

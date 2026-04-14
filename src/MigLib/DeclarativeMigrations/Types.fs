@@ -71,6 +71,8 @@ type QueryLikeAnnotation = { columns: string list }
 
 type QueryByOrCreateAnnotation = { columns: string list }
 
+type SelectOneAnnotation = SelectOneAnnotation
+
 type InsertOrIgnoreAnnotation = InsertOrIgnoreAnnotation
 
 type DeleteAllAnnotation = DeleteAllAnnotation
@@ -86,6 +88,7 @@ type CreateView =
     queryByAnnotations: QueryByAnnotation list
     queryLikeAnnotations: QueryLikeAnnotation list
     queryByOrCreateAnnotations: QueryByOrCreateAnnotation list
+    selectOneAnnotations: SelectOneAnnotation list
     insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list
     deleteAllAnnotations: DeleteAllAnnotation list
     upsertAnnotations: UpsertAnnotation list }
@@ -99,6 +102,7 @@ type CreateTable =
     queryByAnnotations: QueryByAnnotation list
     queryLikeAnnotations: QueryLikeAnnotation list
     queryByOrCreateAnnotations: QueryByOrCreateAnnotation list
+    selectOneAnnotations: SelectOneAnnotation list
     insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list
     deleteAllAnnotations: DeleteAllAnnotation list
     upsertAnnotations: UpsertAnnotation list }

@@ -48,7 +48,13 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
 
     let getMethod = generateGet table
     let getAllMethod = generateGetAll table
-    let getOneMethod = generateGetOne table
+
+    let getOneMethod =
+      if table.selectOneAnnotations.IsEmpty then
+        None
+      else
+        Some(generateGetOne table)
+
     let updateMethod = generateUpdate table
     let deleteMethod = generateDelete table
 
@@ -72,7 +78,7 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
         upsertMethod
         getMethod
         Some getAllMethod
-        Some getOneMethod
+        getOneMethod
         updateMethod
         deleteMethod
         deleteAllMethod ]

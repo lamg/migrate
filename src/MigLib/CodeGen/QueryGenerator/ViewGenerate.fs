@@ -33,7 +33,12 @@ let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<stri
     | Some(Error msg) -> Error msg
     | _ ->
       let getAllMethod = generateViewGetAll view.name columns
-      let getOneMethod = generateViewGetOne view.name columns
+
+      let getOneMethod =
+        if view.selectOneAnnotations.IsEmpty then
+          []
+        else
+          [ generateViewGetOne view.name columns ]
 
       let queryByMethods =
         view.queryByAnnotations |> List.map (generateViewQueryBy view.name columns)
@@ -41,7 +46,7 @@ let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<stri
       let queryLikeMethods =
         view.queryLikeAnnotations |> List.map (generateViewQueryLike view.name columns)
 
-      let allMethods = [ getAllMethod; getOneMethod ] @ queryByMethods @ queryLikeMethods
+      let allMethods = getAllMethod :: getOneMethod @ queryByMethods @ queryLikeMethods
 
       Ok(generateAugmentationCode typeName allMethods)
   | _ :: _, _, _, _ ->

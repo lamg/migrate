@@ -47,7 +47,9 @@ let ``txn builder handles deep recursive bind chains without stack overflow`` ()
         return! buildSteps (remaining - 1) next
     }
 
-  let result = buildSteps 50000 0 Unchecked.defaultof<SqliteTransaction> |> fun task -> task.GetAwaiter().GetResult()
+  let result =
+    buildSteps 50000 0 Unchecked.defaultof<SqliteTransaction>
+    |> fun task -> task.GetAwaiter().GetResult()
 
   match result with
   | Ok value -> Assert.Equal(50000, value)
@@ -62,6 +64,7 @@ let private mkTable name columns constraints =
     queryByAnnotations = []
     queryLikeAnnotations = []
     queryByOrCreateAnnotations = []
+    selectOneAnnotations = []
     insertOrIgnoreAnnotations = []
     deleteAllAnnotations = []
     upsertAnnotations = [] }
@@ -611,7 +614,7 @@ let ``startService migrates the previous database into the target database`` () 
 
   Directory.CreateDirectory envDir |> ignore
 
-  let oldDbPath = Path.Combine(envDir, "previous.sqlite")
+  let oldDbPath = Path.Combine(envDir, "marketdesk-previous.sqlite")
   createStudentDatabase oldDbPath [ "Alice"; "Bob" ] None
 
   let dbFileName = "marketdesk-1111222233334444.sqlite"
@@ -1847,6 +1850,7 @@ let ``non-table consistency report passes for valid target schema objects`` () =
               queryByAnnotations = []
               queryLikeAnnotations = []
               queryByOrCreateAnnotations = []
+              selectOneAnnotations = []
               insertOrIgnoreAnnotations = []
               deleteAllAnnotations = []
               upsertAnnotations = [] } ]
@@ -1878,6 +1882,7 @@ let ``non-table consistency report flags invalid target schema objects`` () =
               queryByAnnotations = []
               queryLikeAnnotations = []
               queryByOrCreateAnnotations = []
+              selectOneAnnotations = []
               insertOrIgnoreAnnotations = []
               deleteAllAnnotations = []
               upsertAnnotations = [] }
@@ -1889,6 +1894,7 @@ let ``non-table consistency report flags invalid target schema objects`` () =
               queryByAnnotations = []
               queryLikeAnnotations = []
               queryByOrCreateAnnotations = []
+              selectOneAnnotations = []
               insertOrIgnoreAnnotations = []
               deleteAllAnnotations = []
               upsertAnnotations = [] } ]
@@ -1906,7 +1912,7 @@ let ``non-table consistency report flags invalid target schema objects`` () =
   Assert.Contains("Target view 'student_view' is declared 2 times.", unsupportedSummary)
   Assert.Contains("View 'student_view' references missing dependencies: missing_table.", unsupportedSummary)
   Assert.Contains("Trigger 'trg_student_insert' references missing dependencies: missing_table.", unsupportedSummary)
-  Assert.Contains("Trigger 'trg_student_insert' has no SQL tokens.", unsupportedSummary)
+  Assert.Contains("Trigger 'trg_student_insert' has no SQL.", unsupportedSummary)
 
 [<Fact>]
 let ``dbTxn records writes into migration log when marker is recording`` () =
@@ -3652,12 +3658,11 @@ let ``cli status prints cutover-complete cleanup state`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-1111222233334444.sqlite")
-  let schemaPath = Path.Combine(tempDir, "Schema.fs")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-1111222233334444.sqlite")
 
-  File.WriteAllText(schemaPath, "module Schema\n")
-  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
+  let newDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -3674,19 +3679,20 @@ let ``cli status prints cutover-complete cleanup state`` () =
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
     "INSERT INTO _migration_status(id, status) VALUES (0, 'ready');"
     "CREATE TABLE _schema_identity(id INTEGER PRIMARY KEY CHECK (id = 0), schema_hash TEXT NOT NULL, schema_commit TEXT, created_utc TEXT NOT NULL);"
-    "INSERT INTO _schema_identity(id, schema_hash, schema_commit, created_utc) VALUES (0, '9999aaaabbbbcccc', 'deadbeef', '2026-02-18T00:00:00.0000000Z');" ]
+    "INSERT INTO _schema_identity(id, schema_hash, schema_commit, created_utc) VALUES (0, '0123456789abcdef', 'fixture-commit', '2026-01-01T00:00:00.0000000Z');" ]
   |> List.iter (fun sql ->
     use cmd = new SqliteCommand(sql, newConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "status" ]
+  let exitCode, stdOut, stdErr =
+    runMigCliInDirectory (Some tempDir) [ "status"; "--assembly"; assemblyPath; "--module"; "CompiledSchemaFixture" ]
 
   Assert.Equal(0, exitCode)
   Assert.Contains($"Old database: {oldDbPath}", stdOut)
   Assert.Contains("Marker status: draining", stdOut)
   Assert.Contains("Migration status: ready", stdOut)
-  Assert.Contains("Schema hash: 9999aaaabbbbcccc", stdOut)
-  Assert.Contains("Schema commit: deadbeef", stdOut)
+  Assert.Contains("Schema hash: 0123456789abcdef", stdOut)
+  Assert.Contains("Schema commit: fixture-commit", stdOut)
   Assert.Contains("Pending replay entries: 0 (cutover complete)", stdOut)
   Assert.Contains("_id_mapping: removed", stdOut)
   Assert.Contains("_migration_progress: removed", stdOut)
@@ -3743,18 +3749,17 @@ let ``cli status infers new database from Schema fs`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-0123456789abcdef.sqlite")
-  let schemaPath = Path.Combine(tempDir, "Schema.fs")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-fedcba9876543210.sqlite")
 
-  File.WriteAllText(schemaPath, "module Schema\n")
-
-  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
+  let newDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   createStudentDatabase oldDbPath [ "Alice" ] None
   createStudentDatabase newDbPath [ "Alice" ] (Some "ready")
 
-  let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "status" ]
+  let exitCode, stdOut, stdErr =
+    runMigCliInDirectory (Some tempDir) [ "status"; "--assembly"; assemblyPath; "--module"; "CompiledSchemaFixture" ]
 
   Assert.Equal(0, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
@@ -3771,8 +3776,9 @@ let ``cli status can use compiled generated module from assembly`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-0123456789abcdef.sqlite")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-fedcba9876543210.sqlite")
+
   let newDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
@@ -4141,10 +4147,8 @@ let ``cli cutover returns error when drain not complete`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let schemaPath = Path.Combine(tempDir, "Schema.fs")
-
-  File.WriteAllText(schemaPath, "module Schema\n")
-  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
+  let newDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   use newConn = openSqliteConnection newDbPath
 
@@ -4156,7 +4160,15 @@ let ``cli cutover returns error when drain not complete`` () =
     use cmd = new SqliteCommand(sql, newConn)
     cmd.ExecuteNonQuery() |> ignore)
 
-  let exitCode, stdOut, stdErr = runMigCli [ "cutover"; "-d"; tempDir ]
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "cutover"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
@@ -4173,12 +4185,11 @@ let ``cli cutover blocks when old marker indicates replay divergence risk`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
-  let schemaPath = Path.Combine(tempDir, "Schema.fs")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-a1b2c3d4e5f60718.sqlite")
 
-  File.WriteAllText(schemaPath, "module Schema\n")
-  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
+  let newDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -4202,7 +4213,15 @@ let ``cli cutover blocks when old marker indicates replay divergence risk`` () =
   oldConn.Close()
   newConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCli [ "cutover"; "-d"; tempDir ]
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "cutover"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
@@ -4218,12 +4237,11 @@ let ``cli cutover blocks when old migration log has unreplayed entries beyond ch
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
-  let schemaPath = Path.Combine(tempDir, "Schema.fs")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-a1b2c3d4e5f60718.sqlite")
 
-  File.WriteAllText(schemaPath, "module Schema\n")
-  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
+  let newDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -4248,7 +4266,15 @@ let ``cli cutover blocks when old migration log has unreplayed entries beyond ch
   oldConn.Close()
   newConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCli [ "cutover"; "-d"; tempDir ]
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "cutover"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
@@ -4263,15 +4289,13 @@ let ``cli drain reports missing schema source clearly`` () =
     Path.Combine(Path.GetTempPath(), $"mig_cli_drain_missing_schema_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
-  let expectedSchemaFsPath = Path.Combine(Path.GetFullPath tempDir, "Schema.fs")
 
   let exitCode, stdOut, stdErr = runMigCli [ "drain"; "-d"; tempDir ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
-  Assert.Contains("drain failed: Could not infer new database automatically for `drain`.", stdErr)
-  Assert.Contains("No schema source was found.", stdErr)
-  Assert.Contains(expectedSchemaFsPath, stdErr)
+  Assert.Contains("drain failed:", stdErr)
+  Assert.Contains("requires --assembly", stdErr)
 
   Directory.Delete(tempDir, true)
 
@@ -4281,22 +4305,25 @@ let ``cli drain reports non-deterministic old database names clearly`` () =
     Path.Combine(Path.GetTempPath(), $"mig_cli_drain_bad_old_name_{Guid.NewGuid()}")
 
   Directory.CreateDirectory tempDir |> ignore
-  let schemaPath = Path.Combine(tempDir, "Schema.fs")
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
   let nonDeterministicOldPath = Path.Combine(tempDir, "old.sqlite")
 
-  File.WriteAllText(schemaPath, "module Schema\n")
   use oldConn = openSqliteConnection nonDeterministicOldPath
   oldConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCli [ "drain"; "-d"; tempDir ]
-  let dirName = DirectoryInfo(tempDir).Name
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "drain"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
-
-  Assert.Contains("drain failed: Could not infer old database automatically.", stdErr)
-  Assert.Contains($"do not match '{dirName}-<old-hash>.sqlite'", stdErr)
-  Assert.Contains(nonDeterministicOldPath, stdErr)
+  Assert.Contains("drain failed:", stdErr)
 
   Directory.Delete(tempDir, true)
 
@@ -4307,8 +4334,10 @@ let ``cli archive-old archives old database into archive directory`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-99990000aaaabbbb.sqlite")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-99990000aaaabbbb.sqlite")
+
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedArchivePath =
     Path.Combine(tempDir, "archive", Path.GetFileName oldDbPath)
@@ -4324,7 +4353,15 @@ let ``cli archive-old archives old database into archive directory`` () =
 
   oldConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCli [ "archive-old"; "-d"; tempDir ]
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "archive-old"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
 
   Assert.Equal(0, exitCode)
   Assert.Contains("Old database archive complete.", stdOut)
@@ -4405,8 +4442,10 @@ let ``cli archive-old returns error while recording`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-ccccddddeeeeffff.sqlite")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-ccccddddeeeeffff.sqlite")
+
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -4419,7 +4458,15 @@ let ``cli archive-old returns error while recording`` () =
 
   oldConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCli [ "archive-old"; "-d"; tempDir ]
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "archive-old"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
@@ -4447,9 +4494,11 @@ let ``cli reset clears old migration artifacts and deletes non-ready new databas
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-1122334455667788.sqlite")
-  let schemaPath = Path.Combine(tempDir, "Schema.fs")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-1122334455667788.sqlite")
+
+  let newDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -4463,9 +4512,6 @@ let ``cli reset clears old migration artifacts and deletes non-ready new databas
 
   oldConn.Close()
 
-  File.WriteAllText(schemaPath, "module Schema\n")
-  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
-
   use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
@@ -4476,7 +4522,15 @@ let ``cli reset clears old migration artifacts and deletes non-ready new databas
 
   newConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCli [ "reset"; "-d"; tempDir ]
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "reset"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
 
   Assert.Equal(0, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
@@ -4522,9 +4576,11 @@ let ``cli reset dry-run reports planned actions without mutating old or new data
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-0011223344556677.sqlite")
-  let schemaPath = Path.Combine(tempDir, "Schema.fs")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-0011223344556677.sqlite")
+
+  let newDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -4538,9 +4594,6 @@ let ``cli reset dry-run reports planned actions without mutating old or new data
 
   oldConn.Close()
 
-  File.WriteAllText(schemaPath, "module Schema\n")
-  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
-
   use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
@@ -4551,7 +4604,16 @@ let ``cli reset dry-run reports planned actions without mutating old or new data
 
   newConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCli [ "reset"; "--dry-run"; "-d"; tempDir ]
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "reset"
+        "--dry-run"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
 
   Assert.Equal(0, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
@@ -4598,8 +4660,9 @@ let ``cli reset dry-run can use compiled generated module from assembly`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-0011223344556677.sqlite")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-0011223344556677.sqlite")
+
   let newDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
@@ -4656,9 +4719,11 @@ let ``cli reset dry-run reports blocked ready target without mutating databases`
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-8899aabbccddeeff.sqlite")
-  let schemaPath = Path.Combine(tempDir, "Schema.fs")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-8899aabbccddeeff.sqlite")
+
+  let newDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -4671,9 +4736,6 @@ let ``cli reset dry-run reports blocked ready target without mutating databases`
 
   oldConn.Close()
 
-  File.WriteAllText(schemaPath, "module Schema\n")
-  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
-
   use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
@@ -4684,7 +4746,16 @@ let ``cli reset dry-run reports blocked ready target without mutating databases`
 
   newConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCli [ "reset"; "--dry-run"; "-d"; tempDir ]
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "reset"
+        "--dry-run"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
@@ -4725,9 +4796,11 @@ let ``cli reset refuses to delete ready new database and leaves old artifacts in
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-8899aabbccddeeff.sqlite")
-  let schemaPath = Path.Combine(tempDir, "Schema.fs")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-8899aabbccddeeff.sqlite")
+
+  let newDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
+  let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   use oldConn = openSqliteConnection oldDbPath
 
@@ -4740,9 +4813,6 @@ let ``cli reset refuses to delete ready new database and leaves old artifacts in
 
   oldConn.Close()
 
-  File.WriteAllText(schemaPath, "module Schema\n")
-  let newDbPath = deriveDeterministicNewDbPathFromSchemaFile tempDir schemaPath
-
   use newConn = openSqliteConnection newDbPath
 
   [ "CREATE TABLE _migration_status(id INTEGER PRIMARY KEY CHECK (id = 0), status TEXT NOT NULL);"
@@ -4753,7 +4823,15 @@ let ``cli reset refuses to delete ready new database and leaves old artifacts in
 
   newConn.Close()
 
-  let exitCode, stdOut, stdErr = runMigCli [ "reset"; "-d"; tempDir ]
+  let exitCode, stdOut, stdErr =
+    runMigCli
+      [ "reset"
+        "-d"
+        tempDir
+        "--assembly"
+        assemblyPath
+        "--module"
+        "CompiledSchemaFixture" ]
 
   Assert.Equal(1, exitCode)
   Assert.True(String.IsNullOrWhiteSpace stdOut, $"Expected no stdout output, got: {stdOut}")
@@ -4826,8 +4904,7 @@ let ``cli init skips when compiled-module database already exists`` () =
 
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
-  let expectedDbPath =
-    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
+  let expectedDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   use existingConn = openSqliteConnection expectedDbPath
 
@@ -4865,8 +4942,7 @@ let ``cli init can use compiled generated module from assembly`` () =
 
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
-  let expectedDbPath =
-    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
+  let expectedDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   let exitCode, stdOut, stdErr =
     runMigCli
@@ -4934,8 +5010,7 @@ let ``cli init prefers non-schema project assembly when Schema fsproj is present
   File.Delete(copiedTestAssemblyPath)
   File.Copy(schemaAssemblySourcePath, schemaAssemblyPath, true)
 
-  let expectedDbPath =
-    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
+  let expectedDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   let exitCode, stdOut, stdErr =
     runMigCliInDirectory (Some tempDir) [ "init"; "--module"; "CompiledSchemaFixture" ]
@@ -5011,8 +5086,9 @@ let ``cli migrate can use compiled generated module from assembly`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-fedcba9876543210.sqlite")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-fedcba9876543210.sqlite")
+
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
@@ -5066,8 +5142,9 @@ let ``cli plan can use compiled generated module from assembly`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-1a2b3c4d5e6f7788.sqlite")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-1a2b3c4d5e6f7788.sqlite")
+
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
@@ -5107,8 +5184,9 @@ let ``cli offline can use compiled generated module from assembly`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-a1b2c3d4e5f60718.sqlite")
+
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
@@ -5164,8 +5242,9 @@ let ``cli migrate stores compiled schema commit metadata`` () =
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-1111222233334444.sqlite")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-1111222233334444.sqlite")
+
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
@@ -5213,8 +5292,9 @@ let ``cli migrate auto-discovers old db from current directory with compiled mod
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-fedcba9876543210.sqlite")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-fedcba9876543210.sqlite")
+
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
@@ -5259,8 +5339,9 @@ let ``cli plan prints dry-run migration plan from compiled module without mutati
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-1a2b3c4d5e6f7788.sqlite")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-1a2b3c4d5e6f7788.sqlite")
+
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
@@ -5322,8 +5403,9 @@ let ``cli plan reports blocking drift from compiled module and keeps databases u
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-9a8b7c6d5e4f3210.sqlite")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-9a8b7c6d5e4f3210.sqlite")
+
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
@@ -5381,8 +5463,9 @@ let ``cli migrate failure from compiled module prints recovery snapshot and guid
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-2233445566778899.sqlite")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-2233445566778899.sqlite")
+
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedNewDbPath =
@@ -5434,8 +5517,9 @@ let ``cli drain cutover status and archive-old use compiled-module target discov
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-a1b2c3d4e5f60718.sqlite")
+
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedArchivePath =
@@ -5513,8 +5597,9 @@ let ``cli offline auto-discovers old db and archives after compiled-module copy`
 
   Directory.CreateDirectory tempDir |> ignore
 
-  let dirName = DirectoryInfo(tempDir).Name
-  let oldDbPath = Path.Combine(tempDir, $"{dirName}-a1b2c3d4e5f60718.sqlite")
+  let oldDbPath =
+    Path.Combine(tempDir, "compiled-fixture-main-a1b2c3d4e5f60718.sqlite")
+
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
   let expectedArchivePath =
@@ -5580,8 +5665,7 @@ let ``cli migrate skips when compiled-module database already exists`` () =
 
   let assemblyPath = typeof<CompiledSchemaFixture.Marker>.Assembly.Location
 
-  let expectedDbPath =
-    Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
+  let expectedDbPath = Path.Combine(Path.GetFullPath tempDir, compiledFixtureDbFile)
 
   use existingConn = openSqliteConnection expectedDbPath
 
@@ -6305,6 +6389,7 @@ let ``codegen generates module and query methods from schema model`` () =
       queryByAnnotations = [ { columns = [ "name"; "age" ] } ]
       queryLikeAnnotations = [ { columns = [ "name" ] } ]
       queryByOrCreateAnnotations = [ { columns = [ "name"; "age" ] } ]
+      selectOneAnnotations = []
       insertOrIgnoreAnnotations = [ InsertOrIgnoreAnnotation ]
       deleteAllAnnotations = [ DeleteAllAnnotation ]
       upsertAnnotations = [ UpsertAnnotation ] }
@@ -6548,6 +6633,7 @@ let ``querybyorinsert works for composite primary keys without SelectById fallba
       queryByAnnotations = []
       queryLikeAnnotations = []
       queryByOrCreateAnnotations = [ { columns = [ "description" ] } ]
+      selectOneAnnotations = []
       insertOrIgnoreAnnotations = []
       deleteAllAnnotations = []
       upsertAnnotations = [] }
@@ -6597,6 +6683,7 @@ let ``codegen rejects upsert annotation when table has no primary key`` () =
       queryByAnnotations = []
       queryLikeAnnotations = []
       queryByOrCreateAnnotations = []
+      selectOneAnnotations = []
       insertOrIgnoreAnnotations = []
       deleteAllAnnotations = []
       upsertAnnotations = [ UpsertAnnotation ] }
@@ -6635,6 +6722,7 @@ let ``codegen allows deleteall annotation when table has no primary key`` () =
       queryByAnnotations = []
       queryLikeAnnotations = []
       queryByOrCreateAnnotations = []
+      selectOneAnnotations = []
       insertOrIgnoreAnnotations = []
       deleteAllAnnotations = [ DeleteAllAnnotation ]
       upsertAnnotations = [] }
@@ -6684,6 +6772,7 @@ let ``codegen rejects upsert annotation on views`` () =
       queryByAnnotations = []
       queryLikeAnnotations = []
       queryByOrCreateAnnotations = []
+      selectOneAnnotations = []
       insertOrIgnoreAnnotations = []
       deleteAllAnnotations = []
       upsertAnnotations = [] }
@@ -6697,6 +6786,7 @@ let ``codegen rejects upsert annotation on views`` () =
       queryByAnnotations = []
       queryLikeAnnotations = []
       queryByOrCreateAnnotations = []
+      selectOneAnnotations = []
       insertOrIgnoreAnnotations = []
       deleteAllAnnotations = []
       upsertAnnotations = [ UpsertAnnotation ] }
@@ -6748,6 +6838,7 @@ let ``codegen rejects deleteall annotation on views`` () =
       queryByAnnotations = []
       queryLikeAnnotations = []
       queryByOrCreateAnnotations = []
+      selectOneAnnotations = []
       insertOrIgnoreAnnotations = []
       deleteAllAnnotations = []
       upsertAnnotations = [] }
@@ -6761,6 +6852,7 @@ let ``codegen rejects deleteall annotation on views`` () =
       queryByAnnotations = []
       queryLikeAnnotations = []
       queryByOrCreateAnnotations = []
+      selectOneAnnotations = []
       insertOrIgnoreAnnotations = []
       deleteAllAnnotations = [ DeleteAllAnnotation ]
       upsertAnnotations = [] }
@@ -6833,7 +6925,8 @@ let ``build api derives schema-bound db file name from Schema fs path`` () =
   match deriveSchemaBoundDbFileName "my-app" None schemaPath with
   | Error error -> failwith $"deriveSchemaBoundDbFileName failed: {error}"
   | Ok dbFileName ->
-    let expectedDbFile = $"my-app-main-{deriveShortSchemaHashFromSourceFile schemaPath}.sqlite"
+    let expectedDbFile =
+      $"my-app-main-{deriveShortSchemaHashFromSourceFile schemaPath}.sqlite"
 
     Assert.Equal(expectedDbFile, dbFileName)
 

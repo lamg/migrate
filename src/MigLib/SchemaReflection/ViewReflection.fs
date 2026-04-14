@@ -453,6 +453,7 @@ module internal SchemaReflectionView =
       let! queryByAnnotations,
            queryLikeAnnotations,
            queryByOrCreateAnnotations,
+           selectOneAnnotations,
            insertOrIgnoreAnnotations,
            deleteAllAnnotations,
            upsertAnnotations = readQueryAnnotations viewType resolver
@@ -466,6 +467,7 @@ module internal SchemaReflectionView =
           queryByAnnotations = queryByAnnotations
           queryLikeAnnotations = queryLikeAnnotations
           queryByOrCreateAnnotations = queryByOrCreateAnnotations
+          selectOneAnnotations = selectOneAnnotations
           insertOrIgnoreAnnotations = insertOrIgnoreAnnotations
           deleteAllAnnotations = deleteAllAnnotations
           upsertAnnotations = upsertAnnotations }

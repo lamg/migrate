@@ -68,6 +68,7 @@ type DefaultAttribute = DbAttributes.DefaultAttribute
 type DefaultExprAttribute = DbAttributes.DefaultExprAttribute
 type IndexAttribute = DbAttributes.IndexAttribute
 type SelectAllAttribute = DbAttributes.SelectAllAttribute
+type SelectOneAttribute = DbAttributes.SelectOneAttribute
 type SelectByAttribute = DbAttributes.SelectByAttribute
 type SelectOneByAttribute = DbAttributes.SelectOneByAttribute
 type SelectLikeAttribute = DbAttributes.SelectLikeAttribute

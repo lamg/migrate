@@ -43,6 +43,11 @@ module DbAttributes =
     inherit Attribute()
     member val OrderBy: string = null with get, set
 
+  [<AttributeUsage(AttributeTargets.Class)>]
+  type SelectOneAttribute() =
+    inherit Attribute()
+    member val OrderBy: string = null with get, set
+
   [<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
   type SelectByAttribute([<ParamArray>] columns: string array) =
     inherit Attribute()

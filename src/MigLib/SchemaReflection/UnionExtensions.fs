@@ -130,6 +130,7 @@ module internal SchemaReflectionUnionExtensions =
                   queryByAnnotations = []
                   queryLikeAnnotations = []
                   queryByOrCreateAnnotations = []
+                  selectOneAnnotations = []
                   insertOrIgnoreAnnotations = []
                   deleteAllAnnotations = []
                   upsertAnnotations = [] }

@@ -195,6 +195,9 @@ let private renderCreateView (view: CreateView) =
   let renderedQueryByOrCreateAnnotations =
     renderList renderQueryByOrCreateAnnotation view.queryByOrCreateAnnotations
 
+  let renderedSelectOneAnnotations =
+    renderList (fun _ -> "SelectOneAnnotation") view.selectOneAnnotations
+
   let renderedInsertOrIgnoreAnnotations =
     renderList (fun _ -> "InsertOrIgnoreAnnotation") view.insertOrIgnoreAnnotations
 
@@ -204,7 +207,7 @@ let private renderCreateView (view: CreateView) =
   let renderedUpsertAnnotations =
     renderList (fun _ -> "UpsertAnnotation") view.upsertAnnotations
 
-  $"{{ name = {renderStringLiteral view.name}; previousName = {renderedPreviousName}; sql = {renderedSql}; declaredColumns = {renderedDeclaredColumns}; dependencies = {renderedDependencies}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; deleteAllAnnotations = {renderedDeleteAllAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
+  $"{{ name = {renderStringLiteral view.name}; previousName = {renderedPreviousName}; sql = {renderedSql}; declaredColumns = {renderedDeclaredColumns}; dependencies = {renderedDependencies}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; selectOneAnnotations = {renderedSelectOneAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; deleteAllAnnotations = {renderedDeleteAllAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
 
 let private renderCreateTable (table: CreateTable) =
   let renderedPreviousName = renderOption renderStringLiteral table.previousName
@@ -221,6 +224,9 @@ let private renderCreateTable (table: CreateTable) =
   let renderedQueryByOrCreateAnnotations =
     renderList renderQueryByOrCreateAnnotation table.queryByOrCreateAnnotations
 
+  let renderedSelectOneAnnotations =
+    renderList (fun _ -> "SelectOneAnnotation") table.selectOneAnnotations
+
   let renderedInsertOrIgnoreAnnotations =
     renderList (fun _ -> "InsertOrIgnoreAnnotation") table.insertOrIgnoreAnnotations
 
@@ -230,7 +236,7 @@ let private renderCreateTable (table: CreateTable) =
   let renderedUpsertAnnotations =
     renderList (fun _ -> "UpsertAnnotation") table.upsertAnnotations
 
-  $"{{ name = {renderStringLiteral table.name}; previousName = {renderedPreviousName}; dropColumns = {renderedDropColumns}; columns = {renderedColumns}; constraints = {renderedConstraints}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; deleteAllAnnotations = {renderedDeleteAllAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
+  $"{{ name = {renderStringLiteral table.name}; previousName = {renderedPreviousName}; dropColumns = {renderedDropColumns}; columns = {renderedColumns}; constraints = {renderedConstraints}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; selectOneAnnotations = {renderedSelectOneAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; deleteAllAnnotations = {renderedDeleteAllAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
 
 let private renderCreateIndex (index: CreateIndex) =
   $"{{ name = {renderStringLiteral index.name}; table = {renderStringLiteral index.table}; columns = {renderList renderStringLiteral index.columns} }}"

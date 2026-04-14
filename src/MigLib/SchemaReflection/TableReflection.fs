@@ -161,6 +161,7 @@ module internal SchemaReflectionTable =
       let! queryByAnnotations,
            queryLikeAnnotations,
            queryByOrCreateAnnotations,
+           selectOneAnnotations,
            insertOrIgnoreAnnotations,
            deleteAllAnnotations,
            upsertAnnotations = readQueryAnnotations recordType resolver
@@ -178,6 +179,7 @@ module internal SchemaReflectionTable =
           queryByAnnotations = queryByAnnotations
           queryLikeAnnotations = queryLikeAnnotations
           queryByOrCreateAnnotations = queryByOrCreateAnnotations
+          selectOneAnnotations = selectOneAnnotations
           insertOrIgnoreAnnotations = insertOrIgnoreAnnotations
           deleteAllAnnotations = deleteAllAnnotations
           upsertAnnotations = upsertAnnotations },
