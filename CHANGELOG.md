@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.0.1] - 2026-04-14
+
+Fixed:
+
+- **Tests**: update test suite for assembly-based CLI approach (commands now require `--assembly`)
+  - replaced `Schema.fs`-based discovery with `--assembly`/`--module` args in all CLI tests
+  - renamed old DB paths from `{dirName}-<hash>.sqlite` to `compiled-fixture-main-<hash>.sqlite`
+  - fixed trigger validation message assertion (`has no SQL tokens` → `has no SQL.`)
+  - fixed `startService` test old DB name to match prefix-based discovery
+
+Changed:
+
+- **MigLib/MigLib.Web/mig**: `CreateView.sqlTokens` and `CreateTrigger.sqlTokens` fields replaced by `sql` string fields
+- Generated views now auto-derive `CREATE VIEW ... AS <sql>` from the `sql` field
+
 ## [6.0.1] - 2026-04-10
 
 Fixed:
