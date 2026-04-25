@@ -73,16 +73,12 @@ let generateDbCodeFromAssemblyModulePath
   if String.IsNullOrWhiteSpace assemblyPath then
     Error "Compiled assembly path is empty."
   else
-    let fullAssemblyPath = Path.GetFullPath assemblyPath
-
-    if not (File.Exists fullAssemblyPath) then
-      Error $"Compiled assembly was not found: {fullAssemblyPath}"
-    else
+    withAssemblyPathResolver assemblyPath (fun fullAssemblyPath loadContext ->
       try
-        let assembly = Assembly.LoadFrom fullAssemblyPath
+        let assembly = loadContext.LoadFromAssemblyPath fullAssemblyPath
         generateDbCodeFromAssemblyModule generatedModuleName dbApp schemaPath assembly schemaModuleName outputFilePath
       with ex ->
-        Error $"Could not load compiled assembly '{fullAssemblyPath}': {ex.Message}"
+        Error $"Could not load compiled assembly '{fullAssemblyPath}': {formatExceptionDetails ex}")
 
 type CodegenReport =
   { schemaPath: string

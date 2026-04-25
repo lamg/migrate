@@ -521,7 +521,12 @@ translates to
 ```sql
 CREATE TABLE user(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
 
-CREATE TABLE order(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, amount REAL NOT NULL, FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE CASCADE);
+CREATE TABLE order(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  amount REAL NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE CASCADE
+);
 ```
 
 Composite foreign keys are declared by specifying multiple columns:
