@@ -192,12 +192,10 @@ module internal HotMigrationMigration =
 
         match oldDbPath with
         | None ->
-          let! (_: InitResult) = (runInitWithSchema targetSchema newDbPath: Task<Result<InitResult, SqliteException>>)
+          let! (_: InitResult) = runInitWithSchema targetSchema newDbPath
           return dbTxn newDbPath
         | Some oldDbPath ->
-          let! (_: MigrateResult) =
-            (runMigrateWithSchema oldDbPath schemaIdentity targetSchema newDbPath
-            : Task<Result<MigrateResult, SqliteException>>)
+          let! (_: MigrateResult) = runMigrateWithSchema oldDbPath schemaIdentity targetSchema newDbPath
 
           return dbTxn newDbPath
       | ExitEarly(_, reason) -> return! Error(SqliteException(reason, 0))

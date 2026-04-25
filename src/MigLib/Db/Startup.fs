@@ -63,11 +63,10 @@ module DbStartup =
     : Task<Result<StartupDatabaseDecision, SqliteException>> =
     taskResult {
       let! dbPath =
-        (DbCore.resolveDatabaseFilePath configuredDirectory dbFileName
-         |> TaskResultEx.ofResultMapError (fun message -> SqliteException(message, 0))
-        : Task<Result<string, SqliteException>>)
+        DbCore.resolveDatabaseFilePath configuredDirectory dbFileName
+        |> TaskResultEx.ofResultMapError (fun message -> SqliteException(message, 0))
 
-      let! state = (getStartupDatabaseState dbPath: Task<Result<StartupDatabaseState, SqliteException>>)
+      let! state = getStartupDatabaseState dbPath
 
       return
         match state with

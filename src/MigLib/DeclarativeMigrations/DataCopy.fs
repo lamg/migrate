@@ -73,7 +73,7 @@ let private identityPart (value: Expr) =
   match value with
   | String text -> "s:" + text.Replace("|", "||")
   | Integer number -> $"i:{number}"
-  | Real number -> $"r:{number.ToString(CultureInfo.InvariantCulture)}"
+  | Real number -> $"r:{number.ToString CultureInfo.InvariantCulture}"
   | Value text -> "v:" + text.Replace("|", "||")
 
 let private identityKey (values: Expr list) =
