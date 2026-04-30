@@ -18,4 +18,5 @@ This file is intentionally short. Detailed project guidance is split into local 
 - migrate-codegen-cpm: `mig codegen` `.fsproj` and CPM requirements. (file: `skills/migrate-codegen-cpm/SKILL.md`)
 - migrate-version-sync: MigLib and mig version synchronization and release checklist. (file: `skills/migrate-version-sync/SKILL.md`)
 - migrate-docs-workflow: `specs/` and `PROGRESS.md` documentation workflow. (file: `skills/migrate-docs-workflow/SKILL.md`)
-- migrate-layered-module-splitting: Split oversized multi-layer files into a directory with one file per layer plus a README. (file: `skills/migrate-layered-module-splitting/SKILL.md`)
+- migrate-layered-module-splitting: Split F# files or modules that contain stacked responsibility layers into explicit one-way internal layers plus a stable facade. (file: `skills/migrate-layered-module-splitting/SKILL.md`)
+- migrate-layered-function-design: Refactor F# function bodies so each function reads at one abstraction level, with lower-level obligations isolated behind precise helper names. (file: `skills/migrate-layered-function-design/SKILL.md`)
