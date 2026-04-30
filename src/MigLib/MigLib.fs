@@ -13,14 +13,15 @@ type StatusResult = Commands.Types.StatusResult
 type ResetResult = Commands.Types.ResetResult
 type ProgReport = Commands.Types.ProgReport
 
-let codegen (project: MigProject) : Result<CodegenResult, MigError> = Commands.Codegen.codegen project
+let codegen (project: MigProject) : Result<CodegenResult, MigError> =
+  Commands.Codegen.Execution.codegen project
 
-let init (project: MigProject) : Task<Result<InitResult, MigError>> = Commands.Init.init project
+let init (project: MigProject) : Task<Result<InitResult, MigError>> = Commands.Init.Execution.init project
 
 let migrate (reportProgress: ProgReport) (project: MigProject) : Task<Result<MigrateResult, MigError>> =
-  Commands.Migrate.migrate reportProgress project
+  Commands.Migrate.Execution.migrate reportProgress project
 
-let plan (project: MigProject) : Task<Result<PlanResult, MigError>> = Commands.Plan.plan project
+let plan (project: MigProject) : Task<Result<PlanResult, MigError>> = Commands.Plan.Reporting.plan project
 
 // reports if the current database needs a migration
 let status (project: MigProject) : Task<Result<StatusResult, MigError>> = failwith "TODO status"

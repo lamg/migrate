@@ -23,7 +23,7 @@ type MigError =
   | Sqlite of SqliteException
   | Other of Exception
 
-type SqlFile = MigLib.DeclarativeMigrations.Types.SqlFile
+type SqlFile = Mig.DeclarativeMigrations.Types.SqlFile
 
 type InitResult =
   { newDbPath: string; seededRows: int64 }

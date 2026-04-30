@@ -6,6 +6,7 @@ open System.Xml.Linq
 
 open MigLib.Commands.Types
 open MigLib.Commands.Resolution.Types
+open MigLib.Util
 
 let private tryLoadProjectDocument (projectPath: string) : Result<XDocument, MigError> =
   try

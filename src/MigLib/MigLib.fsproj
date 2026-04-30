@@ -78,6 +78,23 @@
     <Compile Include="HotMigration/Operations.fs" />
     <Compile Include="CompiledSchema.fs" />
     <Compile Include="Build.fs" />
+    <Compile Include="Commands/Types.fs" />
+    <Compile Include="Commands/Resolution/Types.fs" />
+    <Compile Include="Commands/Resolution/Projects.fs" />
+    <Compile Include="Commands/Resolution/Assemblies.fs" />
+    <Compile Include="Commands/Resolution/GeneratedSchema.fs" />
+    <Compile Include="Commands/Resolution/DatabasePaths.fs" />
+    <Compile Include="Commands/Codegen/Inputs.fs" />
+    <Compile Include="Commands/Codegen/Execution.fs" />
+    <Compile Include="Commands/Init/SchemaInit.fs" />
+    <Compile Include="Commands/Init/Execution.fs" />
+    <Compile Include="Commands/Migrate/Discovery.fs" />
+    <Compile Include="Commands/Migrate/Planning.fs" />
+    <Compile Include="Commands/Migrate/Execution.fs" />
+    <Compile Include="Commands/Migrate/Archive.fs" />
+    <Compile Include="Commands/Plan/Discovery.fs" />
+    <Compile Include="Commands/Plan/Reporting.fs" />
+    <Compile Include="MigLib.fs" />
     <Content Include="../../README.md" Pack="true" PackagePath="\" />
     <Content Include="../../images/logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>
