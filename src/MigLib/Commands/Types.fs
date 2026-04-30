@@ -7,9 +7,10 @@ open MigLib.DbTransactions
 
 type MigProject =
   {
-    // Path to an F# project following MigLib conventions, i.e a nested Schema dir with:
-    // - Schema.fsproj: references MigLib
-    // - Schema.fs: defines database schema using types and MigLib attributes
+    // Path to an F# runtime project following MigLib conventions:
+    // - P/P.fsproj: runtime project that references the generated database module
+    // - P/MigSchema/MigSchema.fsproj: schema project that references MigLib
+    // - P/MigSchema/MigSchema.fs: schema source using types and MigLib attributes
     fsProject: string
     // - Each F# project can have multiple databases, which are differentiated by the dbInstance value
     dbInstance: string
