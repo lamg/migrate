@@ -122,6 +122,7 @@ The README is part of the design. It should let a future maintainer place new co
 - Compile lower layers before higher layers.
 - Keep facade files after the internal files they depend on.
 - Prefer top-level module declarations for single-module files.
+- Name modules after their directory path, using dotted module names that make ownership explicit, such as `MigLib.Commands.Resolution.Types` for `Commands/Resolution/Types.fs`.
 - Prefer `internal` modules for implementation layers unless public exposure is intentional.
 - Format changed F# files with Fantomas.
 
