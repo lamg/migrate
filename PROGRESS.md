@@ -176,9 +176,9 @@ Planned behavior:
 
 1. Accept `--project <path-to-fsproj>` or a directory with autodiscovery.
 2. For directory autodiscovery, inspect only the given directory for runtime `.fsproj` candidates.
-3. Exclude `Schema/Schema.fsproj` from runtime project selection.
+3. Exclude `MigSchema/MigSchema.fsproj` from runtime project selection.
 4. Require exactly one runtime project or fail clearly.
-5. Infer the schema project by convention as `Schema/Schema.fsproj` relative to the runtime project.
+5. Infer the schema project by convention as `MigSchema/MigSchema.fsproj` relative to the runtime project.
 6. Resolve built runtime and schema assemblies automatically from those `.fsproj` files.
 7. Emit a marker attribute on generated `Db.fs` modules during code generation.
 8. Discover the generated schema module by reflection from the compiled runtime assembly.
