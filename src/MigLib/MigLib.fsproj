@@ -85,6 +85,7 @@
     <Compile Include="Commands/Resolution/Assemblies.fs" />
     <Compile Include="Commands/Resolution/GeneratedSchema.fs" />
     <Compile Include="Commands/Resolution/DatabasePaths.fs" />
+    <Compile Include="Commands/Codegen/Generation.fs" />
     <Compile Include="Commands/Codegen/Inputs.fs" />
     <Compile Include="Commands/Codegen/Execution.fs" />
     <Compile Include="Commands/Init/SchemaInit.fs" />

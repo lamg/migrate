@@ -12,7 +12,9 @@
     <Compile Include="Commands/Resolution/AssembliesTests.fs" />
     <Compile Include="Commands/Resolution/GeneratedSchemaTests.fs" />
     <Compile Include="Commands/Resolution/DatabasePathsTests.fs" />
+    <Compile Include="Commands/Codegen/ExecutionFixture.fs" />
     <Compile Include="Commands/Codegen/InputsTests.fs" />
+    <Compile Include="Commands/Codegen/ExecutionTests.fs" />
     <Compile Include="Tests.fs" />
   </ItemGroup>
   <ItemGroup>
