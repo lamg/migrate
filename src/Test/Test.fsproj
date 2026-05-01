@@ -16,6 +16,8 @@
     <Compile Include="Commands/Codegen/InputsTests.fs" />
     <Compile Include="Commands/Codegen/ExecutionTests.fs" />
     <Compile Include="Commands/Init/ExecutionTests.fs" />
+    <Compile Include="Commands/Migrate/DiscoveryTests.fs" />
+    <Compile Include="Commands/Plan/DiscoveryTests.fs" />
     <Compile Include="Tests.fs" />
   </ItemGroup>
   <ItemGroup>
