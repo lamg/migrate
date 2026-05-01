@@ -14,43 +14,35 @@ let private isFsProjectPath (path: string) =
 let private schemaProjectPathFor (runtimeProjectDirectory: string) =
   Path.Combine(runtimeProjectDirectory, "MigSchema", "MigSchema.fsproj")
 
-let private resolveProjectFile (project: MigProject) (projectPath: string) : Result<ResolvedProject, MigError> =
-  let fullProjectPath = Path.GetFullPath projectPath
-
-  if not (isFsProjectPath fullProjectPath) then
-    regularError $"Runtime project path must be an .fsproj file: {fullProjectPath}"
-  elif not (File.Exists fullProjectPath) then
-    regularError $"Runtime project file was not found: {fullProjectPath}"
-  else
-    let runtimeProjectDirectory = Path.GetDirectoryName fullProjectPath
-    let schemaProjectPath = schemaProjectPathFor runtimeProjectDirectory
-    let schemaDirectory = Path.GetDirectoryName schemaProjectPath
-
-    if not (File.Exists schemaProjectPath) then
-      regularError $"Schema project file was not found: {schemaProjectPath}"
-    else
-      Ok
-        { migProject =
-            { project with
-                fsProject = fullProjectPath }
-          runtimeProjectPath = fullProjectPath
-          runtimeProjectDirectory = runtimeProjectDirectory
-          runtimeProjectName = Path.GetFileNameWithoutExtension fullProjectPath
-          schemaProjectPath = schemaProjectPath
-          schemaDirectory = schemaDirectory }
-
-let rec resolveProject (project: MigProject) : Result<ResolvedProject, MigError> =
+let resolveProject (project: MigProject) : Result<ResolvedProject, MigError> =
   if String.IsNullOrWhiteSpace project.fsProject then
     regularError "Runtime project path is empty."
   else
     let fullProjectPath = Path.GetFullPath project.fsProject
 
-    if Directory.Exists fullProjectPath then
-      discoverProject fullProjectPath project.dbInstance project.dbDir
+    if not (isFsProjectPath fullProjectPath) then
+      regularError $"Runtime project path must be an .fsproj file: {fullProjectPath}"
+    elif not (File.Exists fullProjectPath) then
+      regularError $"Runtime project file was not found: {fullProjectPath}"
     else
-      resolveProjectFile project fullProjectPath
+      let runtimeProjectDirectory = Path.GetDirectoryName fullProjectPath
+      let schemaProjectPath = schemaProjectPathFor runtimeProjectDirectory
+      let schemaDirectory = Path.GetDirectoryName schemaProjectPath
 
-and discoverProject (directory: string) (dbInstance: string) (dbDir: string) : Result<ResolvedProject, MigError> =
+      if not (File.Exists schemaProjectPath) then
+        regularError $"Schema project file was not found: {schemaProjectPath}"
+      else
+        Ok
+          { migProject =
+              { project with
+                  fsProject = fullProjectPath }
+            runtimeProjectPath = fullProjectPath
+            runtimeProjectDirectory = runtimeProjectDirectory
+            runtimeProjectName = Path.GetFileNameWithoutExtension fullProjectPath
+            schemaProjectPath = schemaProjectPath
+            schemaDirectory = schemaDirectory }
+
+let discoverProject (directory: string) (dbInstance: string) (dbDir: string) : Result<ResolvedProject, MigError> =
   if String.IsNullOrWhiteSpace directory then
     regularError "Project discovery directory is empty."
   else
