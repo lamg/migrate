@@ -91,8 +91,10 @@ let ``resolveGeneratedSchema loads Schema from conventional Db module`` () =
       Assert.Equal("TestGenerated.Db", resolved.moduleName)
       Assert.Single resolved.generatedModule.schema.tables |> ignore
       Assert.Equal("generated_fixture", resolved.generatedModule.schema.tables.Head.name)
-      Assert.True(resolved.generatedModule.schemaHash.IsNone)
-      Assert.True(resolved.generatedModule.dbApp.IsNone)
+      Assert.Equal(TestGenerated.Db.SchemaHash, resolved.generatedModule.schemaHash)
+      Assert.Equal(TestGenerated.Db.DbApp, resolved.generatedModule.dbApp)
+      Assert.Equal(TestGenerated.Db.DefaultDbInstance, resolved.generatedModule.defaultDbInstance)
+      Assert.Equal(TestGenerated.Db.SchemaIdentity, resolved.generatedModule.schemaIdentity)
     | Error error -> failwith $"Expected generated schema to resolve, got: {error}"
   finally
     Directory.Delete(tempDir, true)

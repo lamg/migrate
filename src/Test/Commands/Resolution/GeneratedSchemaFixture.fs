@@ -1,8 +1,22 @@
 module TestGenerated.Db
 
 open Mig.DeclarativeMigrations.Types
+open Mig.HotMigration
 
 type Marker = class end
+
+[<Literal>]
+let DbApp = "generated-fixture"
+
+[<Literal>]
+let DefaultDbInstance = "main"
+
+[<Literal>]
+let SchemaHash = "0123456789abcdef"
+
+let SchemaIdentity: SchemaIdentity =
+  { schemaHash = SchemaHash
+    schemaCommit = Some "generated-fixture-commit" }
 
 let Schema: SqlFile =
   { measureTypes = []

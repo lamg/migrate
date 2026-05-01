@@ -7,9 +7,9 @@ open System.Runtime.Loader
 open System.Xml.Linq
 
 open Mig.DeclarativeMigrations.Types
+open Mig.HotMigration
 open MigLib.Commands.Types
 open MigLib.Commands.Resolution.Types
-open MigLib.CompiledSchema
 open MigLib.Util
 
 let private staticBindingFlags =
@@ -156,13 +156,17 @@ let private loadGeneratedModule (assemblyPath: string) (moduleName: string) =
       result {
         let! moduleType = tryFindModuleType assembly moduleName
         let! schema = tryReadRequiredStaticValue<SqlFile> moduleType "Schema"
+        let! schemaIdentity = tryReadRequiredStaticValue<SchemaIdentity> moduleType "SchemaIdentity"
+        let! schemaHash = tryReadRequiredStaticValue<string> moduleType "SchemaHash"
+        let! dbApp = tryReadRequiredStaticValue<string> moduleType "DbApp"
+        let! defaultDbInstance = tryReadRequiredStaticValue<string> moduleType "DefaultDbInstance"
 
         return
           { schema = schema
-            schemaIdentity = None
-            schemaHash = None
-            dbApp = None
-            defaultDbInstance = None }
+            schemaIdentity = schemaIdentity
+            schemaHash = schemaHash
+            dbApp = dbApp
+            defaultDbInstance = defaultDbInstance }
       }
     with ex ->
       Error $"Could not load compiled assembly '{fullAssemblyPath}': {formatAssemblyLoadError ex}")

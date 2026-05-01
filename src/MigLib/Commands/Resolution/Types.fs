@@ -1,7 +1,8 @@
 module internal MigLib.Commands.Resolution.Types
 
+open Mig.DeclarativeMigrations.Types
+open Mig.HotMigration
 open MigLib.Commands.Types
-open MigLib.CompiledSchema
 
 type ResolvedProject =
   { migProject: MigProject
@@ -16,10 +17,17 @@ type ResolvedAssembly =
     assemblyName: string
     assemblyPath: string }
 
+type ResolvedGeneratedSchemaModule =
+  { schema: SqlFile
+    schemaIdentity: SchemaIdentity
+    schemaHash: string
+    dbApp: string
+    defaultDbInstance: string }
+
 type ResolvedGeneratedSchema =
   { assembly: ResolvedAssembly
     moduleName: string
-    generatedModule: GeneratedSchemaModule }
+    generatedModule: ResolvedGeneratedSchemaModule }
 
 type ResolvedDatabasePaths =
   { targetDbPath: string
