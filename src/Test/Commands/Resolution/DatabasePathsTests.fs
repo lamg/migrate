@@ -3,8 +3,7 @@ module Test.Commands.Resolution.DatabasePathsTests
 open System
 open System.IO
 
-open Mig.DeclarativeMigrations.Types
-open Mig.HotMigration
+open MigLib.Commands.Schema.Types
 open MigLib.Commands.Types
 open MigLib.Commands.Resolution.DatabasePaths
 open MigLib.Commands.Resolution.Types

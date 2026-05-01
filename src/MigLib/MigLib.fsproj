@@ -78,6 +78,7 @@
     <Compile Include="HotMigration/Operations.fs" />
     <Compile Include="CompiledSchema.fs" />
     <Compile Include="Build.fs" />
+    <Compile Include="Commands/Schema/Types.fs" />
     <Compile Include="Commands/Types.fs" />
     <Compile Include="Commands/Resolution/Types.fs" />
     <Compile Include="Commands/Resolution/Projects.fs" />

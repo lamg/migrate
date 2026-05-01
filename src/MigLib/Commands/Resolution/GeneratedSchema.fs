@@ -6,8 +6,7 @@ open System.Reflection
 open System.Runtime.Loader
 open System.Xml.Linq
 
-open Mig.DeclarativeMigrations.Types
-open Mig.HotMigration
+open MigLib.Commands.Schema.Types
 open MigLib.Commands.Types
 open MigLib.Commands.Resolution.Types
 open MigLib.Util

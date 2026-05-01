@@ -1,7 +1,6 @@
 module TestGenerated.Db
 
-open Mig.DeclarativeMigrations.Types
-open Mig.HotMigration
+open MigLib.Commands.Schema.Types
 
 type Marker = class end
 

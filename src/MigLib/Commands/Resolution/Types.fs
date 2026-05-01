@@ -1,7 +1,6 @@
 module internal MigLib.Commands.Resolution.Types
 
-open Mig.DeclarativeMigrations.Types
-open Mig.HotMigration
+open MigLib.Commands.Schema.Types
 open MigLib.Commands.Types
 
 type ResolvedProject =

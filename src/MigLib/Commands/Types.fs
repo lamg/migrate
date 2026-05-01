@@ -3,6 +3,7 @@ module MigLib.Commands.Types
 open System
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
+open MigLib.Commands.Schema.Types
 open MigLib.DbTransactions
 
 type MigProject =
@@ -24,7 +25,7 @@ type MigError =
   | Sqlite of SqliteException
   | Other of Exception
 
-type SqlFile = Mig.DeclarativeMigrations.Types.SqlFile
+type SqlFile = MigLib.Commands.Schema.Types.SqlFile
 
 type InitResult =
   { newDbPath: string; seededRows: int64 }
