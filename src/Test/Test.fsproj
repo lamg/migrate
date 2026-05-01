@@ -7,8 +7,10 @@
     <Compile Include="CompiledSchemaFixture.fs" />
     <Compile Include="CompiledSchemaSourceFixture.fs" />
     <Compile Include="SchemaReflectionFixture.fs" />
+    <Compile Include="Commands/Resolution/GeneratedSchemaFixture.fs" />
     <Compile Include="Commands/Resolution/ProjectsTests.fs" />
     <Compile Include="Commands/Resolution/AssembliesTests.fs" />
+    <Compile Include="Commands/Resolution/GeneratedSchemaTests.fs" />
     <Compile Include="Tests.fs" />
   </ItemGroup>
   <ItemGroup>
