@@ -90,6 +90,7 @@
     <Compile Include="Commands/Codegen/Execution.fs" />
     <Compile Include="Commands/Init/SchemaInit.fs" />
     <Compile Include="Commands/Init/Execution.fs" />
+    <Compile Include="Commands/Migrate/SchemaIntrospection.fs" />
     <Compile Include="Commands/Migrate/Discovery.fs" />
     <Compile Include="Commands/Migrate/Planning.fs" />
     <Compile Include="Commands/Migrate/Execution.fs" />
