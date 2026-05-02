@@ -24,7 +24,8 @@ let migrate (reportProgress: ProgReport) (project: MigProject) : Task<Result<Mig
 let plan (project: MigProject) : Task<Result<PlanResult, MigError>> = Commands.Plan.Reporting.plan project
 
 // reports if the current database needs a migration
-let status (project: MigProject) : Task<Result<StatusResult, MigError>> = failwith "TODO status"
+let status (project: MigProject) : Task<Result<StatusResult, MigError>> =
+  Commands.Status.Execution.status project
 
 // eliminates the current database and brings the parent database from the archive directory
 let reset (project: MigProject) : Task<Result<ResetResult, MigError>> = failwith "TODO reset"
