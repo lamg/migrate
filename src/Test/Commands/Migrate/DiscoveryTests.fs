@@ -2,6 +2,8 @@ module Test.Commands.Migrate.DiscoveryTests
 
 open System
 open System.IO
+open System.Threading.Tasks
+open Microsoft.Data.Sqlite
 
 open MigLib.Commands.Migrate.Discovery
 open MigLib.Commands.Types
@@ -61,6 +63,8 @@ let private assertRegularErrorContains expectedText result =
   | Error error -> failwith $"Expected MigError.Regular, got: {error}"
   | Ok value -> failwith $"Expected error, got: {value}"
 
+let private report _ = Task.FromResult()
+
 [<Fact>]
 let ``resolveMigrationInputs resolves generated schema and database paths`` () =
   let tempDir = createTempDir "mig_migrate_discovery"
@@ -109,5 +113,49 @@ let ``resolveMigrationInputs fails when runtime output is missing`` () =
 
     resolveMigrationInputs (makeProject tempDir)
     |> assertRegularErrorContains "Could not resolve runtime assembly"
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``prepareNewDb creates generated target database`` () =
+  let tempDir = createTempDir "mig_migrate_prepare_new_db"
+
+  try
+    writeProjectLayout tempDir
+
+    let expectedTargetPath =
+      Path.Combine(tempDir, "generated-fixture-main-0123456789abcdef.sqlite")
+
+    match prepareNewDb report (makeProject tempDir) |> fun task -> task.Result with
+    | Ok dbPath ->
+      Assert.Equal(expectedTargetPath, dbPath)
+      Assert.True(File.Exists dbPath)
+
+      use connection = new SqliteConnection($"Data Source={dbPath}")
+      connection.Open()
+
+      use command =
+        new SqliteCommand("SELECT COUNT(*) FROM generated_fixture", connection)
+
+      Assert.Equal(0L, command.ExecuteScalar() :?> int64)
+    | Error error -> failwith $"Expected prepareNewDb to succeed, got: {error}"
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``prepareNewDb fails when target database already exists`` () =
+  let tempDir = createTempDir "mig_migrate_prepare_existing_target"
+
+  try
+    writeProjectLayout tempDir
+
+    let targetPath =
+      Path.Combine(tempDir, "generated-fixture-main-0123456789abcdef.sqlite")
+
+    writeFile targetPath ""
+
+    prepareNewDb report (makeProject tempDir)
+    |> fun task -> task.Result
+    |> assertRegularErrorContains "Target database already exists"
   finally
     Directory.Delete(tempDir, true)

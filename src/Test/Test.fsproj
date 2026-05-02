@@ -18,6 +18,7 @@
     <Compile Include="Commands/Init/ExecutionTests.fs" />
     <Compile Include="Commands/Migrate/DiscoveryTests.fs" />
     <Compile Include="Commands/Migrate/SchemaIntrospectionTests.fs" />
+    <Compile Include="Commands/Migrate/PlanningTests.fs" />
     <Compile Include="Commands/Plan/DiscoveryTests.fs" />
     <Compile Include="Tests.fs" />
   </ItemGroup>

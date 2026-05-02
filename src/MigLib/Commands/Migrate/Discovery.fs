@@ -1,8 +1,10 @@
 module internal MigLib.Commands.Migrate.Discovery
 
+open System.IO
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 
+open MigLib.Commands.Init.Execution
 open MigLib.Commands.Types
 open MigLib.Commands.Migrate.SchemaIntrospection
 open MigLib.Commands.Resolution.Assemblies
@@ -32,18 +34,26 @@ let resolveMigrationInputs (project: MigProject) : Result<ResolvedGeneratedSchem
   }
 
 let findOldSchema (reportProgress: ProgReport) (project: MigProject) : Task<Result<SqlFile option, MigError>> =
-  task {
-    match resolveMigrationInputs project with
-    | Error error -> return Error error
-    | Ok(_, paths) ->
-      match paths.sourceDbPath with
-      | None -> return Ok None
-      | Some sourceDbPath ->
-        do! reportProgress $"Reading source database schema: {sourceDbPath}"
-        use connection = openSqliteConnection sourceDbPath
-        let! schemaResult = loadSchemaFromDatabase connection
-        return schemaResult |> Result.map Some
+  taskResult {
+    let! _, paths = resolveMigrationInputs project
+
+    match paths.sourceDbPath with
+    | None -> return None
+    | Some sourceDbPath ->
+      do! reportProgress $"Reading source database schema: {sourceDbPath}"
+      use connection = openSqliteConnection sourceDbPath
+      let! (schema: SqlFile) = loadSchemaFromDatabase connection
+      return Some schema
   }
 
 let prepareNewDb (reportProgress: ProgReport) (project: MigProject) : Task<Result<string, MigError>> =
-  failwith "TODO prepareNewDb"
+  taskResult {
+    let! generatedSchema, paths = resolveMigrationInputs project
+
+    if File.Exists paths.targetDbPath then
+      return! Error(MigError.Regular $"Target database already exists: {Path.GetFullPath paths.targetDbPath}")
+    else
+      do! reportProgress $"Creating target database: {paths.targetDbPath}"
+      let! (initResult: InitResult) = runInitWithSchema generatedSchema.generatedModule.schema paths.targetDbPath
+      return initResult.newDbPath
+  }
