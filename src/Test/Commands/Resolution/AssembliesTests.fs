@@ -26,10 +26,8 @@ let private makeProject tempDir projectName =
   let projectPath = Path.Combine(tempDir, $"{projectName}.fsproj")
   let schemaDirectory = Path.Combine(tempDir, "MigSchema")
 
-  { migProject =
-      { fsProject = projectPath
-        dbInstance = "main"
-        dbDir = tempDir }
+  { dbInstance = "main"
+    dbDir = tempDir
     runtimeProjectPath = projectPath
     runtimeProjectDirectory = tempDir
     runtimeProjectName = projectName

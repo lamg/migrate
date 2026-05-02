@@ -22,8 +22,8 @@ let private validateFileSegment (label: string) (value: string) =
   else
     Ok trimmed
 
-let private resolveDbDirectory (schema: ResolvedGeneratedSchema) =
-  let dbDir = schema.assembly.project.migProject.dbDir
+let private resolveDbDirectory (project: MigProject) =
+  let dbDir = project.dbDir
 
   if String.IsNullOrWhiteSpace dbDir then
     regularError "Database directory is empty."
@@ -35,12 +35,11 @@ let private resolveDbDirectory (schema: ResolvedGeneratedSchema) =
     else
       regularError $"Database directory was not found: {fullDbDir}"
 
-let private buildSchemaBoundDbFileName (schema: ResolvedGeneratedSchema) =
+let private buildSchemaBoundDbFileName (project: MigProject) =
   result {
-    let! dbApp = validateFileSegment "app" schema.generatedModule.dbApp
-    let! dbInstance = validateFileSegment "instance" schema.assembly.project.migProject.dbInstance
-
-    let! schemaHash = validateFileSegment "schema hash" schema.generatedModule.schemaHash
+    let! dbApp = validateFileSegment "app" project.dbApp
+    let! dbInstance = validateFileSegment "instance" project.dbInstance
+    let! schemaHash = validateFileSegment "schema hash" project.schemaIdentity.schemaHash
 
     if isHexHashSegment schemaHash then
       return $"{dbApp}-{dbInstance}-{schemaHash}.sqlite"
@@ -70,19 +69,19 @@ let private tryParseSchemaBoundDbFileName (dbApp: string) (dbInstance: string) (
 let private isSamePath (left: string) (right: string) =
   String.Equals(Path.GetFullPath left, Path.GetFullPath right, StringComparison.OrdinalIgnoreCase)
 
-let resolveTargetDbPath (schema: ResolvedGeneratedSchema) : Result<string, MigError> =
+let resolveTargetDbPath (project: MigProject) : Result<string, MigError> =
   result {
-    let! fullDbDir = resolveDbDirectory schema
-    let! dbFileName = buildSchemaBoundDbFileName schema
+    let! fullDbDir = resolveDbDirectory project
+    let! dbFileName = buildSchemaBoundDbFileName project
     return Path.Combine(fullDbDir, dbFileName)
   }
 
-let resolveSourceDbPath (schema: ResolvedGeneratedSchema) : Result<string option, MigError> =
+let resolveSourceDbPath (project: MigProject) : Result<string option, MigError> =
   result {
-    let! fullDbDir = resolveDbDirectory schema
-    let! targetDbPath = resolveTargetDbPath schema
-    let! dbApp = validateFileSegment "app" schema.generatedModule.dbApp
-    let! dbInstance = validateFileSegment "instance" schema.assembly.project.migProject.dbInstance
+    let! fullDbDir = resolveDbDirectory project
+    let! targetDbPath = resolveTargetDbPath project
+    let! dbApp = validateFileSegment "app" project.dbApp
+    let! dbInstance = validateFileSegment "instance" project.dbInstance
 
     let candidates =
       Directory.GetFiles(fullDbDir, "*.sqlite")
@@ -101,11 +100,11 @@ let resolveSourceDbPath (schema: ResolvedGeneratedSchema) : Result<string option
           $"Could not infer source database automatically. Found multiple candidates matching '{dbApp}-{dbInstance}-<old-hash>.sqlite': {candidateList}."
   }
 
-let resolveDatabasePaths (schema: ResolvedGeneratedSchema) : Result<ResolvedDatabasePaths, MigError> =
+let resolveDatabasePaths (project: MigProject) : Result<ResolvedDatabasePaths, MigError> =
   result {
-    let! fullDbDir = resolveDbDirectory schema
-    let! targetDbPath = resolveTargetDbPath schema
-    let! sourceDbPath = resolveSourceDbPath schema
+    let! fullDbDir = resolveDbDirectory project
+    let! targetDbPath = resolveTargetDbPath project
+    let! sourceDbPath = resolveSourceDbPath project
 
     return
       { targetDbPath = targetDbPath

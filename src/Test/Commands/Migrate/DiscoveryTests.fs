@@ -53,9 +53,11 @@ let private writeProjectLayout tempDir =
   File.Copy(fixtureAssembly, targetAssemblyPath, true)
 
 let private makeProject tempDir =
-  { fsProject = runtimeProjectPath tempDir
-    dbInstance = TestGenerated.Db.DefaultDbInstance
-    dbDir = tempDir }
+  { dbInstance = TestGenerated.Db.DefaultDbInstance
+    dbDir = tempDir
+    targetSchema = TestGenerated.Db.Schema
+    dbApp = TestGenerated.Db.DbApp
+    schemaIdentity = TestGenerated.Db.SchemaIdentity }
 
 let private assertRegularErrorContains expectedText result =
   match result with
@@ -66,21 +68,18 @@ let private assertRegularErrorContains expectedText result =
 let private report _ = Task.FromResult()
 
 [<Fact>]
-let ``resolveMigrationInputs resolves generated schema and database paths`` () =
+let ``resolveMigrationInputs resolves shared migration project state`` () =
   let tempDir = createTempDir "mig_migrate_discovery"
 
   try
     writeProjectLayout tempDir
 
-    match resolveMigrationInputs (makeProject tempDir) with
-    | Ok(generatedSchema, databasePaths) ->
-      Assert.Equal("TestGenerated.Db", generatedSchema.moduleName)
-      Assert.Equal(TestGenerated.Db.DbApp, generatedSchema.generatedModule.dbApp)
-      Assert.Equal(TestGenerated.Db.SchemaHash, generatedSchema.generatedModule.schemaHash)
-      Assert.Equal(Path.GetFullPath(runtimeAssemblyPath tempDir), generatedSchema.assembly.assemblyPath)
-      Assert.Equal(Path.Combine(tempDir, "generated-fixture-main-0123456789abcdef.sqlite"), databasePaths.targetDbPath)
-      Assert.True(databasePaths.sourceDbPath.IsNone)
-      Assert.Equal(Path.Combine(tempDir, "archive"), databasePaths.archiveDirectory)
+    match resolveMigrationInputs (makeProject tempDir) |> fun task -> task.Result with
+    | Ok projectState ->
+      Assert.Equal(Path.Combine(tempDir, "generated-fixture-main-0123456789abcdef.sqlite"), projectState.targetDbPath)
+      Assert.True(projectState.sourceDbPath.IsNone)
+      Assert.Equal(Path.Combine(tempDir, "archive"), projectState.archiveDirectory)
+      Assert.True(projectState.sourceSchema.IsNone)
     | Error error -> failwith $"Expected migration inputs to resolve, got: {error}"
   finally
     Directory.Delete(tempDir, true)
@@ -97,22 +96,34 @@ let ``resolveMigrationInputs resolves existing source database`` () =
 
     writeFile sourceDbPath ""
 
-    match resolveMigrationInputs (makeProject tempDir) with
-    | Ok(_, databasePaths) -> Assert.Equal(Some sourceDbPath, databasePaths.sourceDbPath)
+    match resolveMigrationInputs (makeProject tempDir) |> fun task -> task.Result with
+    | Ok projectState -> Assert.Equal(Some sourceDbPath, projectState.sourceDbPath)
     | Error error -> failwith $"Expected migration inputs to resolve, got: {error}"
   finally
     Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``resolveMigrationInputs fails when runtime output is missing`` () =
-  let tempDir = createTempDir "mig_migrate_discovery_missing_runtime"
+let ``resolveMigrationInputs loads source schema when source database exists`` () =
+  let tempDir = createTempDir "mig_migrate_discovery_source_schema"
 
   try
     writeProjectLayout tempDir
-    File.Delete(runtimeAssemblyPath tempDir)
 
-    resolveMigrationInputs (makeProject tempDir)
-    |> assertRegularErrorContains "Could not resolve runtime assembly"
+    let sourceDbPath =
+      Path.Combine(tempDir, "generated-fixture-main-fedcba9876543210.sqlite")
+
+    use connection = new SqliteConnection($"Data Source={sourceDbPath}")
+    connection.Open()
+
+    use command = new SqliteCommand("CREATE TABLE generated_fixture(id INTEGER NOT NULL);", connection)
+    command.ExecuteNonQuery() |> ignore
+    connection.Close()
+
+    match resolveMigrationInputs (makeProject tempDir) |> fun task -> task.Result with
+    | Ok projectState ->
+      Assert.True(projectState.sourceSchema.IsSome)
+      Assert.Equal(Some sourceDbPath, projectState.sourceDbPath)
+    | Error error -> failwith $"Expected migration inputs to resolve, got: {error}"
   finally
     Directory.Delete(tempDir, true)
 

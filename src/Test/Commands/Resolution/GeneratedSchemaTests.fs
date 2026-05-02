@@ -29,10 +29,8 @@ let private makeAssembly tempDir projectXml =
   writeFile runtimeProjectPath projectXml
 
   { project =
-      { migProject =
-          { fsProject = runtimeProjectPath
-            dbInstance = "main"
-            dbDir = tempDir }
+      { dbInstance = "main"
+        dbDir = tempDir
         runtimeProjectPath = runtimeProjectPath
         runtimeProjectDirectory = tempDir
         runtimeProjectName = "Runtime"

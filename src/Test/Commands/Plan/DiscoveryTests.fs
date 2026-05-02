@@ -49,9 +49,11 @@ let private writeProjectLayout tempDir =
   File.Copy(fixtureAssembly, targetAssemblyPath, true)
 
 let private makeProject tempDir =
-  { fsProject = runtimeProjectPath tempDir
-    dbInstance = TestGenerated.Db.DefaultDbInstance
-    dbDir = tempDir }
+  { dbInstance = TestGenerated.Db.DefaultDbInstance
+    dbDir = tempDir
+    targetSchema = TestGenerated.Db.Schema
+    dbApp = TestGenerated.Db.DbApp
+    schemaIdentity = TestGenerated.Db.SchemaIdentity }
 
 [<Fact>]
 let ``resolvePlanInputs reuses migration input discovery`` () =
@@ -60,11 +62,10 @@ let ``resolvePlanInputs reuses migration input discovery`` () =
   try
     writeProjectLayout tempDir
 
-    match resolvePlanInputs (makeProject tempDir) with
-    | Ok(generatedSchema, databasePaths) ->
-      Assert.Equal("TestGenerated.Db", generatedSchema.moduleName)
-      Assert.Equal(Path.Combine(tempDir, "generated-fixture-main-0123456789abcdef.sqlite"), databasePaths.targetDbPath)
-      Assert.True(databasePaths.sourceDbPath.IsNone)
+    match resolvePlanInputs (makeProject tempDir) |> fun task -> task.Result with
+    | Ok projectState ->
+      Assert.Equal(Path.Combine(tempDir, "generated-fixture-main-0123456789abcdef.sqlite"), projectState.targetDbPath)
+      Assert.True(projectState.sourceDbPath.IsNone)
     | Error error -> failwith $"Expected plan inputs to resolve, got: {error}"
   finally
     Directory.Delete(tempDir, true)

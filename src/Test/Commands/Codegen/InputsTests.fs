@@ -51,9 +51,11 @@ let private writeSchemaSource tempDir =
   writeFile (schemaSourcePath tempDir) "module SchemaRoot.MigSchema"
 
 let private makeProject tempDir =
-  { fsProject = runtimeProjectPath tempDir
-    dbInstance = "main"
-    dbDir = tempDir }
+  { dbInstance = "main"
+    dbDir = tempDir
+    targetSchema = TestGenerated.Db.Schema
+    dbApp = TestGenerated.Db.DbApp
+    schemaIdentity = TestGenerated.Db.SchemaIdentity }
 
 let private assertRegularErrorContains expectedText result =
   match result with

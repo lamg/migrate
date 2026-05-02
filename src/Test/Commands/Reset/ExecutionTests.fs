@@ -64,9 +64,11 @@ let private writeProjectLayout tempDir =
   File.Copy(fixtureAssembly, targetAssemblyPath, true)
 
 let private makeProject tempDir =
-  { fsProject = runtimeProjectPath tempDir
-    dbInstance = TestGenerated.Db.DefaultDbInstance
-    dbDir = tempDir }
+  { dbInstance = TestGenerated.Db.DefaultDbInstance
+    dbDir = tempDir
+    targetSchema = TestGenerated.Db.Schema
+    dbApp = TestGenerated.Db.DbApp
+    schemaIdentity = TestGenerated.Db.SchemaIdentity }
 
 let private targetDbPath tempDir =
   Path.Combine(tempDir, "generated-fixture-main-0123456789abcdef.sqlite")
@@ -184,7 +186,9 @@ let ``reset fails when restore destination already exists`` () =
     writeProjectLayout tempDir
     let archivePath = archiveDbPath tempDir "fedcba9876543210"
     createReadonlyArchive archivePath "archived"
-    writeFile (Path.Combine(tempDir, Path.GetFileName archivePath)) "existing"
+
+    use existingConnection = openConnection (Path.Combine(tempDir, Path.GetFileName archivePath))
+    existingConnection.Close()
 
     reset (makeProject tempDir)
     |> fun task -> task.Result

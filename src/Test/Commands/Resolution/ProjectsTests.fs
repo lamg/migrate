@@ -47,19 +47,17 @@ let ``resolveProject resolves explicit runtime project and MigSchema project`` (
     writeSchemaProject tempDir
 
     let project =
-      { fsProject = runtimeProjectPath tempDir "Runtime"
-        dbInstance = "main"
-        dbDir = tempDir }
+      { dbInstance = "main"
+        dbDir = tempDir
+        targetSchema = TestGenerated.Db.Schema
+        dbApp = TestGenerated.Db.DbApp
+        schemaIdentity = TestGenerated.Db.SchemaIdentity }
 
-    match resolveProject project with
+    match resolveProject (runtimeProjectPath tempDir "Runtime") project.dbInstance project.dbDir with
     | Ok resolved ->
-      Assert.Equal(
-        { project with
-            fsProject = Path.GetFullPath project.fsProject },
-        resolved.migProject
-      )
-
-      Assert.Equal(Path.GetFullPath project.fsProject, resolved.runtimeProjectPath)
+      Assert.Equal(project.dbInstance, resolved.dbInstance)
+      Assert.Equal(project.dbDir, resolved.dbDir)
+      Assert.Equal(Path.GetFullPath(runtimeProjectPath tempDir "Runtime"), resolved.runtimeProjectPath)
       Assert.Equal(tempDir, resolved.runtimeProjectDirectory)
       Assert.Equal("Runtime", resolved.runtimeProjectName)
       Assert.Equal(schemaProjectPath tempDir, resolved.schemaProjectPath)
@@ -79,8 +77,8 @@ let ``discoverProject resolves a single runtime project in directory`` () =
     match discoverProject tempDir "tenant" tempDir with
     | Ok resolved ->
       Assert.Equal(Path.GetFullPath(runtimeProjectPath tempDir "Runtime"), resolved.runtimeProjectPath)
-      Assert.Equal("tenant", resolved.migProject.dbInstance)
-      Assert.Equal(tempDir, resolved.migProject.dbDir)
+      Assert.Equal("tenant", resolved.dbInstance)
+      Assert.Equal(tempDir, resolved.dbDir)
       Assert.Equal(schemaProjectPath tempDir, resolved.schemaProjectPath)
     | Error error -> failwith $"Expected project to resolve, got: {error}"
   finally
@@ -92,11 +90,13 @@ let ``resolveProject fails when runtime project is missing`` () =
 
   try
     let project =
-      { fsProject = runtimeProjectPath tempDir "Missing"
-        dbInstance = "main"
-        dbDir = tempDir }
+      { dbInstance = "main"
+        dbDir = tempDir
+        targetSchema = TestGenerated.Db.Schema
+        dbApp = TestGenerated.Db.DbApp
+        schemaIdentity = TestGenerated.Db.SchemaIdentity }
 
-    resolveProject project
+    resolveProject (runtimeProjectPath tempDir "Missing") project.dbInstance project.dbDir
     |> assertRegularErrorContains "Runtime project file was not found"
   finally
     Directory.Delete(tempDir, true)
@@ -109,11 +109,13 @@ let ``resolveProject fails when MigSchema project is missing`` () =
     writeRuntimeProject tempDir "Runtime"
 
     let project =
-      { fsProject = runtimeProjectPath tempDir "Runtime"
-        dbInstance = "main"
-        dbDir = tempDir }
+      { dbInstance = "main"
+        dbDir = tempDir
+        targetSchema = TestGenerated.Db.Schema
+        dbApp = TestGenerated.Db.DbApp
+        schemaIdentity = TestGenerated.Db.SchemaIdentity }
 
-    resolveProject project
+    resolveProject (runtimeProjectPath tempDir "Runtime") project.dbInstance project.dbDir
     |> assertRegularErrorContains "Schema project file was not found"
   finally
     Directory.Delete(tempDir, true)

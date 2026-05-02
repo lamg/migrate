@@ -66,9 +66,11 @@ let private writeProjectLayout tempDir =
   File.Copy(fixtureAssembly, targetAssemblyPath, true)
 
 let private makeProject tempDir =
-  { fsProject = runtimeProjectPath tempDir
-    dbInstance = TestGenerated.Db.DefaultDbInstance
-    dbDir = tempDir }
+  { dbInstance = TestGenerated.Db.DefaultDbInstance
+    dbDir = tempDir
+    targetSchema = TestGenerated.Db.Schema
+    dbApp = TestGenerated.Db.DbApp
+    schemaIdentity = TestGenerated.Db.SchemaIdentity }
 
 [<Fact>]
 let ``loadSchemaFromDatabase reads tables columns defaults and foreign keys`` () =

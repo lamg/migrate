@@ -1,9 +1,0 @@
-module internal Mig.DeclarativeMigrations.DrainReplay
-
-type ReplayOperation = DrainReplayTypes.ReplayOperation
-type MigrationLogEntry = DrainReplayTypes.MigrationLogEntry
-
-let groupEntriesByTransaction = DrainReplayParsing.groupEntriesByTransaction
-let readMigrationLogEntries = DrainReplayParsing.readMigrationLogEntries
-let loadIdMappings = DrainReplayState.loadIdMappings
-let replayDrainEntries = DrainReplayExecution.replayDrainEntries

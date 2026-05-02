@@ -7,17 +7,20 @@ open MigLib.Commands.Schema.Types
 open MigLib.DbTransactions
 
 type MigProject =
-  {
-    // Path to an F# runtime project following MigLib conventions:
-    // - P/P.fsproj: runtime project that references the generated database module
-    // - P/MigSchema/MigSchema.fsproj: schema project that references MigLib
-    // - P/MigSchema/MigSchema.fs: schema source using types and MigLib attributes
-    fsProject: string
-    // - Each F# project can have multiple databases, which are differentiated by the dbInstance value
-    dbInstance: string
-    // Directory containing databases, one for each instance, and optionally an archive directory
-    // storing old databases
-    dbDir: string }
+  { dbInstance: string
+    dbDir: string
+    targetSchema: SqlFile
+    dbApp: string
+    schemaIdentity: SchemaIdentity }
+
+type internal ResolvedMigProject =
+  { project: MigProject
+    targetDbPath: string
+    sourceDbPath: string option
+    archiveDirectory: string
+    archivedDbPaths: string list
+    currentDbPath: string option
+    sourceSchema: SqlFile option }
 
 [<RequireQualifiedAccess>]
 type MigError =

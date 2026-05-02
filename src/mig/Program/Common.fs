@@ -1,7 +1,9 @@
 namespace Mig
 
 open System
+open System.IO
 open MigLib
+open MigLib.Util
 open ProgramArgs
 
 module internal ProgramCommon =
@@ -50,3 +52,20 @@ module internal ProgramCommon =
     | Error message ->
       eprintfn $"{commandName} failed: {message}"
       1
+
+  let resolveCliDirectory (candidateDirectory: string option) : Result<string, string> =
+    let targetDirectory =
+      candidateDirectory
+      |> Option.defaultValue (Directory.GetCurrentDirectory())
+      |> Path.GetFullPath
+
+    if Directory.Exists targetDirectory then
+      Ok targetDirectory
+    else
+      Error $"Project discovery directory was not found: {targetDirectory}"
+
+  let resolveCliProject (candidateDirectory: string option) (instance: string option) : Result<MigProject, string> =
+    result {
+      let! targetDirectory = resolveCliDirectory candidateDirectory
+      return! MigLib.discoverProject targetDirectory instance targetDirectory |> Result.mapError formatMigError
+    }

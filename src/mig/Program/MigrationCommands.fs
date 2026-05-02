@@ -5,7 +5,6 @@ open MigLib
 open MigLib.Util
 open ProgramArgs
 open ProgramCommon
-open ProgramResolution
 
 module internal ProgramMigrationCommands =
   let private printLines header lines =
@@ -20,8 +19,7 @@ module internal ProgramMigrationCommands =
   let migrate (args: ParseResults<MigrateArgs>) =
     let result =
       result {
-        let! currentDirectory = resolveCommandDirectory "migrate" (args.TryGetResult MigrateArgs.Dir)
-        let! project = createMigProject "migrate" currentDirectory (args.TryGetResult MigrateArgs.Instance)
+        let! project = resolveCliProject (args.TryGetResult MigrateArgs.Dir) (args.TryGetResult MigrateArgs.Instance)
 
         let! migrateResult =
           MigLib.migrate reportProgress project
@@ -45,8 +43,7 @@ module internal ProgramMigrationCommands =
   let plan (args: ParseResults<PlanArgs>) =
     let result =
       result {
-        let! currentDirectory = resolveCommandDirectory "plan" (args.TryGetResult PlanArgs.Dir)
-        let! project = createMigProject "plan" currentDirectory (args.TryGetResult PlanArgs.Instance)
+        let! project = resolveCliProject (args.TryGetResult PlanArgs.Dir) (args.TryGetResult PlanArgs.Instance)
 
         let! planResult =
           MigLib.plan project
@@ -73,8 +70,7 @@ module internal ProgramMigrationCommands =
   let reset (args: ParseResults<ResetArgs>) =
     let result =
       result {
-        let! currentDirectory = resolveCommandDirectory "reset" (args.TryGetResult ResetArgs.Dir)
-        let! project = createMigProject "reset" currentDirectory (args.TryGetResult ResetArgs.Instance)
+        let! project = resolveCliProject (args.TryGetResult ResetArgs.Dir) (args.TryGetResult ResetArgs.Instance)
 
         let! resetResult =
           MigLib.reset project
@@ -99,8 +95,7 @@ module internal ProgramMigrationCommands =
   let status (args: ParseResults<StatusArgs>) =
     let result =
       result {
-        let! currentDirectory = resolveCommandDirectory "status" (args.TryGetResult StatusArgs.Dir)
-        let! project = createMigProject "status" currentDirectory (args.TryGetResult StatusArgs.Instance)
+        let! project = resolveCliProject (args.TryGetResult StatusArgs.Dir) (args.TryGetResult StatusArgs.Instance)
 
         let! statusResult =
           MigLib.status project

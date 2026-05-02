@@ -6,10 +6,7 @@ open System.Threading.Tasks
 
 open MigLib.Commands.Types
 open MigLib.Commands.Init.SchemaInit
-open MigLib.Commands.Resolution.Assemblies
-open MigLib.Commands.Resolution.DatabasePaths
-open MigLib.Commands.Resolution.GeneratedSchema
-open MigLib.Commands.Resolution.Projects
+open MigLib.Commands.Resolution.ProjectState
 open MigLib.Util
 
 let runInitWithSchema (targetSchema: SqlFile) (newDbPath: string) : Task<Result<InitResult, MigError>> =
@@ -39,24 +36,14 @@ let runInitWithSchema (targetSchema: SqlFile) (newDbPath: string) : Task<Result<
   }
 
 let init (project: MigProject) : Task<Result<InitResult, MigError>> =
-  task {
-    let resolvedInputs =
-      result {
-        let! resolvedProject = resolveProject project
-        let! runtimeAssembly = resolveRuntimeAssembly resolvedProject
-        let! generatedSchema = resolveGeneratedSchema runtimeAssembly
-        let! paths = resolveDatabasePaths generatedSchema
-        return generatedSchema, paths
-      }
+  taskResult {
+    let! (projectState: ResolvedMigProject) = resolveProjectState project
 
-    match resolvedInputs with
-    | Error error -> return Error error
-    | Ok(generatedSchema, paths) ->
-      if File.Exists paths.targetDbPath then
-        return
-          Ok
-            { newDbPath = paths.targetDbPath
-              seededRows = 0L }
-      else
-        return! runInitWithSchema generatedSchema.generatedModule.schema paths.targetDbPath
+    if File.Exists projectState.targetDbPath then
+      return
+        { newDbPath = projectState.targetDbPath
+          seededRows = 0L }
+    else
+      let! (initResult: InitResult) = runInitWithSchema project.targetSchema projectState.targetDbPath
+      return initResult
   }

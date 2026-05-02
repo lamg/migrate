@@ -5,18 +5,12 @@ open System.IO
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 
-open MigLib.Commands.Migrate.Discovery
+open MigLib.Commands.Resolution.ProjectState
 open MigLib.Commands.Types
 open MigLib.Util
 
-let private latestArchivedDatabase archiveDirectory =
-  if Directory.Exists archiveDirectory then
-    Directory.GetFiles(archiveDirectory, "*.sqlite")
-    |> Array.sortByDescending File.GetLastWriteTimeUtc
-    |> Array.tryHead
-    |> Option.map Path.GetFullPath
-  else
-    None
+let private latestArchivedDatabase (archivedDbPaths: string list) =
+  archivedDbPaths |> List.sortByDescending File.GetLastWriteTimeUtc |> List.tryHead
 
 let private restoreDestination (dbDirectory: string) (archivedDbPath: string) =
   Path.Combine(dbDirectory, Path.GetFileName archivedDbPath)
@@ -36,11 +30,11 @@ let private removeReadonlyMarker dbPath =
 let reset (project: MigProject) : Task<Result<ResetResult, MigError>> =
   taskResult {
     try
-      let! _, paths = resolveMigrationInputs project
-      let targetDbPath = Path.GetFullPath paths.targetDbPath
+      let! (projectState: ResolvedMigProject) = resolveProjectState project
+      let targetDbPath = Path.GetFullPath projectState.targetDbPath
       let dbDirectory = Path.GetDirectoryName targetDbPath
 
-      let archivedDbPath = latestArchivedDatabase paths.archiveDirectory
+      let archivedDbPath = latestArchivedDatabase projectState.archivedDbPaths
 
       let restoredDbPath =
         archivedDbPath

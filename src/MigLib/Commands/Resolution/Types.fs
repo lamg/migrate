@@ -4,7 +4,8 @@ open MigLib.Commands.Schema.Types
 open MigLib.Commands.Types
 
 type ResolvedProject =
-  { migProject: MigProject
+  { dbInstance: string
+    dbDir: string
     runtimeProjectPath: string
     runtimeProjectDirectory: string
     runtimeProjectName: string

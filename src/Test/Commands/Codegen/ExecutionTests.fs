@@ -41,10 +41,8 @@ let private makeInputs tempDir schemaModuleName =
   writeFile schemaSourcePath "module TestCodegenSchema.MigSchema"
 
   let project =
-    { migProject =
-        { fsProject = runtimeProjectPath
-          dbInstance = "main"
-          dbDir = tempDir }
+    { dbInstance = "main"
+      dbDir = tempDir
       runtimeProjectPath = runtimeProjectPath
       runtimeProjectDirectory = tempDir
       runtimeProjectName = "Runtime"

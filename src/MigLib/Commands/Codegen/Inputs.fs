@@ -61,7 +61,7 @@ let private resolveSchemaSourcePath (project: ResolvedProject) =
 
 let resolveInputs (project: MigProject) : Result<CodegenInputs, MigError> =
   result {
-    let! resolvedProject = resolveProject project
+    let! resolvedProject = discoverProject project.dbDir project.dbInstance project.dbDir
     let! schemaAssembly = resolveSchemaAssembly resolvedProject
     let! runtimeRootNamespace = resolveRequiredRootNamespace "runtime" resolvedProject.runtimeProjectPath
     let! schemaRootNamespace = resolveRequiredRootNamespace "schema" resolvedProject.schemaProjectPath

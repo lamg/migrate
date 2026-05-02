@@ -14,11 +14,11 @@ let private isFsProjectPath (path: string) =
 let private schemaProjectPathFor (runtimeProjectDirectory: string) =
   Path.Combine(runtimeProjectDirectory, "MigSchema", "MigSchema.fsproj")
 
-let resolveProject (project: MigProject) : Result<ResolvedProject, MigError> =
-  if String.IsNullOrWhiteSpace project.fsProject then
+let resolveProject (runtimeProjectPath: string) (dbInstance: string) (dbDir: string) : Result<ResolvedProject, MigError> =
+  if String.IsNullOrWhiteSpace runtimeProjectPath then
     regularError "Runtime project path is empty."
   else
-    let fullProjectPath = Path.GetFullPath project.fsProject
+    let fullProjectPath = Path.GetFullPath runtimeProjectPath
 
     if not (isFsProjectPath fullProjectPath) then
       regularError $"Runtime project path must be an .fsproj file: {fullProjectPath}"
@@ -33,20 +33,19 @@ let resolveProject (project: MigProject) : Result<ResolvedProject, MigError> =
         regularError $"Schema project file was not found: {schemaProjectPath}"
       else
         Ok
-          { migProject =
-              { project with
-                  fsProject = fullProjectPath }
+          { dbInstance = dbInstance
+            dbDir = dbDir
             runtimeProjectPath = fullProjectPath
             runtimeProjectDirectory = runtimeProjectDirectory
             runtimeProjectName = Path.GetFileNameWithoutExtension fullProjectPath
             schemaProjectPath = schemaProjectPath
             schemaDirectory = schemaDirectory }
 
-let discoverProject (directory: string) (dbInstance: string) (dbDir: string) : Result<ResolvedProject, MigError> =
-  if String.IsNullOrWhiteSpace directory then
+let discoverProject (projectDir: string) (dbInstance: string) (dbDir: string) : Result<ResolvedProject, MigError> =
+  if String.IsNullOrWhiteSpace projectDir then
     regularError "Project discovery directory is empty."
   else
-    let fullDirectory = Path.GetFullPath directory
+    let fullDirectory = Path.GetFullPath projectDir
 
     if not (Directory.Exists fullDirectory) then
       regularError $"Project discovery directory was not found: {fullDirectory}"
@@ -56,11 +55,7 @@ let discoverProject (directory: string) (dbInstance: string) (dbDir: string) : R
 
       match runtimeProjectCandidates with
       | [||] -> regularError $"Could not discover a runtime project. No .fsproj file was found in {fullDirectory}."
-      | [| projectPath |] ->
-        resolveProject
-          { fsProject = projectPath
-            dbInstance = dbInstance
-            dbDir = dbDir }
+      | [| projectPath |] -> resolveProject projectPath dbInstance dbDir
       | many ->
         let projectList = many |> Array.map Path.GetFileName |> String.concat ", "
 

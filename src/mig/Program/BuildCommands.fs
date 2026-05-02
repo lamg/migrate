@@ -2,17 +2,25 @@ namespace Mig
 
 open Argu
 open MigLib
+open MigLib.Commands.Schema.Types
 open MigLib.Util
 open ProgramArgs
 open ProgramCommon
-open ProgramResolution
 
 module internal ProgramBuildCommands =
   let codegen (args: ParseResults<CodegenArgs>) =
     let result =
       result {
-        let! currentDirectory = resolveCommandDirectory "codegen" (args.TryGetResult CodegenArgs.Dir)
-        let! project = createMigProject "codegen" currentDirectory None
+        let! currentDirectory = resolveCliDirectory (args.TryGetResult CodegenArgs.Dir)
+
+        let project: MigProject =
+          { dbInstance = "main"
+            dbDir = currentDirectory
+            targetSchema = emptyFile
+            dbApp = ""
+            schemaIdentity =
+              { schemaHash = "0000000000000000"
+                schemaCommit = None } }
 
         let! codegenResult = MigLib.codegen project |> Result.mapError formatMigError
 
@@ -34,8 +42,7 @@ module internal ProgramBuildCommands =
   let init (args: ParseResults<InitArgs>) =
     let result =
       result {
-        let! currentDirectory = resolveCommandDirectory "init" (args.TryGetResult InitArgs.Dir)
-        let! project = createMigProject "init" currentDirectory (args.TryGetResult InitArgs.Instance)
+        let! project = resolveCliProject (args.TryGetResult InitArgs.Dir) (args.TryGetResult InitArgs.Instance)
 
         let! initResult =
           MigLib.init project

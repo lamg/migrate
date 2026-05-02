@@ -3,7 +3,7 @@ module internal MigLib.Commands.Migrate.Planning
 open System
 open System.Threading.Tasks
 
-open MigLib.Commands.Migrate.Discovery
+open MigLib.Commands.Resolution.ProjectState
 open MigLib.Commands.Schema.Types
 open MigLib.Commands.Types
 open MigLib.Util
@@ -172,10 +172,10 @@ let private analyzeSchemaDifferences (sourceSchema: SqlFile) (targetSchema: SqlF
 
 let buildPlan (reportProgress: ProgReport) (project: MigProject) : Task<Result<MigrationPlan, MigError>> =
   taskResult {
-    let! generatedSchema, databasePaths = resolveMigrationInputs project
-    let targetSchema = generatedSchema.generatedModule.schema
-    do! reportProgress $"Planning migration to target database: {databasePaths.targetDbPath}"
-    let! sourceSchema = findOldSchema reportProgress project
+    let! (projectState: ResolvedMigProject) = resolveProjectState project
+    let targetSchema = project.targetSchema
+    do! reportProgress $"Planning migration to target database: {projectState.targetDbPath}"
+    let sourceSchema = projectState.sourceSchema
 
     let supportedDifferences, unsupportedDifferences =
       match sourceSchema with
@@ -183,11 +183,11 @@ let buildPlan (reportProgress: ProgReport) (project: MigProject) : Task<Result<M
       | Some oldSchema -> analyzeSchemaDifferences oldSchema targetSchema
 
     return
-      { sourceSchema = sourceSchema
-        targetSchema = targetSchema
-        result =
-          { sourceDbPath = databasePaths.sourceDbPath
-            targetDbPath = databasePaths.targetDbPath
+        { sourceSchema = sourceSchema
+          targetSchema = targetSchema
+          result =
+          { sourceDbPath = projectState.sourceDbPath
+            targetDbPath = projectState.targetDbPath
             canMigrate = unsupportedDifferences.IsEmpty
             supportedDifferences = supportedDifferences
             unsupportedDifferences = unsupportedDifferences } }

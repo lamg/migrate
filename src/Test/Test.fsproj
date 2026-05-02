@@ -4,7 +4,6 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="CompiledSchemaFixture.fs" />
     <Compile Include="CompiledSchemaSourceFixture.fs" />
     <Compile Include="SchemaReflectionFixture.fs" />
     <Compile Include="Commands/Resolution/GeneratedSchemaFixture.fs" />
@@ -24,7 +23,6 @@
     <Compile Include="Commands/Plan/DiscoveryTests.fs" />
     <Compile Include="Commands/Status/ExecutionTests.fs" />
     <Compile Include="Commands/Reset/ExecutionTests.fs" />
-    <Compile Include="Tests.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

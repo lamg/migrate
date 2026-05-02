@@ -31,32 +31,14 @@ let private emptySchema: SqlFile =
     indexes = []
     triggers = [] }
 
-let private makeResolvedSchema dbDir dbInstance schemaHash =
-  let runtimeProjectPath = Path.Combine(dbDir, "Runtime.fsproj")
-  let schemaDirectory = Path.Combine(dbDir, "MigSchema")
-
-  { assembly =
-      { project =
-          { migProject =
-              { fsProject = runtimeProjectPath
-                dbInstance = dbInstance
-                dbDir = dbDir }
-            runtimeProjectPath = runtimeProjectPath
-            runtimeProjectDirectory = dbDir
-            runtimeProjectName = "Runtime"
-            schemaProjectPath = Path.Combine(schemaDirectory, "MigSchema.fsproj")
-            schemaDirectory = schemaDirectory }
-        assemblyName = "Runtime"
-        assemblyPath = Path.Combine(dbDir, "Runtime.dll") }
-    moduleName = "Runtime.Db"
-    generatedModule =
-      { schema = emptySchema
-        schemaIdentity =
-          { schemaHash = schemaHash
-            schemaCommit = None }
-        schemaHash = schemaHash
-        dbApp = "app"
-        defaultDbInstance = "main" } }
+let private makeProject dbDir dbInstance schemaHash =
+  { dbInstance = dbInstance
+    dbDir = dbDir
+    targetSchema = emptySchema
+    dbApp = "app"
+    schemaIdentity =
+      { schemaHash = schemaHash
+        schemaCommit = None } }
 
 let private assertRegularErrorContains expectedText result =
   match result with
@@ -69,7 +51,7 @@ let ``resolveTargetDbPath builds schema-bound path`` () =
   let tempDir = createTempDir "mig_resolve_target_db"
 
   try
-    let schema = makeResolvedSchema tempDir "tenant" "0123456789abcdef"
+    let schema = makeProject tempDir "tenant" "0123456789abcdef"
 
     match resolveTargetDbPath schema with
     | Ok path -> Assert.Equal(Path.Combine(tempDir, "app-tenant-0123456789abcdef.sqlite"), path)
@@ -82,7 +64,7 @@ let ``resolveTargetDbPath fails when dbInstance is empty`` () =
   let tempDir = createTempDir "mig_resolve_target_empty_instance"
 
   try
-    let schema = makeResolvedSchema tempDir " " "0123456789abcdef"
+    let schema = makeProject tempDir " " "0123456789abcdef"
 
     resolveTargetDbPath schema
     |> assertRegularErrorContains "Database instance is empty"
@@ -94,7 +76,7 @@ let ``resolveTargetDbPath fails when schema hash is not sixteen hex characters``
   let tempDir = createTempDir "mig_resolve_target_invalid_hash"
 
   try
-    let schema = makeResolvedSchema tempDir "main" "not-a-hash"
+    let schema = makeProject tempDir "main" "not-a-hash"
 
     resolveTargetDbPath schema
     |> assertRegularErrorContains "must be exactly 16 hexadecimal characters"
@@ -106,7 +88,7 @@ let ``resolveTargetDbPath fails when dbDir is missing`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_resolve_target_missing_dir_{Guid.NewGuid()}")
 
-  let schema = makeResolvedSchema tempDir "main" "0123456789abcdef"
+  let schema = makeProject tempDir "main" "0123456789abcdef"
 
   resolveTargetDbPath schema
   |> assertRegularErrorContains "Database directory was not found"
@@ -116,7 +98,7 @@ let ``resolveSourceDbPath returns none when no old database exists`` () =
   let tempDir = createTempDir "mig_resolve_source_none"
 
   try
-    let schema = makeResolvedSchema tempDir "main" "0123456789abcdef"
+    let schema = makeProject tempDir "main" "0123456789abcdef"
 
     match resolveSourceDbPath schema with
     | Ok None -> ()
@@ -134,7 +116,7 @@ let ``resolveSourceDbPath returns one matching old database`` () =
     writeFile oldDbPath ""
     writeFile (Path.Combine(tempDir, "other-main-1111111111111111.sqlite")) ""
 
-    let schema = makeResolvedSchema tempDir "main" "0123456789abcdef"
+    let schema = makeProject tempDir "main" "0123456789abcdef"
 
     match resolveSourceDbPath schema with
     | Ok(Some path) -> Assert.Equal(oldDbPath, path)
@@ -150,7 +132,7 @@ let ``resolveSourceDbPath excludes target database`` () =
   try
     writeFile (Path.Combine(tempDir, "app-main-0123456789abcdef.sqlite")) ""
 
-    let schema = makeResolvedSchema tempDir "main" "0123456789abcdef"
+    let schema = makeProject tempDir "main" "0123456789abcdef"
 
     match resolveSourceDbPath schema with
     | Ok None -> ()
@@ -167,7 +149,7 @@ let ``resolveSourceDbPath fails when multiple old databases match`` () =
     writeFile (Path.Combine(tempDir, "app-main-1111111111111111.sqlite")) ""
     writeFile (Path.Combine(tempDir, "app-main-2222222222222222.sqlite")) ""
 
-    let schema = makeResolvedSchema tempDir "main" "0123456789abcdef"
+    let schema = makeProject tempDir "main" "0123456789abcdef"
 
     resolveSourceDbPath schema
     |> assertRegularErrorContains "Found multiple candidates"
@@ -179,7 +161,7 @@ let ``resolveDatabasePaths includes archive directory`` () =
   let tempDir = createTempDir "mig_resolve_database_paths"
 
   try
-    let schema = makeResolvedSchema tempDir "main" "0123456789abcdef"
+    let schema = makeProject tempDir "main" "0123456789abcdef"
 
     match resolveDatabasePaths schema with
     | Ok paths ->
