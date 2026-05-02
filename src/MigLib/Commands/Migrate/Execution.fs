@@ -1,8 +1,42 @@
 module internal MigLib.Commands.Migrate.Execution
 
+open System
 open System.Threading.Tasks
 
+open MigLib.Commands.Migrate.DataCopy
+open MigLib.Commands.Migrate.Discovery
+open MigLib.Commands.Migrate.Planning
 open MigLib.Commands.Types
+open MigLib.DbTransactions
+open MigLib.Util
+
+let private formatUnsupportedDifferences (differences: string list) =
+  let details =
+    differences
+    |> List.map (fun difference -> $"- {difference}")
+    |> String.concat Environment.NewLine
+
+  $"Migration plan has unsupported differences:{Environment.NewLine}{details}"
 
 let migrate (reportProgress: ProgReport) (project: MigProject) : Task<Result<MigrateResult, MigError>> =
-  failwith "TODO migrate"
+  taskResult {
+    let! migrationPlan = buildPlan reportProgress project
+
+    if not migrationPlan.result.canMigrate then
+      return! Error(MigError.Regular(formatUnsupportedDifferences migrationPlan.result.unsupportedDifferences))
+    else
+      let! newDbPath = prepareNewDb reportProgress project
+
+      let! (copyResult: CopyResult) =
+        match migrationPlan.sourceSchema, migrationPlan.result.sourceDbPath with
+        | Some sourceSchema, Some sourceDbPath ->
+          copyData reportProgress sourceDbPath newDbPath sourceSchema migrationPlan.targetSchema
+        | _ -> Task.FromResult(Ok { copiedTables = 0; copiedRows = 0L })
+
+      return
+        { db = dbTxn newDbPath
+          newDbPath = newDbPath
+          archivedOldDbPath = None
+          copiedTables = copyResult.copiedTables
+          copiedRows = copyResult.copiedRows }
+  }
