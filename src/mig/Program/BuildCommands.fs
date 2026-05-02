@@ -1,9 +1,7 @@
 namespace Mig
 
 open Argu
-open System
-open System.IO
-open MigLib.Build
+open MigLib
 open MigLib.Util
 open ProgramArgs
 open ProgramCommon
@@ -14,22 +12,20 @@ module internal ProgramBuildCommands =
     let result =
       result {
         let! currentDirectory = resolveCommandDirectory "codegen" (args.TryGetResult CodegenArgs.Dir)
+        let! project = createMigProject "codegen" currentDirectory None
 
-        let! assemblyPath, schemaModuleName, generatedModuleName, outputPath =
-          resolveCodegenInputs
-            currentDirectory
-            (args.TryGetResult CodegenArgs.Assembly)
-            (args.TryGetResult CodegenArgs.Schema_Module)
-            (args.TryGetResult CodegenArgs.Module)
-            (args.TryGetResult CodegenArgs.Output)
+        let! codegenResult = MigLib.codegen project |> Result.mapError formatMigError
 
-        let schemaPath = defaultSchemaFsPathForCurrentDirectory currentDirectory
-        let dbFileNamePrefix = DirectoryInfo(currentDirectory).Name
+        printfn "Codegen complete."
+        printfn $"Output path: {codegenResult.outputPath}"
+        printfn $"Generated module: {codegenResult.generatedModuleName}"
 
-        let! report =
-          runCodegenFromAssemblyModulePath generatedModuleName dbFileNamePrefix schemaPath assemblyPath schemaModuleName outputPath
+        match codegenResult.generatedFiles with
+        | [] -> ()
+        | files ->
+          printfn "Generated files:"
+          files |> List.iter (fun path -> printfn $"  - {path}")
 
-        writeCodegenReport (printfn "%s") report
         return 0
       }
 
@@ -39,19 +35,16 @@ module internal ProgramBuildCommands =
     let result =
       result {
         let! currentDirectory = resolveCommandDirectory "init" (args.TryGetResult InitArgs.Dir)
+        let! project = createMigProject "init" currentDirectory (args.TryGetResult InitArgs.Instance)
 
-        let! assemblyPath, moduleName =
-          resolveRequiredCompiledMode
-            "init"
-            currentDirectory
-            (args.TryGetResult InitArgs.Assembly)
-            (args.TryGetResult InitArgs.Module)
-
-        let! report =
-          initDbFromAssemblyModulePath currentDirectory (args.TryGetResult InitArgs.Instance) assemblyPath moduleName
+        let! initResult =
+          MigLib.init project
           |> fun task -> task.Result
+          |> Result.mapError formatMigError
 
-        writeInitDbReport (printfn "%s") report
+        printfn "Init complete."
+        printfn $"Database: {initResult.newDbPath}"
+        printfn $"Seeded rows: {initResult.seededRows}"
         return 0
       }
 

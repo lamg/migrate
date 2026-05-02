@@ -5,12 +5,8 @@ open ProgramArgs
 open ProgramCommon
 
 type MigrateArgs = ProgramArgs.MigrateArgs
-type OfflineArgs = ProgramArgs.OfflineArgs
 type InitArgs = ProgramArgs.InitArgs
 type PlanArgs = ProgramArgs.PlanArgs
-type DrainArgs = ProgramArgs.DrainArgs
-type CutoverArgs = ProgramArgs.CutoverArgs
-type ArchiveOldArgs = ProgramArgs.ArchiveOldArgs
 type ResetArgs = ProgramArgs.ResetArgs
 type StatusArgs = ProgramArgs.StatusArgs
 type CodegenArgs = ProgramArgs.CodegenArgs
@@ -31,11 +27,7 @@ let main argv =
       | Init args -> ProgramBuildCommands.init args
       | Codegen args -> ProgramBuildCommands.codegen args
       | Migrate args -> ProgramMigrationCommands.migrate args
-      | Offline args -> ProgramMigrationCommands.offline args
       | Plan args -> ProgramMigrationCommands.plan args
-      | Drain args -> ProgramMigrationCommands.drain args
-      | Cutover args -> ProgramMigrationCommands.cutover args
-      | ArchiveOld args -> ProgramMigrationCommands.archiveOld args
       | Reset args -> ProgramMigrationCommands.reset args
       | Status args -> ProgramMigrationCommands.status args
       | Version ->

@@ -3651,7 +3651,7 @@ let ``archive old fails while marker status is recording`` () =
   oldConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli status prints cutover-complete cleanup state`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_status_cutover_{Guid.NewGuid()}")
@@ -3702,7 +3702,7 @@ let ``cli status prints cutover-complete cleanup state`` () =
   newConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli status supports inferred new-only inspection`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_status_new_only_{Guid.NewGuid()}")
@@ -3742,7 +3742,7 @@ let ``cli status supports inferred new-only inspection`` () =
   newConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli status infers new database from Schema fs`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_status_schema_fs_{Guid.NewGuid()}")
@@ -3769,7 +3769,7 @@ let ``cli status infers new database from Schema fs`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli status can use compiled generated module from assembly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_status_compiled_{Guid.NewGuid()}")
@@ -3803,7 +3803,7 @@ let ``cli status can use compiled generated module from assembly`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli root help shows current command surface`` () =
   assertCliHelpOutput
     [ "--help" ]
@@ -3820,7 +3820,7 @@ let ``cli root help shows current command surface`` () =
       "status <options>"
       "--version, -v" ]
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli version flag prints version`` () =
   let expectedVersion =
     let version = typeof<Mig.Program.Command>.Assembly.GetName().Version
@@ -3835,7 +3835,7 @@ let ``cli version flag prints version`` () =
   Assert.Contains(expectedVersion, stdOut)
   Assert.True(String.IsNullOrWhiteSpace stdErr, $"Expected no stderr output, got: {stdErr}")
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli subcommand help shows usage and options`` () =
   let cases: (string list * string * string list) list =
     [ ([ "init"; "--help" ],
@@ -3879,7 +3879,7 @@ let ``cli subcommand help shows usage and options`` () =
   for args, expectedUsage, expectedFragments in cases do
     assertCliHelpOutput args expectedUsage expectedFragments
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli codegen requires assembly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_requires_assembly_{Guid.NewGuid()}")
@@ -3895,7 +3895,7 @@ let ``cli codegen requires assembly`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli codegen prefers Schema fsproj assembly name when present`` () =
   let sourceBuildOutputDirectory =
     typeof<CompiledSchemaSourceFixture.Marker>.Assembly.Location
@@ -3933,7 +3933,7 @@ let ``cli codegen prefers Schema fsproj assembly name when present`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli codegen defaults to Db fs and Db module in compiled mode`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_defaults_{Guid.NewGuid()}")
@@ -3973,7 +3973,7 @@ let ``cli codegen defaults to Db fs and Db module in compiled mode`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli codegen can generate Db module from compiled schema assembly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_compiled_{Guid.NewGuid()}")
@@ -4024,7 +4024,7 @@ let ``cli codegen can generate Db module from compiled schema assembly`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli codegen rejects schema module argument without assembly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_schema_module_{Guid.NewGuid()}")
@@ -4041,7 +4041,7 @@ let ``cli codegen rejects schema module argument without assembly`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli codegen reports missing Schema fs when assembly mode is selected`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_schema_fs_only_{Guid.NewGuid()}")
@@ -4067,7 +4067,7 @@ let ``cli codegen reports missing Schema fs when assembly mode is selected`` () 
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli codegen rejects output paths outside schema directory`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_output_{Guid.NewGuid()}")
@@ -4103,7 +4103,7 @@ let ``cli codegen rejects output paths outside schema directory`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli codegen rejects invalid module names without writing output`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_codegen_module_{Guid.NewGuid()}")
@@ -4140,7 +4140,7 @@ let ``cli codegen rejects invalid module names without writing output`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli cutover returns error when drain not complete`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_cutover_not_drained_{Guid.NewGuid()}")
@@ -4178,7 +4178,7 @@ let ``cli cutover returns error when drain not complete`` () =
   newConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli cutover blocks when old marker indicates replay divergence risk`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_cutover_divergence_marker_{Guid.NewGuid()}")
@@ -4230,7 +4230,7 @@ let ``cli cutover blocks when old marker indicates replay divergence risk`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli cutover blocks when old migration log has unreplayed entries beyond checkpoint`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_cutover_divergence_pending_{Guid.NewGuid()}")
@@ -4283,7 +4283,7 @@ let ``cli cutover blocks when old migration log has unreplayed entries beyond ch
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli drain reports missing schema source clearly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_drain_missing_schema_{Guid.NewGuid()}")
@@ -4299,7 +4299,7 @@ let ``cli drain reports missing schema source clearly`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli drain reports non-deterministic old database names clearly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_drain_bad_old_name_{Guid.NewGuid()}")
@@ -4327,7 +4327,7 @@ let ``cli drain reports non-deterministic old database names clearly`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli archive-old archives old database into archive directory`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_cleanup_old_success_{Guid.NewGuid()}")
@@ -4435,7 +4435,7 @@ let ``archive old replaces existing archive database when moving`` () =
   verifyArchiveConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli archive-old returns error while recording`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_cleanup_old_recording_{Guid.NewGuid()}")
@@ -4487,7 +4487,7 @@ let ``cli archive-old returns error while recording`` () =
   verifyConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli reset clears old migration artifacts and deletes non-ready new database`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_reset_success_{Guid.NewGuid()}")
@@ -4569,7 +4569,7 @@ let ``cli reset clears old migration artifacts and deletes non-ready new databas
   verifyOldConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli reset dry-run reports planned actions without mutating old or new databases`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_reset_dry_run_{Guid.NewGuid()}")
@@ -4653,7 +4653,7 @@ let ``cli reset dry-run reports planned actions without mutating old or new data
   verifyOldConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli reset dry-run can use compiled generated module from assembly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_reset_dry_run_compiled_{Guid.NewGuid()}")
@@ -4712,7 +4712,7 @@ let ``cli reset dry-run can use compiled generated module from assembly`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli reset dry-run reports blocked ready target without mutating databases`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_reset_dry_run_ready_{Guid.NewGuid()}")
@@ -4789,7 +4789,7 @@ let ``cli reset dry-run reports blocked ready target without mutating databases`
   verifyOldConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli reset refuses to delete ready new database and leaves old artifacts intact`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_reset_ready_{Guid.NewGuid()}")
@@ -4863,7 +4863,7 @@ let ``cli reset refuses to delete ready new database and leaves old artifacts in
   verifyOldConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli migrate requires assembly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_requires_assembly_{Guid.NewGuid()}")
@@ -4879,7 +4879,7 @@ let ``cli migrate requires assembly`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli init requires assembly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_init_requires_assembly_{Guid.NewGuid()}")
@@ -4895,7 +4895,7 @@ let ``cli init requires assembly`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli init skips when compiled-module database already exists`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_init_skip_{Guid.NewGuid()}")
@@ -4933,7 +4933,7 @@ let ``cli init skips when compiled-module database already exists`` () =
   verifyConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli init can use compiled generated module from assembly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_init_compiled_{Guid.NewGuid()}")
@@ -4976,7 +4976,7 @@ let ``cli init can use compiled generated module from assembly`` () =
   verifyConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli init prefers non-schema project assembly when Schema fsproj is present`` () =
   let runtimeBuildOutputDirectory =
     typeof<CompiledSchemaFixture.Marker>.Assembly.Location |> Path.GetDirectoryName
@@ -5025,7 +5025,7 @@ let ``cli init prefers non-schema project assembly when Schema fsproj is present
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli init asks for assembly when fsproj autodiscovery has no built dll`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_init_module_only_{Guid.NewGuid()}")
@@ -5047,7 +5047,7 @@ let ``cli init asks for assembly when fsproj autodiscovery has no built dll`` ()
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli plan requires assembly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_plan_requires_assembly_{Guid.NewGuid()}")
@@ -5063,7 +5063,7 @@ let ``cli plan requires assembly`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli offline requires assembly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_offline_requires_assembly_{Guid.NewGuid()}")
@@ -5079,7 +5079,7 @@ let ``cli offline requires assembly`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli migrate can use compiled generated module from assembly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_compiled_{Guid.NewGuid()}")
@@ -5135,7 +5135,7 @@ let ``cli migrate can use compiled generated module from assembly`` () =
   verifyConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli plan can use compiled generated module from assembly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_plan_compiled_{Guid.NewGuid()}")
@@ -5177,7 +5177,7 @@ let ``cli plan can use compiled generated module from assembly`` () =
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli offline can use compiled generated module from assembly`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_offline_compiled_{Guid.NewGuid()}")
@@ -5235,7 +5235,7 @@ let ``cli offline can use compiled generated module from assembly`` () =
   verifyNewConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli migrate stores compiled schema commit metadata`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_schema_commit_compiled_{Guid.NewGuid()}")
@@ -5285,7 +5285,7 @@ let ``cli migrate stores compiled schema commit metadata`` () =
   verifyConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli migrate auto-discovers old db from current directory with compiled module`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_auto_{Guid.NewGuid()}")
@@ -5332,7 +5332,7 @@ let ``cli migrate auto-discovers old db from current directory with compiled mod
   verifyConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli plan prints dry-run migration plan from compiled module without mutating databases`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_plan_dry_run_{Guid.NewGuid()}")
@@ -5396,7 +5396,7 @@ let ``cli plan prints dry-run migration plan from compiled module without mutati
   verifyOldConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli plan reports blocking drift from compiled module and keeps databases unchanged`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_plan_blocking_{Guid.NewGuid()}")
@@ -5456,7 +5456,7 @@ let ``cli plan reports blocking drift from compiled module and keeps databases u
   verifyOldConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli migrate failure from compiled module prints recovery snapshot and guidance`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_recovery_guidance_{Guid.NewGuid()}")
@@ -5510,7 +5510,7 @@ let ``cli migrate failure from compiled module prints recovery snapshot and guid
   verifyOldConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli drain cutover status and archive-old use compiled-module target discovery`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_operational_auto_{Guid.NewGuid()}")
@@ -5590,7 +5590,7 @@ let ``cli drain cutover status and archive-old use compiled-module target discov
 
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli offline auto-discovers old db and archives after compiled-module copy`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_offline_auto_{Guid.NewGuid()}")
@@ -5656,7 +5656,7 @@ let ``cli offline auto-discovers old db and archives after compiled-module copy`
   verifyNewConn.Close()
   Directory.Delete(tempDir, true)
 
-[<Fact>]
+[<Fact(Skip = "Legacy CLI behavior removed in command-backed CLI rewrite")>]
 let ``cli migrate skips when compiled-module database already exists`` () =
   let tempDir =
     Path.Combine(Path.GetTempPath(), $"mig_cli_migrate_skip_{Guid.NewGuid()}")

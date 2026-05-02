@@ -20,6 +20,7 @@
     <Compile Include="Commands/Migrate/SchemaIntrospectionTests.fs" />
     <Compile Include="Commands/Migrate/PlanningTests.fs" />
     <Compile Include="Commands/Migrate/ExecutionTests.fs" />
+    <Compile Include="Commands/Cli/ProgramTests.fs" />
     <Compile Include="Commands/Plan/DiscoveryTests.fs" />
     <Compile Include="Commands/Status/ExecutionTests.fs" />
     <Compile Include="Commands/Reset/ExecutionTests.fs" />

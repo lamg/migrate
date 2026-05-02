@@ -1,20 +1,10 @@
 namespace Mig
 
 open System
-open MigLib.CompiledSchema
+open MigLib
 open ProgramArgs
 
 module internal ProgramCommon =
-  type ResolvedCompiledModule =
-    { assemblyPath: string
-      moduleName: string
-      generatedModule: GeneratedSchemaModule
-      newDbPath: string }
-
-  type SchemaBoundDbPath =
-    { schemaSourcePath: string
-      path: string }
-
   let getVersionText () =
     let version = typeof<Command>.Assembly.GetName().Version
 
@@ -47,6 +37,12 @@ module internal ProgramCommon =
       $"{chain}{Environment.NewLine}{ex}"
     else
       chain
+
+  let formatMigError error =
+    match error with
+    | MigError.Regular message -> message
+    | MigError.Sqlite ex -> formatExceptionDetails ex
+    | MigError.Other ex -> formatExceptionDetails ex
 
   let finishCommand (commandName: string) (result: Result<int, string>) =
     match result with
