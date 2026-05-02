@@ -99,6 +99,7 @@
     <Compile Include="Commands/Plan/Discovery.fs" />
     <Compile Include="Commands/Plan/Reporting.fs" />
     <Compile Include="Commands/Status/Execution.fs" />
+    <Compile Include="Commands/Reset/Execution.fs" />
     <Compile Include="MigLib.fs" />
     <Content Include="../../README.md" Pack="true" PackagePath="\" />
     <Content Include="../../images/logo.png" Pack="true" PackagePath="\" />

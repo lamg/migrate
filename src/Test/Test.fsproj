@@ -22,6 +22,7 @@
     <Compile Include="Commands/Migrate/ExecutionTests.fs" />
     <Compile Include="Commands/Plan/DiscoveryTests.fs" />
     <Compile Include="Commands/Status/ExecutionTests.fs" />
+    <Compile Include="Commands/Reset/ExecutionTests.fs" />
     <Compile Include="Tests.fs" />
   </ItemGroup>
   <ItemGroup>

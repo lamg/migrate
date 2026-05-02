@@ -8,9 +8,6 @@ open Microsoft.Data.Sqlite
 open MigLib.Commands.Types
 open MigLib.Util
 
-let private createCommand (connection: SqliteConnection) (tx: SqliteTransaction) sql =
-  new SqliteCommand(sql, connection, tx)
-
 let private archivePathFor oldDbPath =
   let oldDirectory = Path.GetDirectoryName(Path.GetFullPath oldDbPath)
 
@@ -25,7 +22,7 @@ let private markReadonly oldDbPath =
     use tx = connection.BeginTransaction()
 
     use createTableCommand =
-      createCommand
+      Sqlite.createCommand
         connection
         tx
         "CREATE TABLE IF NOT EXISTS _mig_readonly(id INTEGER PRIMARY KEY CHECK (id = 1), marked_utc TEXT NOT NULL);"
@@ -33,7 +30,7 @@ let private markReadonly oldDbPath =
     let! _ = createTableCommand.ExecuteNonQueryAsync()
 
     use upsertCommand =
-      createCommand
+      Sqlite.createCommand
         connection
         tx
         "INSERT INTO _mig_readonly(id, marked_utc) VALUES (1, @markedUtc) ON CONFLICT(id) DO UPDATE SET marked_utc = excluded.marked_utc;"

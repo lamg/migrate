@@ -28,4 +28,4 @@ let status (project: MigProject) : Task<Result<StatusResult, MigError>> =
   Commands.Status.Execution.status project
 
 // eliminates the current database and brings the parent database from the archive directory
-let reset (project: MigProject) : Task<Result<ResetResult, MigError>> = failwith "TODO reset"
+let reset (project: MigProject) : Task<Result<ResetResult, MigError>> = Commands.Reset.Execution.reset project

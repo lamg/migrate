@@ -7,6 +7,7 @@ open Microsoft.Data.Sqlite
 
 open MigLib.Commands.Schema.Types
 open MigLib.Commands.Types
+open MigLib.Util
 
 let private quoteIdentifier (identifier: string) =
   let escaped = identifier.Replace("\"", "\"\"")
@@ -121,28 +122,25 @@ let private createIndexSql (index: CreateIndex) =
   let cols = index.columns |> List.map quoteIdentifier |> String.concat ", "
   $"CREATE INDEX {quoteIdentifier index.name} ON {quoteIdentifier index.table} ({cols});"
 
-let private createCommand (connection: SqliteConnection) (tx: SqliteTransaction) sql =
-  new SqliteCommand(sql, connection, tx)
-
 let private createSchemaObjects (connection: SqliteConnection) (tx: SqliteTransaction) (targetSchema: SqlFile) =
   task {
     for table in targetSchema.tables do
-      use createTableCmd = createCommand connection tx (createTableSql table)
+      use createTableCmd = Sqlite.createCommand connection tx (createTableSql table)
       let! _ = createTableCmd.ExecuteNonQueryAsync()
       ()
 
     for index in targetSchema.indexes do
-      use createIndexCmd = createCommand connection tx (createIndexSql index)
+      use createIndexCmd = Sqlite.createCommand connection tx (createIndexSql index)
       let! _ = createIndexCmd.ExecuteNonQueryAsync()
       ()
 
     for view in targetSchema.views do
-      use createViewCmd = createCommand connection tx view.sql
+      use createViewCmd = Sqlite.createCommand connection tx view.sql
       let! _ = createViewCmd.ExecuteNonQueryAsync()
       ()
 
     for trigger in targetSchema.triggers do
-      use createTriggerCmd = createCommand connection tx trigger.sql
+      use createTriggerCmd = Sqlite.createCommand connection tx trigger.sql
       let! _ = createTriggerCmd.ExecuteNonQueryAsync()
       ()
   }
@@ -176,7 +174,7 @@ let private applySeedInserts (connection: SqliteConnection) (tx: SqliteTransacti
         $"INSERT INTO {quoteIdentifier insert.table} ({escapedColumns}) VALUES ({parameterNames})"
 
       for rowValues in insert.values do
-        use insertCmd = createCommand connection tx insertSql
+        use insertCmd = Sqlite.createCommand connection tx insertSql
 
         rowValues
         |> List.iteri (fun i value -> insertCmd.Parameters.AddWithValue($"@p{i}", exprToDbValue value) |> ignore)
@@ -194,7 +192,7 @@ let initializeDatabaseFromSchemaOnly
   task {
     try
       use tx = newConnection.BeginTransaction()
-      use fkOffCmd = createCommand newConnection tx "PRAGMA foreign_keys = OFF;"
+      use fkOffCmd = Sqlite.createCommand newConnection tx "PRAGMA foreign_keys = OFF;"
       let! _ = fkOffCmd.ExecuteNonQueryAsync()
 
       do! createSchemaObjects newConnection tx targetSchema
@@ -206,7 +204,7 @@ let initializeDatabaseFromSchemaOnly
       | None ->
         let! seededRows = applySeedInserts newConnection tx targetSchema
 
-        use fkOnCmd = createCommand newConnection tx "PRAGMA foreign_keys = ON;"
+        use fkOnCmd = Sqlite.createCommand newConnection tx "PRAGMA foreign_keys = ON;"
         let! _ = fkOnCmd.ExecuteNonQueryAsync()
 
         tx.Commit()

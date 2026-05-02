@@ -17,6 +17,8 @@ module Sqlite =
     connection.Open()
     connection
 
+  let createCommand (connection: SqliteConnection) (tx: SqliteTransaction) sql = new SqliteCommand(sql, connection, tx)
+
 type ResultBuilder() =
   member _.Return(value: 'a) : Result<'a, 'e> = Ok value
 

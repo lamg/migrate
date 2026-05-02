@@ -22,9 +22,6 @@ let private sourceTableName (table: CreateTable) =
 let private sourceColumnName (column: ColumnDef) =
   defaultArg column.previousName column.name
 
-let private createCommand (connection: SqliteConnection) (tx: SqliteTransaction) sql =
-  new SqliteCommand(sql, connection, tx)
-
 let private sourceTableExpression tableName =
   let sourceDbName = quoteIdentifier "source_db"
   $"{sourceDbName}.{quoteIdentifier tableName}"
@@ -34,7 +31,7 @@ let private attachSourceDatabase (connection: SqliteConnection) (tx: SqliteTrans
     let sourceDbName = quoteIdentifier "source_db"
 
     use command =
-      createCommand connection tx $"ATTACH DATABASE @sourcePath AS {sourceDbName};"
+      Sqlite.createCommand connection tx $"ATTACH DATABASE @sourcePath AS {sourceDbName};"
 
     command.Parameters.AddWithValue("@sourcePath", Path.GetFullPath sourceDbPath)
     |> ignore
@@ -74,7 +71,7 @@ let private copyMappedColumns
       let sql =
         $"INSERT INTO {quoteIdentifier targetTable.name} ({targetColumns}) SELECT {sourceColumns} FROM {sourceTableExpression sourceTable.name};"
 
-      use command = createCommand connection tx sql
+      use command = Sqlite.createCommand connection tx sql
       let! rows = command.ExecuteNonQueryAsync()
       return int64 rows
   }
