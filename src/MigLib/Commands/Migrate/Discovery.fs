@@ -2,7 +2,6 @@ module internal MigLib.Commands.Migrate.Discovery
 
 open System.IO
 open System.Threading.Tasks
-open Microsoft.Data.Sqlite
 
 open MigLib.Commands.Init.Execution
 open MigLib.Commands.Types
@@ -13,16 +12,6 @@ open MigLib.Commands.Resolution.GeneratedSchema
 open MigLib.Commands.Resolution.Projects
 open MigLib.Commands.Resolution.Types
 open MigLib.Util
-
-let private sqliteInitialized = lazy (SQLitePCL.Batteries_V2.Init())
-
-let private ensureSqliteInitialized () = sqliteInitialized.Force()
-
-let private openSqliteConnection dbPath =
-  ensureSqliteInitialized ()
-  let connection = new SqliteConnection($"Data Source={dbPath}")
-  connection.Open()
-  connection
 
 let resolveMigrationInputs (project: MigProject) : Result<ResolvedGeneratedSchema * ResolvedDatabasePaths, MigError> =
   result {
@@ -41,7 +30,7 @@ let findOldSchema (reportProgress: ProgReport) (project: MigProject) : Task<Resu
     | None -> return None
     | Some sourceDbPath ->
       do! reportProgress $"Reading source database schema: {sourceDbPath}"
-      use connection = openSqliteConnection sourceDbPath
+      use connection = Sqlite.openConnection sourceDbPath
       let! (schema: SqlFile) = loadSchemaFromDatabase connection
       return Some schema
   }

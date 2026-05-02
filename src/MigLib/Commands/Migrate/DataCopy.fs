@@ -7,13 +7,10 @@ open Microsoft.Data.Sqlite
 
 open MigLib.Commands.Schema.Types
 open MigLib.Commands.Types
+open MigLib.Util
 
 type CopyResult =
   { copiedTables: int; copiedRows: int64 }
-
-let private sqliteInitialized = lazy (SQLitePCL.Batteries_V2.Init())
-
-let private ensureSqliteInitialized () = sqliteInitialized.Force()
 
 let private quoteIdentifier (identifier: string) =
   let escaped = identifier.Replace("\"", "\"\"")
@@ -24,12 +21,6 @@ let private sourceTableName (table: CreateTable) =
 
 let private sourceColumnName (column: ColumnDef) =
   defaultArg column.previousName column.name
-
-let private openSqliteConnection dbPath =
-  ensureSqliteInitialized ()
-  let connection = new SqliteConnection($"Data Source={dbPath}")
-  connection.Open()
-  connection
 
 let private createCommand (connection: SqliteConnection) (tx: SqliteTransaction) sql =
   new SqliteCommand(sql, connection, tx)
@@ -98,7 +89,7 @@ let copyData
   task {
     try
       do! reportProgress $"Copying data from source database: {sourceDbPath}"
-      use connection = openSqliteConnection targetDbPath
+      use connection = Sqlite.openConnection targetDbPath
       use tx = connection.BeginTransaction()
 
       do! attachSourceDatabase connection tx sourceDbPath

@@ -3,6 +3,7 @@ module internal MigLib.Commands.Migrate.Execution
 open System
 open System.Threading.Tasks
 
+open MigLib.Commands.Migrate.Archive
 open MigLib.Commands.Migrate.DataCopy
 open MigLib.Commands.Migrate.Discovery
 open MigLib.Commands.Migrate.Planning
@@ -33,10 +34,19 @@ let migrate (reportProgress: ProgReport) (project: MigProject) : Task<Result<Mig
           copyData reportProgress sourceDbPath newDbPath sourceSchema migrationPlan.targetSchema
         | _ -> Task.FromResult(Ok { copiedTables = 0; copiedRows = 0L })
 
+      let! archivedOldDbPath =
+        match migrationPlan.result.sourceDbPath with
+        | Some sourceDbPath ->
+          taskResult {
+            let! (archivedPath: string) = markReadonlyAndArchiveOldDb reportProgress sourceDbPath
+            return Some archivedPath
+          }
+        | None -> Task.FromResult(Ok None)
+
       return
         { db = dbTxn newDbPath
           newDbPath = newDbPath
-          archivedOldDbPath = None
+          archivedOldDbPath = archivedOldDbPath
           copiedTables = copyResult.copiedTables
           copiedRows = copyResult.copiedRows }
   }

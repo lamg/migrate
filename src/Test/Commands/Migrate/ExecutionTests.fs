@@ -77,6 +77,9 @@ let private sourceDbPath tempDir =
 let private targetDbPath tempDir =
   Path.Combine(tempDir, "generated-fixture-main-0123456789abcdef.sqlite")
 
+let private archivedSourceDbPath tempDir =
+  Path.Combine(tempDir, "archive", "generated-fixture-main-fedcba9876543210.sqlite")
+
 let private assertRegularErrorContains expectedText result =
   match result with
   | Error(MigError.Regular message) -> Assert.Contains(expectedText, message)
@@ -123,15 +126,42 @@ let ``migrate copies compatible source rows`` () =
     | Ok result ->
       Assert.Equal(1, result.copiedTables)
       Assert.Equal(3L, result.copiedRows)
+      Assert.Equal(Some(archivedSourceDbPath tempDir), result.archivedOldDbPath)
+      Assert.False(File.Exists(sourceDbPath tempDir))
+      Assert.True(File.Exists(archivedSourceDbPath tempDir))
       Assert.Contains(messages, fun message -> message.Contains "Copying data from source database")
       Assert.Contains(messages, fun message -> message.Contains "Copying table: generated_fixture -> generated_fixture")
       Assert.Contains(messages, fun message -> message.Contains "Copied 3 row(s) into table: generated_fixture")
       Assert.Contains(messages, fun message -> message.Contains "Copied 3 row(s) across 1 table(s).")
+      Assert.Contains(messages, fun message -> message.Contains "Marking old database readonly")
+      Assert.Contains(messages, fun message -> message.Contains "Archiving old database")
 
       use targetConnection = openConnection result.newDbPath
       Assert.Equal(3L, scalar<int64> targetConnection "SELECT COUNT(*) FROM generated_fixture")
       Assert.Equal(6L, scalar<int64> targetConnection "SELECT SUM(id) FROM generated_fixture")
+
+      use archiveConnection = openConnection (archivedSourceDbPath tempDir)
+      Assert.Equal(1L, scalar<int64> archiveConnection "SELECT COUNT(*) FROM _mig_readonly WHERE id = 1")
     | Error error -> failwith $"Expected migrate to succeed, got: {error}"
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``migrate fails when archive target already exists`` () =
+  let tempDir = createTempDir "mig_execution_archive_collision"
+
+  try
+    writeProjectLayout tempDir
+    use sourceConnection = openConnection (sourceDbPath tempDir)
+    executeSql sourceConnection "CREATE TABLE generated_fixture(id INTEGER NOT NULL);"
+    executeSql sourceConnection "INSERT INTO generated_fixture(id) VALUES (1);"
+    sourceConnection.Close()
+
+    writeFile (archivedSourceDbPath tempDir) ""
+
+    migrate report (makeProject tempDir)
+    |> fun task -> task.Result
+    |> assertRegularErrorContains "Archived database already exists"
   finally
     Directory.Delete(tempDir, true)
 

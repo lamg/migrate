@@ -94,8 +94,8 @@
     <Compile Include="Commands/Migrate/Discovery.fs" />
     <Compile Include="Commands/Migrate/Planning.fs" />
     <Compile Include="Commands/Migrate/DataCopy.fs" />
-    <Compile Include="Commands/Migrate/Execution.fs" />
     <Compile Include="Commands/Migrate/Archive.fs" />
+    <Compile Include="Commands/Migrate/Execution.fs" />
     <Compile Include="Commands/Plan/Discovery.fs" />
     <Compile Include="Commands/Plan/Reporting.fs" />
     <Compile Include="MigLib.fs" />

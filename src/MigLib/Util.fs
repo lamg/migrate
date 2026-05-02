@@ -4,6 +4,19 @@ open System
 open Microsoft.Data.Sqlite
 open System.Threading.Tasks
 
+module Sqlite =
+  let private sqliteInitialized = lazy (SQLitePCL.Batteries_V2.Init())
+
+  let ensureInitialized () = sqliteInitialized.Force()
+
+  let connectionString (dbPath: string) = $"Data Source={dbPath}"
+
+  let openConnection (dbPath: string) =
+    ensureInitialized ()
+    let connection = new SqliteConnection(connectionString dbPath)
+    connection.Open()
+    connection
+
 type ResultBuilder() =
   member _.Return(value: 'a) : Result<'a, 'e> = Ok value
 

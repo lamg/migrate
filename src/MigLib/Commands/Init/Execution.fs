@@ -12,16 +12,6 @@ open MigLib.Commands.Resolution.GeneratedSchema
 open MigLib.Commands.Resolution.Projects
 open MigLib.Util
 
-let private sqliteInitialized = lazy (SQLitePCL.Batteries_V2.Init())
-
-let private ensureSqliteInitialized () = sqliteInitialized.Force()
-
-let private openSqliteConnection dbPath =
-  ensureSqliteInitialized ()
-  let connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={dbPath}")
-  connection.Open()
-  connection
-
 let runInitWithSchema (targetSchema: SqlFile) (newDbPath: string) : Task<Result<InitResult, MigError>> =
   task {
     try
@@ -33,7 +23,7 @@ let runInitWithSchema (targetSchema: SqlFile) (newDbPath: string) : Task<Result<
         if not (String.IsNullOrWhiteSpace newDirectory) then
           Directory.CreateDirectory newDirectory |> ignore
 
-        use newConnection = openSqliteConnection newDbPath
+        use newConnection = Sqlite.openConnection newDbPath
         let! initResult = initializeDatabaseFromSchemaOnly newConnection targetSchema
 
         match initResult with

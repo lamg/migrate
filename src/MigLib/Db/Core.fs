@@ -25,11 +25,6 @@ module DbCore =
       writes: ResizeArray<MigrationWrite> }
 
   let txnContext = AsyncLocal<TxnContext option>()
-  let private sqliteInitialized = lazy (SQLitePCL.Batteries_V2.Init())
-
-  let private sqliteConnectionString (dbPath: string) = $"Data Source={dbPath}"
-
-  let private ensureSqliteInitialized () = sqliteInitialized.Force()
 
   let resolveDatabasePath (configuredPath: string) : Result<string, string> =
     if String.IsNullOrWhiteSpace configuredPath then
@@ -37,11 +32,7 @@ module DbCore =
     else
       Ok(Path.GetFullPath configuredPath)
 
-  let openSqliteConnection (dbPath: string) =
-    ensureSqliteInitialized ()
-    let connection = new SqliteConnection(sqliteConnectionString dbPath)
-    connection.Open()
-    connection
+  let openSqliteConnection (dbPath: string) = Util.Sqlite.openConnection dbPath
 
   let resolveDatabaseFilePath (configuredDirectory: string) (dbFileName: string) : Result<string, string> =
     match resolveDatabasePath configuredDirectory with
