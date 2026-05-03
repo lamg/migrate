@@ -2,7 +2,7 @@ namespace Mig
 
 open Argu
 open MigLib
-open MigLib.Util
+open MigLib.TaskResult
 open ProgramArgs
 open ProgramCommon
 

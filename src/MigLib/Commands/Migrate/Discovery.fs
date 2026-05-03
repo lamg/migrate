@@ -6,7 +6,7 @@ open System.Threading.Tasks
 open MigLib.Commands.Init.Execution
 open MigLib.Commands.Resolution.ProjectState
 open MigLib.Commands.Types
-open MigLib.Util
+open MigLib.TaskResult
 
 let resolveMigrationInputs (project: MigProject) : Task<Result<ResolvedMigProject, MigError>> =
   resolveProjectState project

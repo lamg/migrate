@@ -1,4 +1,4 @@
-module MigLib.DbAttributes
+module MigLib.Db.Attributes
 
 open System
 

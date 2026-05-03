@@ -495,10 +495,10 @@ module Respond =
   [<RequiresUnreferencedCode("JSON serialization without source-generated metadata may require runtime metadata that trimming cannot preserve. Use Respond.jsonWithTypeInfo instead.")>]
   let json<'env, 'appError, 'custom, 'a> (value: 'a) : WebOp<'env, 'appError, 'custom, unit> =
     Response.append (
-      (WriteJson
+      WriteJson
         { Serialize = fun options -> JsonSerializer.Serialize(value, options)
           Options = None }
-      : ResponseEffect<'custom>)
+      : ResponseEffect<'custom>
     )
 
   [<RequiresDynamicCode("JSON serialization without source-generated metadata is not native AOT-safe. Use Respond.jsonWithTypeInfo instead.")>]
@@ -508,10 +508,10 @@ module Respond =
     (value: 'a)
     : WebOp<'env, 'appError, 'custom, unit> =
     Response.append (
-      (WriteJson
+      WriteJson
         { Serialize = fun _ -> JsonSerializer.Serialize(value, options)
           Options = Some options }
-      : ResponseEffect<'custom>)
+      : ResponseEffect<'custom>
     )
 
   let jsonWithTypeInfo<'env, 'appError, 'custom, 'a>
@@ -519,10 +519,10 @@ module Respond =
     (value: 'a)
     : WebOp<'env, 'appError, 'custom, unit> =
     Response.append (
-      (WriteJson
+      WriteJson
         { Serialize = fun _ -> JsonSerializer.Serialize(value, jsonTypeInfo)
           Options = None }
-      : ResponseEffect<'custom>)
+      : ResponseEffect<'custom>
     )
 
   let redirect (location: string) : WebOp<'env, 'appError, 'custom, unit> =

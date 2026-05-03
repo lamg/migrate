@@ -5,7 +5,7 @@ open System.Threading.Tasks
 
 open MigLib.Commands.Resolution.ProjectState
 open MigLib.Commands.Types
-open MigLib.Util
+open MigLib.TaskResult
 
 let status (project: MigProject) : Task<Result<StatusResult, MigError>> =
   taskResult {

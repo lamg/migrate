@@ -1,8 +1,11 @@
-module MigLib.DbTransactions
+module MigLib.Db.Transactions
 
 open System
 open System.Threading.Tasks
+
 open Microsoft.Data.Sqlite
+
+open MigLib
 
 /// Represents a transaction-bound asynchronous step that receives the active
 /// <see cref="SqliteTransaction"/> and returns either a value or a
@@ -85,27 +88,27 @@ let runTransactionInternal
   (body: SqliteTransaction -> Task<Result<'a, 'e>>)
   : Task<Result<'a, 'e>> =
   task {
-    match DbCore.resolveDatabasePath dbPath with
+    match Db.Core.resolveDatabasePath dbPath with
     | Error message -> return Error(mapDbError (SqliteException(message, 0)))
     | Ok resolvedDbPath ->
-      use connection = DbCore.openSqliteConnection resolvedDbPath
+      use connection = Db.Core.openSqliteConnection resolvedDbPath
       use transaction = connection.BeginTransaction()
-      let! readinessResult = DbRecording.ensureNewDatabaseReadyForTransactions transaction
+      let! readinessResult = Db.Recording.ensureNewDatabaseReadyForTransactions transaction
 
       match readinessResult with
       | Error ex ->
         transaction.Rollback()
         return Error(mapDbError ex)
       | Ok() ->
-        let! mode = DbRecording.detectMigrationMode transaction
+        let! mode = Db.Recording.detectMigrationMode transaction
 
         let context =
-          { DbCore.TxnContext.tx = transaction
-            DbCore.TxnContext.mode = mode
-            DbCore.TxnContext.writes = ResizeArray() }
+          { Db.Core.TxnContext.tx = transaction
+            Db.Core.TxnContext.mode = mode
+            Db.Core.TxnContext.writes = ResizeArray() }
 
-        let previousContext = DbCore.txnContext.Value
-        DbCore.txnContext.Value <- Some context
+        let previousContext = Db.Core.txnContext.Value
+        Db.Core.txnContext.Value <- Some context
 
         try
           try
@@ -113,7 +116,7 @@ let runTransactionInternal
 
             match result with
             | Ok value ->
-              let! flushResult = DbRecording.flushRecordedWrites context
+              let! flushResult = Db.Recording.flushRecordedWrites context
 
               match flushResult with
               | Ok() ->
@@ -129,7 +132,7 @@ let runTransactionInternal
             transaction.Rollback()
             return Error(mapDbError ex)
         finally
-          DbCore.txnContext.Value <- previousContext
+          Db.Core.txnContext.Value <- previousContext
   }
 
 /// Provides transaction execution services for a fixed database path.

@@ -9,7 +9,7 @@ open MigLib.Commands.Schema.Types
 open MigLib.Commands.Types
 open MigLib.Commands.Codegen.Generation
 open MigLib.Commands.Codegen.Inputs
-open MigLib.Util
+open MigLib.TaskResult
 
 let private staticBindingFlags =
   BindingFlags.Public ||| BindingFlags.NonPublic ||| BindingFlags.Static

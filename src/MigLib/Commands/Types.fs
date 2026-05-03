@@ -4,7 +4,7 @@ open System
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 open MigLib.Commands.Schema.Types
-open MigLib.DbTransactions
+open MigLib.Db.Transactions
 
 type MigProject =
   { dbInstance: string

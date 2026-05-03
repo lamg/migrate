@@ -3,7 +3,7 @@ namespace Mig
 open System
 open System.IO
 open MigLib
-open MigLib.Util
+open MigLib.TaskResult
 open ProgramArgs
 
 module internal ProgramCommon =
@@ -67,5 +67,8 @@ module internal ProgramCommon =
   let resolveCliProject (candidateDirectory: string option) (instance: string option) : Result<MigProject, string> =
     result {
       let! targetDirectory = resolveCliDirectory candidateDirectory
-      return! MigLib.discoverProject targetDirectory instance targetDirectory |> Result.mapError formatMigError
+
+      return!
+        MigLib.discoverProject targetDirectory instance targetDirectory
+        |> Result.mapError formatMigError
     }

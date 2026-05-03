@@ -6,7 +6,7 @@ open System.Threading.Tasks
 open MigLib.Commands.Resolution.ProjectState
 open MigLib.Commands.Schema.Types
 open MigLib.Commands.Types
-open MigLib.Util
+open MigLib.TaskResult
 
 type MigrationPlan =
   { sourceSchema: SqlFile option
@@ -183,9 +183,9 @@ let buildPlan (reportProgress: ProgReport) (project: MigProject) : Task<Result<M
       | Some oldSchema -> analyzeSchemaDifferences oldSchema targetSchema
 
     return
-        { sourceSchema = sourceSchema
-          targetSchema = targetSchema
-          result =
+      { sourceSchema = sourceSchema
+        targetSchema = targetSchema
+        result =
           { sourceDbPath = projectState.sourceDbPath
             targetDbPath = projectState.targetDbPath
             canMigrate = unsupportedDifferences.IsEmpty

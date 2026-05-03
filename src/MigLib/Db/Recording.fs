@@ -1,18 +1,21 @@
-module MigLib.DbRecording
+module MigLib.Db.Recording
 
 open System
 open System.Globalization
 open System.Threading.Tasks
+
 open Microsoft.Data.Sqlite
+
+open MigLib
 
 let ensureNewDatabaseReadyForTransactions (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
   task {
-    let! statusResult = DbCore.tryReadStatusValue tx "_migration_status"
+    let! statusResult = Db.Core.tryReadStatusValue tx "_migration_status"
 
     match statusResult with
     | Error ex -> return Error ex
     | Ok None ->
-      let! hasStatusTable = DbCore.tableExists tx "_migration_status"
+      let! hasStatusTable = Db.Core.tableExists tx "_migration_status"
 
       if hasStatusTable then
         return
@@ -37,12 +40,12 @@ let ensureNewDatabaseReadyForTransactions (tx: SqliteTransaction) : Task<Result<
         )
   }
 
-let detectMigrationMode (tx: SqliteTransaction) : Task<DbCore.MigrationMode> =
+let detectMigrationMode (tx: SqliteTransaction) : Task<Db.Core.MigrationMode> =
   task {
-    let! markerExists = DbCore.tableExists tx "_migration_marker"
+    let! markerExists = Db.Core.tableExists tx "_migration_marker"
 
     if not markerExists then
-      return DbCore.Normal
+      return Db.Core.Normal
     else
       use cmd =
         new SqliteCommand("SELECT status FROM _migration_marker WHERE id = 0 LIMIT 1", tx.Connection, tx)
@@ -50,20 +53,20 @@ let detectMigrationMode (tx: SqliteTransaction) : Task<DbCore.MigrationMode> =
       let! statusObj = cmd.ExecuteScalarAsync()
 
       if isNull statusObj then
-        return DbCore.Normal
+        return Db.Core.Normal
       else
         match string statusObj with
-        | "recording" -> return DbCore.Recording
-        | "draining" -> return DbCore.Draining
-        | _ -> return DbCore.Normal
+        | "recording" -> return Db.Core.Recording
+        | "draining" -> return Db.Core.Draining
+        | _ -> return Db.Core.Normal
   }
 
-let flushRecordedWrites (context: DbCore.TxnContext) : Task<Result<unit, SqliteException>> =
+let flushRecordedWrites (context: Db.Core.TxnContext) : Task<Result<unit, SqliteException>> =
   task {
     try
       match context.mode with
-      | DbCore.Recording when context.writes.Count > 0 ->
-        let! logExists = DbCore.tableExists context.tx "_migration_log"
+      | Db.Core.Recording when context.writes.Count > 0 ->
+        let! logExists = Db.Core.tableExists context.tx "_migration_log"
 
         if not logExists then
           return Error(SqliteException("Migration marker is set to recording, but _migration_log table is missing.", 0))
@@ -104,20 +107,20 @@ let flushRecordedWrites (context: DbCore.TxnContext) : Task<Result<unit, SqliteE
   }
 
 let ensureWriteAllowed (tx: SqliteTransaction) : unit =
-  match DbCore.getMatchingContext tx with
-  | Some context when context.mode = DbCore.Draining ->
+  match Db.Core.getMatchingContext tx with
+  | Some context when context.mode = Db.Core.Draining ->
     raise (SqliteException("Writes are unavailable while migration drain is in progress.", 0))
   | _ -> ()
 
 let private recordWrite (tx: SqliteTransaction) (operation: string) (tableName: string) (rowData: (string * obj) list) =
   ensureWriteAllowed tx
 
-  match DbCore.getMatchingContext tx with
-  | Some context when context.mode = DbCore.Recording ->
+  match Db.Core.getMatchingContext tx with
+  | Some context when context.mode = Db.Core.Recording ->
     context.writes.Add
       { operation = operation
         tableName = tableName
-        rowDataJson = DbCore.serializeRowData rowData }
+        rowDataJson = Db.Core.serializeRowData rowData }
   | _ -> ()
 
 let recordInsert (tx: SqliteTransaction) (tableName: string) (rowData: (string * obj) list) : unit =

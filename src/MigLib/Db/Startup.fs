@@ -1,11 +1,14 @@
-module MigLib.DbStartup
+module MigLib.Db.Startup
 
 open System
 open System.IO
 open System.Threading
 open System.Threading.Tasks
+
 open Microsoft.Data.Sqlite
-open MigLib.Util
+
+open MigLib
+open MigLib.TaskResult
 
 type StartupDatabaseState =
   | Missing
@@ -21,20 +24,20 @@ type StartupDatabaseDecision =
 
 let getStartupDatabaseState (dbPath: string) : Task<Result<StartupDatabaseState, SqliteException>> =
   task {
-    match DbCore.resolveDatabasePath dbPath with
+    match Db.Core.resolveDatabasePath dbPath with
     | Error message -> return Error(SqliteException(message, 0))
     | Ok resolvedDbPath ->
       if not (File.Exists resolvedDbPath) then
         return Ok Missing
       else
         try
-          use connection = DbCore.openSqliteConnection resolvedDbPath
-          let! statusResult = DbCore.tryReadStatusValueFromConnection connection "_migration_status"
+          use connection = Db.Core.openSqliteConnection resolvedDbPath
+          let! statusResult = Db.Core.tryReadStatusValueFromConnection connection "_migration_status"
 
           match statusResult with
           | Error ex -> return Error ex
           | Ok None ->
-            let! hasStatusTable = DbCore.tableExistsInConnection connection "_migration_status"
+            let! hasStatusTable = Db.Core.tableExistsInConnection connection "_migration_status"
 
             if hasStatusTable then
               return
@@ -62,7 +65,7 @@ let getStartupDatabaseDecision
   : Task<Result<StartupDatabaseDecision, SqliteException>> =
   taskResult {
     let! dbPath =
-      DbCore.resolveDatabaseFilePath configuredDirectory dbFileName
+      Db.Core.resolveDatabaseFilePath configuredDirectory dbFileName
       |> TaskResultEx.ofResultMapError (fun message -> SqliteException(message, 0))
 
     let! state = getStartupDatabaseState dbPath

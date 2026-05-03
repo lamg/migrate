@@ -7,7 +7,8 @@ open System.Threading.Tasks
 open MigLib.Commands.Types
 open MigLib.Commands.Init.SchemaInit
 open MigLib.Commands.Resolution.ProjectState
-open MigLib.Util
+open MigLib.TaskResult
+open MigLib.Sqlite
 
 let runInitWithSchema (targetSchema: SqlFile) (newDbPath: string) : Task<Result<InitResult, MigError>> =
   task {
@@ -20,7 +21,7 @@ let runInitWithSchema (targetSchema: SqlFile) (newDbPath: string) : Task<Result<
         if not (String.IsNullOrWhiteSpace newDirectory) then
           Directory.CreateDirectory newDirectory |> ignore
 
-        use newConnection = Sqlite.openConnection newDbPath
+        use newConnection = openConnection newDbPath
         let! initResult = initializeDatabaseFromSchemaOnly newConnection targetSchema
 
         match initResult with

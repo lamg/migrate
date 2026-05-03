@@ -7,7 +7,8 @@ open Microsoft.Data.Sqlite
 
 open MigLib.Commands.Schema.Types
 open MigLib.Commands.Types
-open MigLib.Util
+open MigLib.TaskResult
+open MigLib.Sqlite
 
 type CopyResult =
   { copiedTables: int; copiedRows: int64 }
@@ -31,7 +32,7 @@ let private attachSourceDatabase (connection: SqliteConnection) (tx: SqliteTrans
     let sourceDbName = quoteIdentifier "source_db"
 
     use command =
-      Sqlite.createCommand connection tx $"ATTACH DATABASE @sourcePath AS {sourceDbName};"
+      createCommand connection tx $"ATTACH DATABASE @sourcePath AS {sourceDbName};"
 
     command.Parameters.AddWithValue("@sourcePath", Path.GetFullPath sourceDbPath)
     |> ignore
@@ -71,7 +72,7 @@ let private copyMappedColumns
       let sql =
         $"INSERT INTO {quoteIdentifier targetTable.name} ({targetColumns}) SELECT {sourceColumns} FROM {sourceTableExpression sourceTable.name};"
 
-      use command = Sqlite.createCommand connection tx sql
+      use command = createCommand connection tx sql
       let! rows = command.ExecuteNonQueryAsync()
       return int64 rows
   }
@@ -86,7 +87,7 @@ let copyData
   task {
     try
       do! reportProgress $"Copying data from source database: {sourceDbPath}"
-      use connection = Sqlite.openConnection targetDbPath
+      use connection = openConnection targetDbPath
       use tx = connection.BeginTransaction()
 
       do! attachSourceDatabase connection tx sourceDbPath

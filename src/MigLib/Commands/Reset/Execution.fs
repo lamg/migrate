@@ -7,21 +7,23 @@ open Microsoft.Data.Sqlite
 
 open MigLib.Commands.Resolution.ProjectState
 open MigLib.Commands.Types
-open MigLib.Util
+open MigLib.TaskResult
+open MigLib.Sqlite
 
 let private latestArchivedDatabase (archivedDbPaths: string list) =
-  archivedDbPaths |> List.sortByDescending File.GetLastWriteTimeUtc |> List.tryHead
+  archivedDbPaths
+  |> List.sortByDescending File.GetLastWriteTimeUtc
+  |> List.tryHead
 
 let private restoreDestination (dbDirectory: string) (archivedDbPath: string) =
   Path.Combine(dbDirectory, Path.GetFileName archivedDbPath)
 
 let private removeReadonlyMarker dbPath =
   task {
-    use connection = Sqlite.openConnection dbPath
+    use connection = openConnection dbPath
     use tx = connection.BeginTransaction()
 
-    use command =
-      Sqlite.createCommand connection tx "DROP TABLE IF EXISTS _mig_readonly;"
+    use command = createCommand connection tx "DROP TABLE IF EXISTS _mig_readonly;"
 
     let! _ = command.ExecuteNonQueryAsync()
     tx.Commit()

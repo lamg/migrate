@@ -8,8 +8,8 @@ open MigLib.Commands.Migrate.DataCopy
 open MigLib.Commands.Migrate.Discovery
 open MigLib.Commands.Migrate.Planning
 open MigLib.Commands.Types
-open MigLib.DbTransactions
-open MigLib.Util
+open MigLib.Db.Transactions
+open MigLib.TaskResult
 
 let private formatUnsupportedDifferences (differences: string list) =
   let details =

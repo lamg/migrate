@@ -6,7 +6,7 @@ open System.Threading
 open Microsoft.Data.Sqlite
 open Mig.HotMigration
 open MigLib.Db
-open MigLib.Util
+open MigLib.TaskResult
 
 open Db
 

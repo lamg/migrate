@@ -9,7 +9,7 @@ open System.Xml.Linq
 open MigLib.Commands.Schema.Types
 open MigLib.Commands.Types
 open MigLib.Commands.Resolution.Types
-open MigLib.Util
+open MigLib.TaskResult
 
 let private staticBindingFlags =
   BindingFlags.Public ||| BindingFlags.NonPublic ||| BindingFlags.Static

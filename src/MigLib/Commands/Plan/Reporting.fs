@@ -4,7 +4,7 @@ open System.Threading.Tasks
 
 open MigLib.Commands.Migrate.Planning
 open MigLib.Commands.Types
-open MigLib.Util
+open MigLib.TaskResult
 
 let plan (project: MigProject) : Task<Result<PlanResult, MigError>> =
   let reportProgress _ = Task.FromResult()

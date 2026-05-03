@@ -1,4 +1,4 @@
-module MigLib.DbCore
+module MigLib.Db.Core
 
 open System
 open System.Globalization
@@ -31,7 +31,7 @@ let resolveDatabasePath (configuredPath: string) : Result<string, string> =
   else
     Ok(Path.GetFullPath configuredPath)
 
-let openSqliteConnection (dbPath: string) = Util.Sqlite.openConnection dbPath
+let openSqliteConnection (dbPath: string) = MigLib.Sqlite.openConnection dbPath
 
 let resolveDatabaseFilePath (configuredDirectory: string) (dbFileName: string) : Result<string, string> =
   match resolveDatabasePath configuredDirectory with

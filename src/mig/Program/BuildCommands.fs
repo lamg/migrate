@@ -3,7 +3,7 @@ namespace Mig
 open Argu
 open MigLib
 open MigLib.Commands.Schema.Types
-open MigLib.Util
+open MigLib.TaskResult
 open ProgramArgs
 open ProgramCommon
 

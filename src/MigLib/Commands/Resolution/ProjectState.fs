@@ -6,7 +6,8 @@ open System.Threading.Tasks
 open MigLib.Commands.Migrate.SchemaIntrospection
 open MigLib.Commands.Types
 open MigLib.Commands.Resolution.DatabasePaths
-open MigLib.Util
+open MigLib.TaskResult
+open MigLib.Sqlite
 
 let private listArchivedDatabases archiveDirectory =
   if Directory.Exists archiveDirectory then
@@ -19,7 +20,7 @@ let private listArchivedDatabases archiveDirectory =
 
 let private loadSourceSchema (sourceDbPath: string) =
   taskResult {
-    use connection = Sqlite.openConnection sourceDbPath
+    use connection = openConnection sourceDbPath
     let! (sourceSchema: SqlFile) = loadSchemaFromDatabase connection
     return Some sourceSchema
   }

@@ -8,7 +8,7 @@ open MigLib.Commands.Types
 open MigLib.Commands.Resolution.Assemblies
 open MigLib.Commands.Resolution.Projects
 open MigLib.Commands.Resolution.Types
-open MigLib.Util
+open MigLib.TaskResult
 
 type CodegenInputs =
   { project: ResolvedProject

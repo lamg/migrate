@@ -183,7 +183,7 @@ Added:
 
 Changed:
 
-- **MigLib.Util**: generalized `taskResult` so it works with any error type instead of only `SqliteException`
+- **MigLib.TaskResult**: generalized `taskResult` so it works with any error type instead of only `SqliteException`
   - allows build/reporting helpers to compose `Result` and `Task<Result<_, _>>` flows without forcing SQLite-shaped errors
   - preserves the existing usage patterns in hot-migration code while widening the computation expression for other modules
 
@@ -229,7 +229,7 @@ Removed:
 
 - **Schema Script Support**: `.fsx` schema parsing/execution has been removed from runtime, code generation, and tests
 - **Generated Project Files**: `mig codegen` no longer emits sibling `.fsproj` files
-- **FsToolkit.ErrorHandling Dependency**: result and task-result utilities now live in `MigLib.Util`
+- **FsToolkit.ErrorHandling Dependency**: result and task-result utilities now live in `MigLib.TaskResult`
 
 
 ## [4.1.4] - 2026-03-21

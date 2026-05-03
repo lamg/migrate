@@ -5,7 +5,7 @@ open System.IO
 
 open MigLib.Commands.Types
 open MigLib.Commands.Resolution.Types
-open MigLib.Util
+open MigLib.TaskResult
 
 let private regularError message = Error(MigError.Regular message)
 

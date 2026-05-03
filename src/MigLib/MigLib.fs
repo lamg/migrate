@@ -2,7 +2,8 @@
 module MigLib.MigLib
 
 open System.Threading.Tasks
-open MigLib.Util
+open MigLib.Db
+open MigLib.TaskResult
 
 type MigProject = Commands.Types.MigProject
 type MigError = Commands.Types.MigError
@@ -19,7 +20,7 @@ let codegen (project: MigProject) : Result<CodegenResult, MigError> =
 
 let discoverProject (directory: string) (instance: string option) (dbDir: string) : Result<MigProject, MigError> =
   result {
-    let dbInstance = Db.resolveDatabaseInstance instance
+    let dbInstance = resolveDatabaseInstance instance
     let! resolvedProject = Commands.Resolution.Projects.discoverProject directory dbInstance dbDir
     let! runtimeAssembly = Commands.Resolution.Assemblies.resolveRuntimeAssembly resolvedProject
     let! generatedSchema = Commands.Resolution.GeneratedSchema.resolveGeneratedSchema runtimeAssembly

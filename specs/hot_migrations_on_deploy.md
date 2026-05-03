@@ -41,7 +41,7 @@ Example build step:
 ```fsharp
 open System.IO
 open MigLib.Build
-open MigLib.Util
+open MigLib.TaskResult
 
 let generateDb (projectDir: string) (compiledAssemblyPath: string) =
   result {

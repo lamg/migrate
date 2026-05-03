@@ -6,7 +6,7 @@ open System.Security.Cryptography
 open System.Text
 
 open MigLib.Commands.Schema.Types
-open MigLib.Util
+open MigLib.TaskResult
 
 type CodegenStats = { generatedFiles: string list }
 
@@ -142,6 +142,7 @@ let private renderGeneratedModule moduleName dbApp schemaHash schema =
   [ $"module {moduleName}"
     ""
     "open MigLib.Commands.Schema.Types"
+    "open MigLib.Commands.Codegen.Helpers"
     ""
     "[<Literal>]"
     $"let DbApp = {renderStringLiteral dbApp}"
