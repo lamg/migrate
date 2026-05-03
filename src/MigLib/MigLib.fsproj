@@ -26,7 +26,6 @@
     <Compile Include="Db/Startup.fs" />
     <Compile Include="Db/Recording.fs" />
     <Compile Include="Db/Transactions.fs" />
-    <Compile Include="Db.fs" />
     <Compile Include="Commands/Schema/Types.fs" />
     <Compile Include="Commands/Types.fs" />
     <Compile Include="Commands/Resolution/Types.fs" />

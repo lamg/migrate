@@ -19,6 +19,11 @@ let codegen (project: MigProject) : Result<CodegenResult, MigError> =
   Commands.Codegen.Execution.codegen project
 
 let discoverProject (directory: string) (instance: string option) (dbDir: string) : Result<MigProject, MigError> =
+  let resolveDatabaseInstance (instance: string option) =
+    match instance with
+    | Some value when not (System.String.IsNullOrWhiteSpace value) -> value.Trim()
+    | _ -> "main"
+
   result {
     let dbInstance = resolveDatabaseInstance instance
     let! resolvedProject = Commands.Resolution.Projects.discoverProject directory dbInstance dbDir

@@ -1,6 +1,6 @@
 module CompiledSchemaSourceFixture
 
-open MigLib.Db
+open MigLib.Db.Attributes
 
 type Marker = class end
 
