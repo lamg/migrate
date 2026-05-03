@@ -4,6 +4,9 @@ open System
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 
+/// Represents a transaction-bound asynchronous step that receives the active
+/// <see cref="SqliteTransaction"/> and returns either a value or a
+/// <see cref="SqliteException"/>.
 type TxnStep<'a> = SqliteTransaction -> Task<Result<'a, SqliteException>>
 
 module private TxnStep =
@@ -73,6 +76,9 @@ module private TxnStep =
         | None -> return Ok()
       }
 
+/// Opens the database at <paramref name="dbPath"/>, starts a transaction,
+/// runs <paramref name="body"/>, and commits on success or rolls back on
+/// failure.
 let runTransactionInternal
   (dbPath: string)
   (mapDbError: SqliteException -> 'e)
@@ -126,22 +132,36 @@ let runTransactionInternal
           DbCore.txnContext.Value <- previousContext
   }
 
+/// Provides transaction execution services for a fixed database path.
 type DbRuntime(dbPath: string) =
+  /// Gets the database path used by this runtime.
   member _.DbPath = dbPath
 
+  /// Runs <paramref name="body"/> inside a transaction against this runtime's
+  /// database path.
   member _.RunInTransaction
     (mapDbError: SqliteException -> 'e)
     (body: SqliteTransaction -> Task<Result<'a, 'e>>)
     : Task<Result<'a, 'e>> =
     runTransactionInternal dbPath mapDbError body
 
+/// Exposes a <see cref="DbRuntime"/> for a value that owns database access.
 type IHasDbRuntime =
+  /// Gets the runtime used to execute transactions.
   abstract DbRuntime: DbRuntime
 
+/// Computation expression builder for running transaction steps against a fixed
+/// database path.
+/// Supports binding <see cref="TxnStep{T}"/>, <see cref="Task{TResult}"/>, and
+/// <c>Task&lt;Result&lt;_, _&gt;&gt;</c> values.
 type DbTxnBuilder(dbPath: string) =
+  /// Gets the database path used by this builder.
   member _.DbPath = dbPath
+
+  /// Gets the reusable runtime bound to this builder's database path.
   member _.DbRuntime = DbRuntime dbPath
 
+  /// Runs a composed transaction step against this builder's database path.
   member _.Run(f: TxnStep<'a>) : Task<Result<'a, SqliteException>> = runTransactionInternal dbPath id f
   member _.Zero() : TxnStep<unit> = TxnStep.zero ()
   member _.Return(x: 'a) : TxnStep<'a> = TxnStep.result x
@@ -153,7 +173,12 @@ type DbTxnBuilder(dbPath: string) =
   member _.Delay(f: unit -> TxnStep<'a>) : TxnStep<'a> = TxnStep.delay f
   member _.For(items: 'a seq, body: 'a -> TxnStep<unit>) : TxnStep<unit> = TxnStep.forEach items body
 
+/// Computation expression builder for composing reusable transaction steps
+/// independently of any concrete database path.
+/// Supports binding <see cref="TxnStep{T}"/>, <see cref="Task{TResult}"/>, and
+/// <c>Task&lt;Result&lt;_, _&gt;&gt;</c> values.
 type TxnBuilder() =
+  /// Returns the composed transaction step without executing it.
   member _.Run(f: TxnStep<'a>) : TxnStep<'a> = f
   member _.Zero() : TxnStep<unit> = TxnStep.zero ()
   member _.Return(x: 'a) : TxnStep<'a> = TxnStep.result x
@@ -165,6 +190,14 @@ type TxnBuilder() =
   member _.Delay(f: unit -> TxnStep<'a>) : TxnStep<'a> = TxnStep.delay f
   member _.For(items: 'a seq, body: 'a -> TxnStep<unit>) : TxnStep<unit> = TxnStep.forEach items body
 
+/// Creates a transaction computation expression builder bound to
+/// <paramref name="dbPath"/>.
 let dbTxn dbPath = DbTxnBuilder dbPath
+
+/// Creates a reusable database runtime bound to <paramref name="dbPath"/>.
 let dbRuntime dbPath = DbRuntime dbPath
+
+/// Shared transaction computation expression builder for composing reusable
+/// <see cref="TxnStep{T}"/> values before binding them to a concrete database
+/// path.
 let txn = TxnBuilder()
