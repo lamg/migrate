@@ -173,7 +173,7 @@ let executeWrite
     try
       use cmd = new SqliteCommand(sql, tx.Connection, tx)
       configure cmd
-      MigLib.MigrationLog.ensureWriteAllowed tx
+      MigLib.DbRecording.ensureWriteAllowed tx
       let! rows = cmd.ExecuteNonQueryAsync()
       return! finish rows
     with :? SqliteException as ex ->
@@ -297,12 +297,6 @@ let getStartupDatabaseDecision (configuredDirectory: string) (dbFileName: string
   }
 
 let waitForStartupDatabaseReady = DbStartup.waitForStartupDatabaseReady
-
-module MigrationLog =
-  let ensureWriteAllowed = MigLib.MigrationLog.ensureWriteAllowed
-  let recordInsert = MigLib.MigrationLog.recordInsert
-  let recordUpdate = MigLib.MigrationLog.recordUpdate
-  let recordDelete = MigLib.MigrationLog.recordDelete
 
 type TxnStep<'a> = DbTransactions.TxnStep<'a>
 type DbRuntime = DbTransactions.DbRuntime
