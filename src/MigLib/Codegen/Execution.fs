@@ -9,6 +9,7 @@ open MigLib.Schema.Types
 open MigLib.Types
 open MigLib.Codegen.Generation
 open MigLib.Codegen.Inputs
+open MigLib.Codegen.SchemaReflection
 open MigLib.TaskResult
 
 let private staticBindingFlags =
@@ -134,7 +135,12 @@ let private loadSchema inputs =
 
       result {
         let! moduleType = tryFindModuleType assembly inputs.schemaModuleName
-        return! tryReadRequiredStaticValue<SqlFile> moduleType "Schema"
+
+        match SchemaReflection.Seed.buildSchemaFromAssemblyModule assembly inputs.schemaModuleName with
+        | Ok schema -> return schema
+        | Error reflectionError when reflectionError.StartsWith("No record or union schema types were found") ->
+          return! tryReadRequiredStaticValue<SqlFile> moduleType "Schema"
+        | Error reflectionError -> return! Error reflectionError
       }
     with ex ->
       Error $"Could not load compiled schema assembly '{fullAssemblyPath}': {formatAssemblyLoadError ex}")

@@ -14,7 +14,7 @@ let DbApp = "ExampleApp"
 let DefaultDbInstance = "main"
 
 [<Literal>]
-let SchemaHash = "db4e5b3cef0aac02"
+let SchemaHash = "a1b718d52621c7ac"
 
 let SchemaIdentity: SchemaIdentity =
   { schemaHash = SchemaHash

@@ -32,6 +32,14 @@
     <Compile Include="Resolution/Assemblies.fs" />
     <Compile Include="Resolution/GeneratedSchema.fs" />
     <Compile Include="Resolution/DatabasePaths.fs" />
+    <Compile Include="Codegen/SchemaReflection/Types.fs" />
+    <Compile Include="Codegen/SchemaReflection/NamingAndTypeMapping.fs" />
+    <Compile Include="Codegen/SchemaReflection/AttributeReaders.fs" />
+    <Compile Include="Codegen/SchemaReflection/TableReflection.fs" />
+    <Compile Include="Codegen/SchemaReflection/ViewReflection.fs" />
+    <Compile Include="Codegen/SchemaReflection/UnionExtensions.fs" />
+    <Compile Include="Codegen/SchemaReflection/SchemaAssembly.fs" />
+    <Compile Include="Codegen/SchemaReflection/SeedReflection.fs" />
     <Compile Include="Codegen/FabulousAstHelpers.fs" />
     <Compile Include="Codegen/AstExprBuilders.fs" />
     <Compile Include="Codegen/ViewIntrospection.fs" />
