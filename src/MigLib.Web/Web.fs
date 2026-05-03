@@ -7,9 +7,11 @@ open System.Text.Json
 open System.Text.Json.Nodes
 open System.Text.Json.Serialization.Metadata
 open System.Threading.Tasks
+
 open Microsoft.AspNetCore.Http
 open Microsoft.Data.Sqlite
-open MigLib.Db
+
+open MigLib.Db.Transactions
 
 type IClock =
   abstract UtcNow: unit -> DateTimeOffset

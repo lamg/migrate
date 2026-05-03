@@ -134,13 +134,3 @@ module Facade =
     }
 
   let waitForStartupDatabaseReady = Startup.waitForStartupDatabaseReady
-
-  type TxnStep<'a> = Transactions.TxnStep<'a>
-  type DbRuntime = Transactions.DbRuntime
-  type IHasDbRuntime = Transactions.IHasDbRuntime
-  type DbTxnBuilder = Transactions.DbTxnBuilder
-  type TxnBuilder = Transactions.TxnBuilder
-
-  let dbTxn = Transactions.dbTxn
-  let dbRuntime = Transactions.dbRuntime
-  let txn = Transactions.txn
