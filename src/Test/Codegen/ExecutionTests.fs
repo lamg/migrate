@@ -67,7 +67,7 @@ let private assertRegularErrorContains expectedText result =
   | Ok value -> failwith $"Expected error, got: {value}"
 
 [<Fact>]
-let ``runCodegen writes Db fs with required metadata and schema`` () =
+let ``runCodegen writes Db fs with metadata types and CRUD helpers`` () =
   let tempDir = createTempDir "mig_codegen_execution"
 
   try
@@ -82,12 +82,33 @@ let ``runCodegen writes Db fs with required metadata and schema`` () =
       let generated = File.ReadAllText result.outputPath
 
       Assert.Contains("module RuntimeRoot.Db", generated)
+      Assert.Contains("open MigLib.Codegen.Helpers", generated)
+      Assert.Contains("open MigLib.Db", generated)
       Assert.Contains("let DbApp = \"RuntimeRoot\"", generated)
       Assert.Contains("let DefaultDbInstance = \"main\"", generated)
+      Assert.Contains("let DbFileForInstance (instance: string option)", generated)
+      Assert.Contains("let DbFile = DbFileForInstance None", generated)
       Assert.Contains("let SchemaHash =", generated)
-      Assert.Contains("let SchemaIdentity : SchemaIdentity =", generated)
-      Assert.Contains("let Schema : SqlFile =", generated)
+      Assert.Contains("let SchemaIdentity", generated)
+      Assert.Contains("let Schema", generated)
       Assert.Contains("codegen_fixture", generated)
+      Assert.Contains("type CodegenFixture =", generated)
+      Assert.Contains("type CodegenFixtureView =", generated)
+      Assert.Contains("type NewPerson =", generated)
+      Assert.Contains("type Person =", generated)
+      Assert.Contains("static member Insert", generated)
+      Assert.Contains("static member InsertOrIgnore", generated)
+      Assert.Contains("static member SelectById", generated)
+      Assert.Contains("static member SelectAll", generated)
+      Assert.Contains("static member SelectOne", generated)
+      Assert.Contains("static member Update", generated)
+      Assert.Contains("static member Delete", generated)
+      Assert.Contains("static member DeleteAll", generated)
+      Assert.Contains("static member SelectByName", generated)
+      Assert.Contains("static member SelectNameLike", generated)
+      Assert.Contains("static member SelectByNameOrInsert", generated)
+      Assert.Contains("static member Upsert", generated)
+      Assert.Contains("Recording.recordInsert", generated)
     | Error error -> failwith $"Expected codegen to run, got: {error}"
   finally
     Directory.Delete(tempDir, true)

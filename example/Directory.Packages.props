@@ -1,9 +1,0 @@
-<Project>
-  <PropertyGroup>
-    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <PackageVersion Include="MigLib" Version="5.2.8" />
-  </ItemGroup>
-</Project>

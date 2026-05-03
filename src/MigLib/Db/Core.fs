@@ -33,17 +33,6 @@ let resolveDatabasePath (configuredPath: string) : Result<string, string> =
 
 let openSqliteConnection (dbPath: string) = MigLib.Sqlite.openConnection dbPath
 
-let resolveDatabaseFilePath (configuredDirectory: string) (dbFileName: string) : Result<string, string> =
-  match resolveDatabasePath configuredDirectory with
-  | Error message -> Error message
-  | Ok resolvedDirectory ->
-    if String.IsNullOrWhiteSpace dbFileName then
-      Error "Configured database file name is empty."
-    elif Path.IsPathRooted dbFileName || dbFileName <> Path.GetFileName dbFileName then
-      Error $"Configured database file name must be a file name only, not a path: {dbFileName}"
-    else
-      Ok(Path.Combine(resolvedDirectory, dbFileName))
-
 let serializeRowData (rowData: (string * obj) list) : string =
   let toJsonNode (value: obj) : JsonNode =
     if isNull value || Object.ReferenceEquals(value, DBNull.Value) then
@@ -74,40 +63,6 @@ let serializeRowData (rowData: (string * obj) list) : string =
     json[name] <- toJsonNode value
 
   json.ToJsonString()
-
-let tableExistsInConnection (connection: SqliteConnection) (tableName: string) : Task<bool> =
-  task {
-    use cmd =
-      new SqliteCommand("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = @name LIMIT 1", connection)
-
-    cmd.Parameters.AddWithValue("@name", tableName) |> ignore
-    let! scalar = cmd.ExecuteScalarAsync()
-    return not (isNull scalar)
-  }
-
-let tryReadStatusValueFromConnection
-  (connection: SqliteConnection)
-  (tableName: string)
-  : Task<Result<string option, SqliteException>> =
-  task {
-    try
-      let! statusTableExists = tableExistsInConnection connection tableName
-
-      if not statusTableExists then
-        return Ok None
-      else
-        use cmd =
-          new SqliteCommand($"SELECT status FROM {tableName} WHERE id = 0 LIMIT 1", connection)
-
-        let! statusObj = cmd.ExecuteScalarAsync()
-
-        if isNull statusObj then
-          return Ok None
-        else
-          return Ok(Some(string statusObj))
-    with :? SqliteException as ex ->
-      return Error ex
-  }
 
 let tableExists (tx: SqliteTransaction) (tableName: string) : Task<bool> =
   task {

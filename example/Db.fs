@@ -1,21 +1,34 @@
-module Db
+module ExampleApp.Db
 
 open System
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
-open Mig.DeclarativeMigrations.Types
-open Mig.HotMigration
+open MigLib.Schema.Types
+open MigLib.Codegen.Helpers
 open MigLib.Db
 
 [<Literal>]
-let DbFile = "Schema-6dc5755fde7d9df3.sqlite"
+let DbApp = "ExampleApp"
 
 [<Literal>]
-let SchemaHash = "6dc5755fde7d9df3"
+let DefaultDbInstance = "main"
+
+[<Literal>]
+let SchemaHash = "db4e5b3cef0aac02"
 
 let SchemaIdentity: SchemaIdentity =
   { schemaHash = SchemaHash
     schemaCommit = None }
+
+let DbFileForInstance (instance: string option) =
+  let resolvedInstance =
+    match instance with
+    | Some value when not (String.IsNullOrWhiteSpace value) -> value.Trim()
+    | _ -> DefaultDbInstance
+
+  $"{DbApp}-{resolvedInstance}-{SchemaHash}.sqlite"
+
+let DbFile = DbFileForInstance None
 
 let Schema: SqlFile =
   { measureTypes = []
@@ -51,11 +64,12 @@ let Schema: SqlFile =
                 unitOfMeasure = None } ]
           constraints = []
           queryByAnnotations = [ { columns = [ "name" ] } ]
-          queryLikeAnnotations = []
-          queryByOrCreateAnnotations = []
-          insertOrIgnoreAnnotations = []
+          queryLikeAnnotations = [ { columns = [ "name" ] } ]
+          queryByOrCreateAnnotations = [ { columns = [ "name" ] } ]
+          selectOneAnnotations = [ SelectOneAnnotation ]
+          insertOrIgnoreAnnotations = [ InsertOrIgnoreAnnotation ]
           deleteAllAnnotations = [ DeleteAllAnnotation ]
-          upsertAnnotations = [] } ]
+          upsertAnnotations = [ UpsertAnnotation ] } ]
     indexes = []
     triggers = [] }
 
@@ -72,9 +86,29 @@ type Student with
       tx
       (fun newId ->
         task {
-          MigrationLog.recordInsert tx "student" [ "name", box item.Name; "age", box item.Age; "id", box newId ]
+          Recording.recordInsert tx "student" [ "name", box item.Name; "age", box item.Age; "id", box newId ]
           return Ok newId
         })
+
+  static member InsertOrIgnore (item: Student) (tx: SqliteTransaction) : Task<Result<int64 option, SqliteException>> =
+    executeInsertOrIgnore
+      "INSERT OR IGNORE INTO student (name, age) VALUES (@name, @age)"
+      (fun cmd ->
+        cmd.Parameters.AddWithValue("@name", item.Name) |> ignore
+        cmd.Parameters.AddWithValue("@age", item.Age) |> ignore)
+      tx
+      (fun newId ->
+        task {
+          match newId with
+          | None -> return Ok None
+          | Some newId ->
+            Recording.recordInsert tx "student" [ "name", box item.Name; "age", box item.Age; "id", box newId ]
+            return Ok(Some newId)
+        })
+
+  static member Upsert (item: Student) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
+    upsertByExisting (fun () -> Student.SelectById item.Id tx) (fun () -> Student.Update item tx) (fun () ->
+      Student.Insert item tx)
 
   static member SelectById (id: int64) (tx: SqliteTransaction) : Task<Result<Student option, SqliteException>> =
     querySingle
@@ -120,7 +154,7 @@ type Student with
       match updateResult with
       | Error ex -> return Error ex
       | Ok() ->
-        MigrationLog.recordUpdate tx "student" [ "id", box item.Id; "name", box item.Name; "age", box item.Age ]
+        Recording.recordUpdate tx "student" [ "id", box item.Id; "name", box item.Name; "age", box item.Age ]
         return Ok()
     }
 
@@ -135,7 +169,7 @@ type Student with
       match deleteResult with
       | Error ex -> return Error ex
       | Ok() ->
-        MigrationLog.recordDelete tx "student" [ "id", box id ]
+        Recording.recordDelete tx "student" [ "id", box id ]
         return Ok()
     }
 
@@ -151,3 +185,31 @@ type Student with
           Name = reader.GetString 1
           Age = reader.GetInt64 2 })
       tx
+
+  static member SelectNameLike (name: string) (tx: SqliteTransaction) : Task<Result<Student list, SqliteException>> =
+    queryList
+      "SELECT id, name, age FROM student WHERE name LIKE \'%\' || @name || \'%\'"
+      (fun cmd -> cmd.Parameters.AddWithValue("@name", name) |> ignore)
+      (fun reader ->
+        { Id = reader.GetInt64 0
+          Name = reader.GetString 1
+          Age = reader.GetInt64 2 })
+      tx
+
+  static member SelectByNameOrInsert
+    (newItem: Student)
+    (tx: SqliteTransaction)
+    : Task<Result<Student, SqliteException>> =
+    let name = newItem.Name
+
+    let select () =
+      querySingle
+        "SELECT id, name, age FROM student WHERE name = @name LIMIT 1"
+        (fun cmd -> cmd.Parameters.AddWithValue("@name", name) |> ignore)
+        (fun reader ->
+          { Id = reader.GetInt64 0
+            Name = reader.GetString 1
+            Age = reader.GetInt64 2 })
+        tx
+
+    querySingleOrInsert select (fun () -> Student.Insert newItem tx)

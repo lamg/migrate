@@ -2,13 +2,9 @@ module Program
 
 open System
 open System.IO
-open System.Threading
-open Microsoft.Data.Sqlite
-open Mig.HotMigration
-open MigLib.Db
-open MigLib.TaskResult
+open MigLib.Db.Transactions
 
-open Db
+open ExampleApp.Db
 
 let printStudents (label: string) (students: Student list) =
   printfn "%s" label
@@ -18,29 +14,41 @@ let printStudents (label: string) (students: Student list) =
 
 [<EntryPoint>]
 let main _ =
+  let dbPath = Path.Combine(__SOURCE_DIRECTORY__, DbFile)
+  let db = dbTxn dbPath
+
   let result =
-    taskResult {
-      let! (db: DbTxnBuilder) = startService __SOURCE_DIRECTORY__ DbFile SchemaIdentity Schema CancellationToken.None
+    db {
+      let! existingStudents = Student.SelectAll
+      printStudents "Existing rows in the current database:" existingStudents
 
-      printfn "Opened database at: %s" db.DbPath
+      let! insertedId = Student.Insert { Id = 0L; Name = "Carol"; Age = 25L }
+      printfn "Inserted Carol with generated id %d" insertedId
 
-      let! (students: Student list) =
-        db {
-          do! Student.DeleteAll
-          let! insertedId = Student.Insert { Id = 0L; Name = "Carol"; Age = 25L }
-          let! carol = Student.SelectByName "Carol"
-          let! allStudents = Student.SelectAll
+      do!
+        Student.Upsert
+          { Id = insertedId
+            Name = "Carol"
+            Age = 26L }
 
-          printfn "Inserted Carol with generated id %d" insertedId
-          printStudents "Rows returned by generated Student.SelectByName \"Carol\":" carol
-          return allStudents
-        }
+      let! carol = Student.SelectByName "Carol"
+      let! fuzzyMatch = Student.SelectNameLike "ar"
+      let! ensuredStudent = Student.SelectByNameOrInsert { Id = 0L; Name = "Dora"; Age = 19L }
+      let! allStudents = Student.SelectAll
 
-      printStudents "All students:" students
+      printStudents "Rows returned by generated Student.SelectByName \"Carol\":" carol
+      printStudents "Rows returned by generated Student.SelectNameLike \"ar\":" fuzzyMatch
+
+      printfn
+        "SelectByNameOrInsert returned: id=%d name=%s age=%d"
+        ensuredStudent.Id
+        ensuredStudent.Name
+        ensuredStudent.Age
+
+      printStudents "All students after generated CRUD operations:" allStudents
       return ()
     }
-    |> Async.AwaitTask
-    |> Async.RunSynchronously
+    |> fun task -> task.Result
 
   match result with
   | Ok() -> 0

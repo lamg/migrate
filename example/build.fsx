@@ -1,30 +1,31 @@
 #r "nuget: Fake.Core.Target, 6.1.3"
 #r "nuget: Fake.DotNet.Cli, 6.1.3"
 #r "nuget: Fake.IO.FileSystem, 6.1.3"
-#r "nuget: MigLib, 5.2.8"
+#r "nuget: Microsoft.Data.Sqlite, 9.0.0"
 
 open System
 open System.IO
+open Microsoft.Data.Sqlite
 open Fake.Core
 open Fake.Core.TargetOperators
 open Fake.DotNet
 open Fake.IO
-open MigLib
 
 if not (Context.isFakeContext ()) then
   let executionContext = Context.FakeExecutionContext.Create false "build.fsx" []
   Context.RuntimeContext.Fake executionContext |> Context.setExecutionContext
 
 let rootDir = Path.GetFullPath __SOURCE_DIRECTORY__
-let schemaDir = Path.Combine(rootDir, "Schema")
-let schemaProjectPath = Path.Combine(schemaDir, "Schema.fsproj")
+let schemaDir = Path.Combine(rootDir, "MigSchema")
+let schemaProjectPath = Path.Combine(schemaDir, "MigSchema.fsproj")
 let exampleProjectPath = Path.Combine(rootDir, "example.fsproj")
+let migProjectPath = Path.Combine(rootDir, "..", "src", "mig", "mig.fsproj")
 
-let schemaAssemblyPath =
-  Path.Combine(schemaDir, "bin", "Debug", "net10.0", "Schema.dll")
+let generatedDbPath = Path.Combine(rootDir, "Db.fs")
+let exampleDbPrefix = "ExampleApp-main"
 
-let schemaSourcePath = Path.Combine(schemaDir, "Schema.fs")
-let generatedDbPath = Path.Combine(schemaDir, "Db.fs")
+let legacyDbPath =
+  Path.Combine(rootDir, $"{exampleDbPrefix}-1111111111111111.sqlite")
 
 let cliArgs =
   let commandLineArgs = Environment.GetCommandLineArgs() |> Array.toList
@@ -50,24 +51,93 @@ let private runDotNetCommand command args =
   if not result.OK then
     failwithf "dotnet %s failed with args: %s" command args
 
+let private deleteIfExists path =
+  if File.Exists path then
+    File.Delete path
+
+let private schemaHash () =
+  if not (File.Exists generatedDbPath) then
+    failwithf "Expected generated Db.fs at %s" generatedDbPath
+
+  let content = File.ReadAllText generatedDbPath
+  let marker = "let SchemaHash = \""
+  let startIndex = content.IndexOf(marker, StringComparison.Ordinal)
+
+  if startIndex < 0 then
+    failwith "Could not find SchemaHash in generated Db.fs"
+
+  let hashStart = startIndex + marker.Length
+  let hashEnd = content.IndexOf('"', hashStart)
+
+  if hashEnd < 0 then
+    failwith "Could not parse SchemaHash in generated Db.fs"
+
+  content.Substring(hashStart, hashEnd - hashStart)
+
+let private targetDbPath () =
+  Path.Combine(rootDir, $"{exampleDbPrefix}-{schemaHash ()}.sqlite")
+
+let private createLegacyDatabase () =
+  deleteIfExists legacyDbPath
+
+  use connection = new SqliteConnection($"Data Source={legacyDbPath}")
+  connection.Open()
+
+  use createTable =
+    new SqliteCommand(
+      "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, age INTEGER NOT NULL DEFAULT 18);",
+      connection
+    )
+
+  createTable.ExecuteNonQuery() |> ignore
+
+  use seedRows =
+    new SqliteCommand("INSERT INTO student(name, age) VALUES ('Alice', 21), ('Bob', 24);", connection)
+
+  seedRows.ExecuteNonQuery() |> ignore
+
+Target.create "Clean" (fun _ ->
+  deleteIfExists generatedDbPath
+  deleteIfExists legacyDbPath
+
+  Directory.GetFiles(rootDir, $"{exampleDbPrefix}-*.sqlite")
+  |> Seq.iter deleteIfExists
+
+  [ Path.Combine(rootDir, "bin")
+    Path.Combine(rootDir, "obj")
+    Path.Combine(schemaDir, "bin")
+    Path.Combine(schemaDir, "obj") ]
+  |> Shell.cleanDirs)
+
 Target.create "Restore" (fun _ ->
+  runDotNetCommand "restore" $"\"{migProjectPath}\""
   runDotNetCommand "restore" $"\"{schemaProjectPath}\""
   runDotNetCommand "restore" $"\"{exampleProjectPath}\"")
 
 Target.create "BuildSchema" (fun _ -> runDotNetCommand "build" $"\"{schemaProjectPath}\" --no-restore")
 
-Target.create "Codegen" (fun _ ->
-  if not (File.Exists schemaAssemblyPath) then
-    failwithf "Expected compiled schema assembly at %s" schemaAssemblyPath
-
-  match Build.runCodegenFromAssemblyModulePath "Db" schemaSourcePath schemaAssemblyPath "Schema" generatedDbPath with
-  | Ok _ -> ()
-  | Error e -> failwith $"error generating code: {e}")
+Target.create "Codegen" (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPath}\" -- codegen -d \"{rootDir}\"")
 
 Target.create "BuildExample" (fun _ -> runDotNetCommand "build" $"\"{exampleProjectPath}\" --no-restore")
 
-Target.create "Run" (fun _ -> runDotNetCommand "run" $"--project \"{exampleProjectPath}\" --no-build")
+Target.create "Init" (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPath}\" -- init -d \"{rootDir}\"")
 
-"Restore" ==> "BuildSchema" ==> "Codegen" ==> "BuildExample" ==> "Run"
+Target.create "CreateLegacySource" (fun _ ->
+  deleteIfExists (targetDbPath ())
+  createLegacyDatabase ())
+
+Target.create "Migrate" (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPath}\" -- migrate -d \"{rootDir}\"")
+
+Target.create "RunProgram" (fun _ -> runDotNetCommand "run" $"--project \"{exampleProjectPath}\" --no-build")
+
+Target.create "RunInitExample" (fun _ -> runDotNetCommand "run" $"--project \"{exampleProjectPath}\" --no-build")
+
+Target.create "RunMigrationExample" (fun _ -> runDotNetCommand "run" $"--project \"{exampleProjectPath}\" --no-build")
+
+"Clean" ==> "Restore" ==> "BuildSchema" ==> "Codegen" ==> "BuildExample"
+
+"BuildExample" ==> "Init" ==> "RunInitExample"
+
+"BuildExample" ==> "CreateLegacySource" ==> "Migrate" ==> "RunMigrationExample"
 
 Target.runOrDefault requestedTarget

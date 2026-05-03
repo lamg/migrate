@@ -7,43 +7,52 @@
 [![NuGet Downloads][nuget-downloads]][migtool]
 ![Tests][tests]
 
-Migrate is a SQLite-first migration toolchain built around `Schema.fs`, generated `Db.fs`, and compiled schema modules.
-It provides both a hot-migration workflow (`migrate` -> `drain` -> `cutover`) and a one-shot offline workflow (`offline`), plus type-safe code generation from compiled schema types.
+Migrate is a SQLite-first migration toolchain built around a schema project, generated `Db.fs`, and compiled schema modules.
+It generates typed CRUD/query helpers from compiled schema definitions and provides blocking `init`, `plan`, `migrate`, `status`, and `reset` workflows for schema-bound SQLite files.
 
-## Schema Project Convention
+## Project Convention
 
-The recommended layout is to keep `Schema.fs` in its own `Schema.fsproj`, build that project first, and then generate `Db.fs` from the compiled schema assembly before compiling the main application project.
+The current convention is:
 
-This convention exists to eliminate build dependency cycles:
+1. Keep the runtime project in the working directory.
+2. Keep the schema project at `MigSchema/MigSchema.fsproj`.
+3. Keep the schema source at `MigSchema/MigSchema.fs`.
+4. Run `mig codegen` from the runtime project directory.
+5. Let `mig codegen` write `Db.fs` into the runtime project root.
+6. Build the runtime project after code generation so the compiled runtime assembly contains the generated module.
 
-- generating `Db.fs` needs a compiled schema assembly
-- compiling the main application project usually needs the generated `Db.fs`
+The runtime project must define `<RootNamespace>`. `mig codegen` uses it to generate the runtime module `<RootNamespace>.Db` and to derive the SQLite filename prefix.
 
-When `mig` runs in a directory that contains `Schema.fsproj`, it tries to discover the compiled schema assembly automatically by looking for:
+The schema project must also define `<RootNamespace>`. The compiled schema module is resolved as `<SchemaRootNamespace>.MigSchema`.
 
-1. `bin/Debug/net10.0/<AssemblyName>.dll` when `<AssemblyName>` is set in `Schema.fsproj`
-2. `bin/Debug/net10.0/Schema.dll` otherwise
+## Generated Code
 
-If there is no `Schema.fsproj`, `mig` falls back to the single-`.fsproj` convention and looks for `bin/Debug/net10.0/<ProjectName>.dll`.
+`mig codegen` emits a runtime module that contains:
 
-All compiled-module commands can still be overridden with the optional `--assembly` and `--module` parameters.
+- `DbApp`
+- `DefaultDbInstance`
+- `SchemaHash`
+- `DbFileForInstance`
+- `DbFile`
+- `SchemaIdentity`
+- `Schema`
+- generated record and DU types
+- generated CRUD/query helpers driven by schema annotations
+
+Examples of generated helpers include:
+
+- `Student.Insert`
+- `Student.InsertOrIgnore`
+- `Student.SelectById`
+- `Student.SelectAll`
+- `Student.SelectByName`
+- `Student.SelectNameLike`
+- `Student.SelectByNameOrInsert`
+- `Student.Upsert`
 
 ## Installation
 
-If you just want to test the tool without installing [.Net][dotnet],
-then you can use a Docker image:
-
-```sh
-podman run -it 'mcr.microsoft.com/dotnet/sdk:10.0' bash
-```
-
-Inside the container run:
-
-```sh
-export PATH="$PATH:/root/.dotnet/tools"
-```
-
-After having [.Net][dotnet] in your system you can run
+Install the CLI as a global tool:
 
 ```sh
 dotnet tool install --global migtool
@@ -51,10 +60,10 @@ dotnet tool install --global migtool
 
 For library usage:
 
-- install `MigLib` when you only need the database/runtime surface
-- install `MigLib.Web` in addition when you want ASP.NET Core `webResult` helpers
+- install `MigLib` for schema attributes, generated CRUD support, transactions, and migration workflows
+- install `MigLib.Web` when you also want the ASP.NET Core `webResult` helpers
 
-## Local Tool Build/Install (FAKE)
+## Local Tool Build
 
 Build, pack, and install the current branch as a global `mig` tool from the local package output:
 
@@ -62,151 +71,104 @@ Build, pack, and install the current branch as a global `mig` tool from the loca
 dotnet fsi build.fsx
 ```
 
-Run specific FAKE targets when needed:
+Useful targets:
 
 ```sh
 dotnet fsi build.fsx -- --target Build
-dotnet fsi build.fsx -- --target PackTool
+dotnet fsi build.fsx -- --target packTool
+dotnet fsi build.fsx -- --target InstallTool
 ```
 
-Run the installed local tool directly:
+## Quickstart: Init
+
+Build the schema project, generate `Db.fs`, build the runtime project, and initialize the schema-bound database:
 
 ```sh
-mig --help
+dotnet build ./my-app/MigSchema/MigSchema.fsproj
+mig codegen -d ./my-app
+dotnet build ./my-app/my-app.fsproj
+mig init -d ./my-app
 ```
 
-## Quickstart (Online Migration)
+`mig init` is idempotent at the workflow level: when the target database already exists, it reports success and does not recreate it.
 
-Assuming:
+## Quickstart: Migrate
 
-- an existing SQLite database named `<app-name>-<old-hash>.sqlite`
-- a compiled generated `Db` module produced from `Schema.fs`
-- the recommended `Schema.fsproj` convention above
+When a previous schema-bound SQLite file already exists for the same app/instance prefix, `mig migrate` creates the new target database, copies compatible data, and archives the old file into `archive/` next to the database directory.
 
 ```sh
-# from your project directory:
-mig codegen
-mig plan
-mig migrate
-
-# then continue in the same directory (paths auto-resolve)
-mig status
-mig drain
-mig cutover
-# optional, after traffic has fully moved to the new service:
-mig archive-old
-
-# from a different directory:
-mig migrate -d /path/to/project
-
-# if migrate fails and you need to clear failed migration artifacts:
-mig reset --dry-run
-mig reset
+dotnet build ./my-app/MigSchema/MigSchema.fsproj
+mig codegen -d ./my-app
+dotnet build ./my-app/my-app.fsproj
+mig plan -d ./my-app
+mig migrate -d ./my-app
+mig status -d ./my-app
 ```
 
-## Quickstart (Schema Initialization)
-
-When you want to bootstrap a database directly from a compiled generated `Db` module (no source DB yet):
+If you need to discard the current target database and restore the latest archived database back into the main database directory:
 
 ```sh
-mig codegen
-mig init
+mig reset -d ./my-app
 ```
 
-## Quickstart (Offline Migration)
+## Runtime Use
 
-When downtime is acceptable and you want to create the fully migrated target DB in one command from a compiled generated `Db` module:
-
-```sh
-mig codegen
-mig offline
-```
-
-## Library Example
-
-The CLI automates the same startup decision that `MigLib.HotMigration.startService` exposes directly in application code.
+Generated helpers execute inside `dbTxn` or `txn` transaction workflows.
 
 ```fsharp
-open System.Threading
-open Mig.HotMigration
-open Db
+open System.IO
+open MigLib.Db.Transactions
+open MyApp.Db
 
-let sqliteDirectoryEnvVar = "APP_SQLITE_DIRECTORY"
+let dbPath = Path.Combine(dataDirectory, DbFile)
+let db = dbTxn dbPath
 
-let startRuntime cancellationToken =
-  task {
-    let! result =
-      startService
-        sqliteDirectoryEnvVar
-        Db.DbFile
-        Db.SchemaIdentity
-        Db.Schema
-        cancellationToken
-
-    match result with
-    | Ok db -> return db
-    | Error ex -> return raise ex
+let result =
+  db {
+    let! student = Student.SelectByNameOrInsert { Id = 0L; Name = "Alice"; Age = 21L }
+    let! matches = Student.SelectNameLike "li"
+    return student, matches
   }
 ```
 
-`startService` will:
+## Example
 
-- use the ready database immediately when the current schema-bound file already exists
-- initialize a fresh database when no previous database is found
-- migrate from the previous database when exactly one non-target sqlite file is discovered in the configured directory
-- fail startup when previous-database inference is ambiguous or the target database is invalid
+`example/` shows the full convention in a working project:
 
-## Features
+- runtime project at `example/example.fsproj`
+- schema project at `example/MigSchema/MigSchema.fsproj`
+- generated `Db.fs` at `example/Db.fs`
+- generated CRUD usage in `example/Program.fs`
+- scripted `init` and `migrate` flows in `example/build.fsx`
 
-- Schema reflection from compiled F# modules
-- FK-aware bulk copy and replay with ID mapping
-- Replay checkpoints and drain safety validation
-- Schema identity metadata (`schema_hash`, optional `schema_commit`) persisted in new database
-- Operational status reporting for old/new database migration state
-- Optional old-database archival into `archive/` after cutover
-- Transactional ASP.NET Core request composition via the separate `MigLib.Web` package and `webResult`
+Run it with:
+
+```sh
+dotnet fsi example/build.fsx
+```
+
+## Commands
+
+- `mig codegen`: generate `Db.fs` from the compiled `MigSchema` module and schema source file
+- `mig init`: create the current schema-bound database when it does not exist yet
+- `mig plan`: report inferred source/target paths plus supported and unsupported schema differences
+- `mig migrate`: create the target database, copy data, and archive the previous source database
+- `mig status`: show the current database path, archived databases, and whether a migration source is still present
+- `mig reset`: delete the current target database and restore the latest archived database into the main database directory
 
 ## Specs
 
 - [`specs/database_dsl.md`](./specs/database_dsl.md)
-- [`specs/hot_migrations.md`](./specs/hot_migrations.md)
 - [`specs/mig_command.md`](./specs/mig_command.md)
 - [`specs/operator_runbook.md`](./specs/operator_runbook.md)
+- [`specs/custom_migration.md`](./specs/custom_migration.md)
 - [`specs/web_result.md`](./specs/web_result.md)
-
-## Commands
-
-- `mig codegen` - Generate `Db.fs` from `Schema.fs` plus the compiled schema module, and emit a `DbFile` literal for the schema-bound SQLite filename using the caller-supplied app/database name prefix.
-- `mig init` - Create a schema-matched database from the compiled generated module and apply seed inserts when the database does not exist yet.
-- `mig plan` - Print inferred paths, schema diff summary, and replay prerequisites without mutating databases.
-- `mig migrate` - Create the new database, bulk-copy data, and start recording new writes on the old database.
-- `mig drain` - Switch the old database to draining mode and replay pending migration log entries.
-- `mig cutover` - Verify drain completion, switch the new database to `ready`, and remove replay-only tables.
-- `mig offline` - Create the fully migrated target database in one step and archive the old database into `archive/`.
-- `mig archive-old` - Archive the old database into `archive/`, replacing any existing archive with the same name.
-- `mig reset` - Reset failed or aborted migration artifacts, or inspect reset impact first with `--dry-run`.
-- `mig status` - Show marker/status state and migration counters for operational visibility.
 
 ## Contributing
 
-How to contribute:
-
-- Open an issue to discuss the change and approach
-- Add relevant tests
-- Create a pull request mentioning the issue and also including a summary of the problem and approach to solve it
-- Wait for the review
-
-## Acknowledgments
-
-This project wouldn't have been possible without the amazing open-source community. We're especially grateful to:
-
-- **[Fabulous.AST][fabulous-ast]** - An elegant F# DSL for code generation that made creating and manipulating F# AST a joy
-- **[Fantomas][fantomas]** - The excellent F# code formatter that ensures our generated code is beautiful and consistent
-
-If you find these projects valuable, please consider supporting them:
-- Star their repositories
-- Contribute to their projects
-- Donate to support their continued development
+- Open an issue to discuss the change and approach.
+- Add relevant tests.
+- Open a pull request with the problem statement and solution summary.
 
 ## License
 
@@ -219,10 +181,6 @@ If you find these projects valuable, please consider supporting them:
 [nuget-version]: https://img.shields.io/nuget/v/migtool?style=flat-square
 [nuget-downloads]: https://img.shields.io/nuget/dt/migtool?style=flat-square
 [tests]: https://img.shields.io/github/actions/workflow/status/lamg/migrate/test.yml?style=flat-square&label=tests
-
 [dotnet-badge]: https://img.shields.io/badge/.NET-10.0-blue?style=flat-square
 [apache-badge]: https://img.shields.io/badge/License-Apache2-yellow.svg?style=flat-square
 [fs-badge]: https://img.shields.io/badge/Language-F%23-blue?style=flat-square
-
-[fabulous-ast]: https://github.com/edgarfgp/Fabulous.AST
-[fantomas]: https://github.com/fsprojects/fantomas

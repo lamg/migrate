@@ -5,10 +5,16 @@ open System.IO
 open System.Security.Cryptography
 open System.Text
 
+open Fantomas.Core
+
 open MigLib.Schema.Types
 open MigLib.TaskResult
 
-type CodegenStats = { generatedFiles: string list }
+type CodegenStats =
+  { normalizedTables: int
+    regularTables: int
+    views: int
+    generatedFiles: string list }
 
 let private renderBoolLiteral value = if value then "true" else "false"
 
@@ -39,7 +45,6 @@ let private renderExpr =
   | Integer value -> $"Expr.Integer {value}"
   | Real value ->
     let renderedValue = value.ToString("R", Globalization.CultureInfo.InvariantCulture)
-
     $"Expr.Real {renderedValue}"
   | Value value -> $"Expr.Value {renderStringLiteral value}"
 
@@ -55,10 +60,21 @@ let private renderEnumLikeDu (enumLikeDu: EnumLikeDu) =
   $"{{ typeName = {renderStringLiteral enumLikeDu.typeName}; cases = {renderList renderStringLiteral enumLikeDu.cases} }}"
 
 let private renderPrimaryKey (primaryKey: PrimaryKey) =
-  $"{{ constraintName = {renderOption renderStringLiteral primaryKey.constraintName}; columns = {renderList renderStringLiteral primaryKey.columns}; isAutoincrement = {renderBoolLiteral primaryKey.isAutoincrement} }}"
+  let renderedConstraintName =
+    renderOption renderStringLiteral primaryKey.constraintName
+
+  let renderedColumns = renderList renderStringLiteral primaryKey.columns
+  let renderedAutoincrement = renderBoolLiteral primaryKey.isAutoincrement
+
+  $"{{ constraintName = {renderedConstraintName}; columns = {renderedColumns}; isAutoincrement = {renderedAutoincrement} }}"
 
 let private renderForeignKey (foreignKey: ForeignKey) =
-  $"{{ columns = {renderList renderStringLiteral foreignKey.columns}; refTable = {renderStringLiteral foreignKey.refTable}; refColumns = {renderList renderStringLiteral foreignKey.refColumns}; onDelete = {renderOption renderFkAction foreignKey.onDelete}; onUpdate = {renderOption renderFkAction foreignKey.onUpdate} }}"
+  let renderedColumns = renderList renderStringLiteral foreignKey.columns
+  let renderedRefColumns = renderList renderStringLiteral foreignKey.refColumns
+  let renderedOnDelete = renderOption renderFkAction foreignKey.onDelete
+  let renderedOnUpdate = renderOption renderFkAction foreignKey.onUpdate
+
+  $"{{ columns = {renderedColumns}; refTable = {renderStringLiteral foreignKey.refTable}; refColumns = {renderedRefColumns}; onDelete = {renderedOnDelete}; onUpdate = {renderedOnUpdate} }}"
 
 let private renderColumnConstraint =
   function
@@ -71,10 +87,18 @@ let private renderColumnConstraint =
   | ForeignKey foreignKey -> $"ColumnConstraint.ForeignKey {renderForeignKey foreignKey}"
 
 let private renderColumnDef (column: ColumnDef) =
-  $"{{ name = {renderStringLiteral column.name}; previousName = {renderOption renderStringLiteral column.previousName}; columnType = {renderSqlType column.columnType}; constraints = {renderList renderColumnConstraint column.constraints}; enumLikeDu = {renderOption renderEnumLikeDu column.enumLikeDu}; unitOfMeasure = {renderOption renderStringLiteral column.unitOfMeasure} }}"
+  let renderedPreviousName = renderOption renderStringLiteral column.previousName
+  let renderedConstraints = renderList renderColumnConstraint column.constraints
+  let renderedEnumLikeDu = renderOption renderEnumLikeDu column.enumLikeDu
+  let renderedUnitOfMeasure = renderOption renderStringLiteral column.unitOfMeasure
+
+  $"{{ name = {renderStringLiteral column.name}; previousName = {renderedPreviousName}; columnType = {renderSqlType column.columnType}; constraints = {renderedConstraints}; enumLikeDu = {renderedEnumLikeDu}; unitOfMeasure = {renderedUnitOfMeasure} }}"
 
 let private renderViewColumn (column: ViewColumn) =
-  $"{{ name = {renderStringLiteral column.name}; columnType = {renderSqlType column.columnType}; enumLikeDu = {renderOption renderEnumLikeDu column.enumLikeDu}; unitOfMeasure = {renderOption renderStringLiteral column.unitOfMeasure} }}"
+  let renderedEnumLikeDu = renderOption renderEnumLikeDu column.enumLikeDu
+  let renderedUnitOfMeasure = renderOption renderStringLiteral column.unitOfMeasure
+
+  $"{{ name = {renderStringLiteral column.name}; columnType = {renderSqlType column.columnType}; enumLikeDu = {renderedEnumLikeDu}; unitOfMeasure = {renderedUnitOfMeasure} }}"
 
 let private renderQueryByAnnotation (annotation: QueryByAnnotation) =
   $"{{ columns = {renderList renderStringLiteral annotation.columns} }}"
@@ -85,45 +109,99 @@ let private renderQueryLikeAnnotation (annotation: QueryLikeAnnotation) =
 let private renderQueryByOrCreateAnnotation (annotation: QueryByOrCreateAnnotation) =
   $"{{ columns = {renderList renderStringLiteral annotation.columns} }}"
 
-let private renderSelectOneAnnotation _ = "SelectOneAnnotation"
-
-let private renderInsertOrIgnoreAnnotation _ = "InsertOrIgnoreAnnotation"
-
-let private renderDeleteAllAnnotation _ = "DeleteAllAnnotation"
-
-let private renderUpsertAnnotation _ = "UpsertAnnotation"
-
 let private renderInsertInto (insert: InsertInto) =
-  $"{{ table = {renderStringLiteral insert.table}; columns = {renderList renderStringLiteral insert.columns}; values = {renderList (renderList renderExpr) insert.values} }}"
+  let renderedColumns = renderList renderStringLiteral insert.columns
+  let renderedValues = renderList (renderList renderExpr) insert.values
+  $"{{ table = {renderStringLiteral insert.table}; columns = {renderedColumns}; values = {renderedValues} }}"
 
 let private renderCreateView (view: CreateView) =
-  $"{{ name = {renderStringLiteral view.name}; previousName = {renderOption renderStringLiteral view.previousName}; sql = {renderStringLiteral view.sql}; declaredColumns = {renderList renderViewColumn view.declaredColumns}; dependencies = {renderList renderStringLiteral view.dependencies}; queryByAnnotations = {renderList renderQueryByAnnotation view.queryByAnnotations}; queryLikeAnnotations = {renderList renderQueryLikeAnnotation view.queryLikeAnnotations}; queryByOrCreateAnnotations = {renderList renderQueryByOrCreateAnnotation view.queryByOrCreateAnnotations}; selectOneAnnotations = {renderList renderSelectOneAnnotation view.selectOneAnnotations}; insertOrIgnoreAnnotations = {renderList renderInsertOrIgnoreAnnotation view.insertOrIgnoreAnnotations}; deleteAllAnnotations = {renderList renderDeleteAllAnnotation view.deleteAllAnnotations}; upsertAnnotations = {renderList renderUpsertAnnotation view.upsertAnnotations} }}"
+  let renderedPreviousName = renderOption renderStringLiteral view.previousName
+  let renderedSql = renderStringLiteral view.sql
+  let renderedDeclaredColumns = renderList renderViewColumn view.declaredColumns
+  let renderedDependencies = renderList renderStringLiteral view.dependencies
+
+  let renderedQueryByAnnotations =
+    renderList renderQueryByAnnotation view.queryByAnnotations
+
+  let renderedQueryLikeAnnotations =
+    renderList renderQueryLikeAnnotation view.queryLikeAnnotations
+
+  let renderedQueryByOrCreateAnnotations =
+    renderList renderQueryByOrCreateAnnotation view.queryByOrCreateAnnotations
+
+  let renderedSelectOneAnnotations =
+    renderList (fun _ -> "SelectOneAnnotation") view.selectOneAnnotations
+
+  let renderedInsertOrIgnoreAnnotations =
+    renderList (fun _ -> "InsertOrIgnoreAnnotation") view.insertOrIgnoreAnnotations
+
+  let renderedDeleteAllAnnotations =
+    renderList (fun _ -> "DeleteAllAnnotation") view.deleteAllAnnotations
+
+  let renderedUpsertAnnotations =
+    renderList (fun _ -> "UpsertAnnotation") view.upsertAnnotations
+
+  $"{{ name = {renderStringLiteral view.name}; previousName = {renderedPreviousName}; sql = {renderedSql}; declaredColumns = {renderedDeclaredColumns}; dependencies = {renderedDependencies}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; selectOneAnnotations = {renderedSelectOneAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; deleteAllAnnotations = {renderedDeleteAllAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
 
 let private renderCreateTable (table: CreateTable) =
-  $"{{ name = {renderStringLiteral table.name}; previousName = {renderOption renderStringLiteral table.previousName}; dropColumns = {renderList renderStringLiteral table.dropColumns}; columns = {renderList renderColumnDef table.columns}; constraints = {renderList renderColumnConstraint table.constraints}; queryByAnnotations = {renderList renderQueryByAnnotation table.queryByAnnotations}; queryLikeAnnotations = {renderList renderQueryLikeAnnotation table.queryLikeAnnotations}; queryByOrCreateAnnotations = {renderList renderQueryByOrCreateAnnotation table.queryByOrCreateAnnotations}; selectOneAnnotations = {renderList renderSelectOneAnnotation table.selectOneAnnotations}; insertOrIgnoreAnnotations = {renderList renderInsertOrIgnoreAnnotation table.insertOrIgnoreAnnotations}; deleteAllAnnotations = {renderList renderDeleteAllAnnotation table.deleteAllAnnotations}; upsertAnnotations = {renderList renderUpsertAnnotation table.upsertAnnotations} }}"
+  let renderedPreviousName = renderOption renderStringLiteral table.previousName
+  let renderedDropColumns = renderList renderStringLiteral table.dropColumns
+  let renderedColumns = renderList renderColumnDef table.columns
+  let renderedConstraints = renderList renderColumnConstraint table.constraints
+
+  let renderedQueryByAnnotations =
+    renderList renderQueryByAnnotation table.queryByAnnotations
+
+  let renderedQueryLikeAnnotations =
+    renderList renderQueryLikeAnnotation table.queryLikeAnnotations
+
+  let renderedQueryByOrCreateAnnotations =
+    renderList renderQueryByOrCreateAnnotation table.queryByOrCreateAnnotations
+
+  let renderedSelectOneAnnotations =
+    renderList (fun _ -> "SelectOneAnnotation") table.selectOneAnnotations
+
+  let renderedInsertOrIgnoreAnnotations =
+    renderList (fun _ -> "InsertOrIgnoreAnnotation") table.insertOrIgnoreAnnotations
+
+  let renderedDeleteAllAnnotations =
+    renderList (fun _ -> "DeleteAllAnnotation") table.deleteAllAnnotations
+
+  let renderedUpsertAnnotations =
+    renderList (fun _ -> "UpsertAnnotation") table.upsertAnnotations
+
+  $"{{ name = {renderStringLiteral table.name}; previousName = {renderedPreviousName}; dropColumns = {renderedDropColumns}; columns = {renderedColumns}; constraints = {renderedConstraints}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; selectOneAnnotations = {renderedSelectOneAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; deleteAllAnnotations = {renderedDeleteAllAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
 
 let private renderCreateIndex (index: CreateIndex) =
   $"{{ name = {renderStringLiteral index.name}; table = {renderStringLiteral index.table}; columns = {renderList renderStringLiteral index.columns} }}"
 
 let private renderCreateTrigger (trigger: CreateTrigger) =
-  $"{{ name = {renderStringLiteral trigger.name}; sql = {renderStringLiteral trigger.sql}; dependencies = {renderList renderStringLiteral trigger.dependencies} }}"
+  let renderedSql = renderStringLiteral trigger.sql
+  let renderedDependencies = renderList renderStringLiteral trigger.dependencies
+  $"{{ name = {renderStringLiteral trigger.name}; sql = {renderedSql}; dependencies = {renderedDependencies} }}"
 
 let private renderSqlFile (schema: SqlFile) =
-  $"{{ measureTypes = {renderList renderStringLiteral schema.measureTypes}; inserts = {renderList renderInsertInto schema.inserts}; views = {renderList renderCreateView schema.views}; tables = {renderList renderCreateTable schema.tables}; indexes = {renderList renderCreateIndex schema.indexes}; triggers = {renderList renderCreateTrigger schema.triggers} }}"
+  let renderedMeasureTypes = renderList renderStringLiteral schema.measureTypes
+  let renderedInserts = renderList renderInsertInto schema.inserts
+  let renderedViews = renderList renderCreateView schema.views
+  let renderedTables = renderList renderCreateTable schema.tables
+  let renderedIndexes = renderList renderCreateIndex schema.indexes
+  let renderedTriggers = renderList renderCreateTrigger schema.triggers
+
+  $"{{ measureTypes = {renderedMeasureTypes}; inserts = {renderedInserts}; views = {renderedViews}; tables = {renderedTables}; indexes = {renderedIndexes}; triggers = {renderedTriggers} }}"
 
 let private normalizeLineEndings (text: string) =
   text.Replace("\r\n", "\n").Replace("\r", "\n")
 
-let private computeShortSchemaHash (schemaSourcePath: string) =
+let private computeShortSchemaHash (schemaPath: string) : Result<string, string> =
   try
-    let normalizedSchema = File.ReadAllText schemaSourcePath |> normalizeLineEndings
+    let normalizedSchema = File.ReadAllText schemaPath |> normalizeLineEndings
     use sha256 = SHA256.Create()
     let schemaBytes = Encoding.UTF8.GetBytes normalizedSchema
     let hashBytes = sha256.ComputeHash schemaBytes
-
     Ok(Convert.ToHexString(hashBytes).ToLowerInvariant().Substring(0, 16))
   with ex ->
-    Error $"Could not compute schema hash from source file '{schemaSourcePath}': {ex.Message}"
+    Error $"Could not compute schema hash from source file '{schemaPath}': {ex.Message}"
 
 let private isValidModuleSegment (segment: string) =
   not (String.IsNullOrWhiteSpace segment)
@@ -138,28 +216,154 @@ let private validateModuleName (moduleName: string) =
   else
     Ok()
 
-let private renderGeneratedModule moduleName dbApp schemaHash schema =
-  [ $"module {moduleName}"
-    ""
-    "open MigLib.Schema.Types"
-    "open MigLib.Codegen.Helpers"
-    ""
-    "[<Literal>]"
-    $"let DbApp = {renderStringLiteral dbApp}"
-    ""
-    "[<Literal>]"
-    "let DefaultDbInstance = \"main\""
-    ""
-    "[<Literal>]"
-    $"let SchemaHash = {renderStringLiteral schemaHash}"
-    ""
-    "let SchemaIdentity : SchemaIdentity ="
-    "  { schemaHash = SchemaHash"
-    "    schemaCommit = None }"
-    ""
-    $"let Schema : SqlFile = {renderSqlFile schema}"
-    "" ]
-  |> String.concat "\n"
+let private formatGeneratedCode (code: string) : Result<string, string> =
+  try
+    code |> FabulousAstHelpers.formatCode |> Ok
+  with :? ParseException as ex ->
+    Error $"Generated F# code could not be parsed: {ex.Message}"
+
+let private generateCode
+  (moduleName: string)
+  (dbApp: string option)
+  (schema: SqlFile)
+  (outputFilePath: string)
+  (schemaHash: string option)
+  : Result<CodegenStats, string> =
+  result {
+    do! validateModuleName moduleName
+
+    let! viewsWithColumns =
+      schema.views
+      |> traverseResultM (fun view ->
+        result {
+          let! columns = ViewIntrospection.getViewColumns schema.tables view
+          return view, columns
+        })
+
+    let normalizedTables, regularTables = NormalizedSchema.classifyTables schema.tables
+
+    let! regularTableCodes =
+      regularTables
+      |> traverseResultM (fun table ->
+        result {
+          let! code = QueryGenerator.generateTableCode table
+          return [ code; "" ]
+        })
+      |> Result.map List.concat
+
+    let! normalizedTableCodes =
+      normalizedTables
+      |> traverseResultM (fun normalized ->
+        result {
+          let! code = NormalizedQueryGenerator.generateNormalizedTableCode normalized
+          return [ code; "" ]
+        })
+      |> Result.map List.concat
+
+    let! viewCodes =
+      viewsWithColumns
+      |> traverseResultM (fun (view, columns) ->
+        result {
+          let! code = QueryGenerator.generateViewCode view columns
+          return [ code; "" ]
+        })
+      |> Result.map List.concat
+
+    let enumLikeDus =
+      (regularTables
+       |> List.collect (fun table -> TypeGenerator.collectEnumLikeDusFromColumns table.columns))
+      @ (normalizedTables
+         |> List.collect (fun normalized ->
+           TypeGenerator.collectEnumLikeDusFromColumns normalized.baseTable.columns
+           @ (normalized.extensions
+              |> List.collect (fun extensionTable ->
+                TypeGenerator.collectEnumLikeDusFromColumns extensionTable.table.columns))))
+      @ (viewsWithColumns
+         |> List.collect (fun (_, columns) -> TypeGenerator.collectEnumLikeDusFromViewColumns columns))
+      |> List.distinctBy (fun enumLikeDu -> enumLikeDu.typeName, enumLikeDu.cases)
+
+    let moduleContent =
+      [ yield $"module {moduleName}"
+        yield ""
+        yield "open System"
+        yield "open System.Threading.Tasks"
+        yield "open Microsoft.Data.Sqlite"
+        yield "open MigLib.Schema.Types"
+        yield "open MigLib.Codegen.Helpers"
+        yield "open MigLib.Db"
+        yield ""
+        match dbApp with
+        | Some appName ->
+          yield "[<Literal>]"
+          yield $"let DbApp = {renderStringLiteral appName}"
+          yield ""
+          yield "[<Literal>]"
+          yield "let DefaultDbInstance = \"main\""
+          yield ""
+        | None -> ()
+        match schemaHash with
+        | Some value ->
+          yield "[<Literal>]"
+          yield $"let SchemaHash = {renderStringLiteral value}"
+          yield ""
+          yield "let SchemaIdentity : SchemaIdentity ="
+          yield "  { schemaHash = SchemaHash"
+          yield "    schemaCommit = None }"
+          yield ""
+
+          match dbApp with
+          | Some _ ->
+            yield "let DbFileForInstance (instance: string option) ="
+            yield "  let resolvedInstance ="
+            yield "    match instance with"
+            yield "    | Some value when not (String.IsNullOrWhiteSpace value) -> value.Trim()"
+            yield "    | _ -> DefaultDbInstance"
+            yield ""
+            yield "  $\"{DbApp}-{resolvedInstance}-{SchemaHash}.sqlite\""
+            yield ""
+            yield "let DbFile = DbFileForInstance None"
+            yield ""
+          | None -> ()
+        | None -> ()
+        yield $"let Schema : SqlFile = {renderSqlFile schema}"
+        yield ""
+        yield!
+          schema.measureTypes
+          |> List.collect (fun measureType -> [ TypeGenerator.generateMeasureType measureType; "" ])
+        yield!
+          enumLikeDus
+          |> List.collect (fun enumLikeDu -> [ TypeGenerator.generateEnumType enumLikeDu; "" ])
+        yield!
+          normalizedTables
+          |> List.collect (fun normalized -> [ NormalizedTypeGenerator.generateTypes normalized; "" ])
+        yield!
+          regularTables
+          |> List.collect (fun table -> [ TypeGenerator.generateRecordType table; "" ])
+        yield!
+          viewsWithColumns
+          |> List.collect (fun (view, columns) -> [ TypeGenerator.generateViewRecordType view.name columns; "" ])
+        yield! normalizedTableCodes
+        yield! regularTableCodes
+        yield! viewCodes ]
+      |> String.concat "\n"
+      |> fun value -> value.TrimEnd()
+
+    let fullOutputPath = Path.GetFullPath outputFilePath
+    let outputDirectory = Path.GetDirectoryName fullOutputPath
+
+    if outputDirectory |> String.IsNullOrWhiteSpace |> not then
+      if not (Directory.Exists outputDirectory) then
+        Directory.CreateDirectory outputDirectory |> ignore
+
+    let! formattedContent = formatGeneratedCode moduleContent
+    File.WriteAllText(fullOutputPath, formattedContent)
+
+    return
+      { normalizedTables = normalizedTables.Length
+        regularTables = regularTables.Length
+        views = viewsWithColumns.Length
+        generatedFiles = [ fullOutputPath ] }
+  }
 
 let generateCodeFromSchema
   (moduleName: string)
@@ -169,20 +373,9 @@ let generateCodeFromSchema
   (outputPath: string)
   : Result<CodegenStats, string> =
   result {
-    do! validateModuleName moduleName
-
     if String.IsNullOrWhiteSpace dbApp then
       return! Error "Database app name is empty."
 
     let! schemaHash = computeShortSchemaHash schemaSourcePath
-    let fullOutputPath = Path.GetFullPath outputPath
-    let outputDirectory = Path.GetDirectoryName fullOutputPath
-
-    if outputDirectory |> String.IsNullOrWhiteSpace |> not then
-      Directory.CreateDirectory outputDirectory |> ignore
-
-    let content = renderGeneratedModule moduleName (dbApp.Trim()) schemaHash schema
-    File.WriteAllText(fullOutputPath, content)
-
-    return { generatedFiles = [ fullOutputPath ] }
+    return! generateCode moduleName (Some(dbApp.Trim())) schema outputPath (Some schemaHash)
   }

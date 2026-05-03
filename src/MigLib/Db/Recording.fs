@@ -29,7 +29,13 @@ let ensureNewDatabaseReadyForTransactions (tx: SqliteTransaction) : Task<Result<
         return Ok()
     | Ok(Some status) when status.Equals("ready", StringComparison.OrdinalIgnoreCase) -> return Ok()
     | Ok(Some status) when status.Equals("migrating", StringComparison.OrdinalIgnoreCase) ->
-      return Error(SqliteException("Target database is still migrating. Run `mig cutover` before serving requests.", 0))
+      return
+        Error(
+          SqliteException(
+            "Target database is still migrating. Wait for migration to finish before serving requests.",
+            0
+          )
+        )
     | Ok(Some status) ->
       return
         Error(
@@ -109,7 +115,7 @@ let flushRecordedWrites (context: Db.Core.TxnContext) : Task<Result<unit, Sqlite
 let ensureWriteAllowed (tx: SqliteTransaction) : unit =
   match Db.Core.getMatchingContext tx with
   | Some context when context.mode = Db.Core.Draining ->
-    raise (SqliteException("Writes are unavailable while migration drain is in progress.", 0))
+    raise (SqliteException("Writes are unavailable while migration finalization is in progress.", 0))
   | _ -> ()
 
 let private recordWrite (tx: SqliteTransaction) (operation: string) (tableName: string) (rowData: (string * obj) list) =

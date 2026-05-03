@@ -100,10 +100,6 @@ module ResultEx =
       return firstValue, secondValue, thirdValue, fourthValue
     }
 
-module TaskResultEx =
-  let ofResultMapError (mapError: 'error -> 'mappedError) (value: Result<'a, 'error>) : Task<Result<'a, 'mappedError>> =
-    value |> Result.mapError mapError |> Task.FromResult
-
 module private TaskResult =
   let result (x: 'a) : Task<Result<'a, 'e>> = Task.FromResult(Ok x)
 

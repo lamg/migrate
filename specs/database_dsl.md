@@ -646,16 +646,28 @@ Nested seed values also support composite foreign keys. If a field references a 
 
 ## SQL generation
 
-The supported CLI code-generation path now starts from compiled schema types plus `Schema.fs` as the source file for schema-bound naming.
+The supported CLI code-generation path starts from the runtime project directory plus the compiled `MigSchema` module.
 
-Use `mig codegen` to materialize generated `Db.fs` code next to `Schema.fs`:
+Use `mig codegen` from the runtime project directory:
 
 ```sh
-mig codegen [--dir|-d /path/to/project] [--assembly|-a /path/to/App.dll] [--schema-module|-s Schema] [--module|-m Db] [--output|-o Db.fs]
+mig codegen [--dir|-d /path/to/project]
 ```
 
-The CLI reads `Schema.fs` to derive the schema-bound SQLite filename, reflects tables/views/query helpers from the compiled schema module, emits a `DbFile` literal whose value is `<dir-name>-<schema-hash>.sqlite`, and writes the output file into the same directory as `Schema.fs`. The default generated module is `Db`, and the default output file is `Db.fs`. The output file must be a plain file name, not an absolute path or subdirectory path.
+The runtime directory must contain exactly one runtime `.fsproj`. The schema project must live at `MigSchema/MigSchema.fsproj`, and the schema source file must be `MigSchema/MigSchema.fs`.
 
-Generated source preserves:
+`mig codegen` writes `Db.fs` into the runtime project root. The generated module contains:
+
+- `DbApp`
+- `DefaultDbInstance`
+- `SchemaHash`
+- `DbFileForInstance`
+- `DbFile`
+- `SchemaIdentity`
+- `Schema`
+- generated record and DU types
+- generated CRUD/query helpers based on the schema attributes
+
+Generated source also preserves:
 
 - nullary, non-generic scalar DUs as typed F# fields and query parameters, while storing them as strings in SQLite

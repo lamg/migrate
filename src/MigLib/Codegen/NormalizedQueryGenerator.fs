@@ -1,0 +1,4 @@
+module internal MigLib.Codegen.NormalizedQueryGenerator
+
+let generateNormalizedTableCode =
+  NormalizedQueryGeneratorGenerate.generateNormalizedTableCode
