@@ -54,6 +54,8 @@ let private runDotNetCommand command args =
 let private deleteIfExists path =
   if File.Exists path then
     File.Delete path
+  else if Directory.Exists path then
+    Directory.delete path
 
 let private schemaHash () =
   if not (File.Exists generatedDbPath) then
@@ -79,6 +81,7 @@ let private targetDbPath () =
 
 let private createLegacyDatabase () =
   deleteIfExists legacyDbPath
+  deleteIfExists "archive"
 
   use connection = new SqliteConnection($"Data Source={legacyDbPath}")
   connection.Open()
