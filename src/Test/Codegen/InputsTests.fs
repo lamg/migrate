@@ -81,7 +81,7 @@ let ``resolveInputs uses project codegen conventions`` () =
       Assert.Equal("RuntimeRoot.Db", inputs.generatedModuleName)
       Assert.Equal(Path.GetFullPath(schemaSourcePath tempDir), inputs.schemaSourcePath)
       Assert.Equal("RuntimeRoot", inputs.dbApp)
-      Assert.Equal(Path.Combine(tempDir, "Db.fs"), inputs.outputPath)
+      Assert.Equal(Path.Combine(tempDir, "MigSchema", "Db.fs"), inputs.outputPath)
     | Error error -> failwith $"Expected codegen inputs to resolve, got: {error}"
   finally
     Directory.Delete(tempDir, true)

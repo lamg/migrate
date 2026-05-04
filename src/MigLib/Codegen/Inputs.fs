@@ -74,5 +74,5 @@ let resolveInputs (project: MigProject) : Result<CodegenInputs, MigError> =
         generatedModuleName = $"{runtimeRootNamespace}.Db"
         schemaSourcePath = schemaSourcePath
         dbApp = runtimeRootNamespace
-        outputPath = Path.Combine(resolvedProject.runtimeProjectDirectory, "Db.fs") }
+        outputPath = Path.Combine(resolvedProject.runtimeProjectDirectory, "MigSchema", "Db.fs") }
   }

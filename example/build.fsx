@@ -57,30 +57,7 @@ let private deleteIfExists path =
   else if Directory.Exists path then
     Directory.delete path
 
-let private schemaHash () =
-  if not (File.Exists generatedDbPath) then
-    failwithf "Expected generated Db.fs at %s" generatedDbPath
-
-  let content = File.ReadAllText generatedDbPath
-  let marker = "let SchemaHash = \""
-  let startIndex = content.IndexOf(marker, StringComparison.Ordinal)
-
-  if startIndex < 0 then
-    failwith "Could not find SchemaHash in generated Db.fs"
-
-  let hashStart = startIndex + marker.Length
-  let hashEnd = content.IndexOf('"', hashStart)
-
-  if hashEnd < 0 then
-    failwith "Could not parse SchemaHash in generated Db.fs"
-
-  content.Substring(hashStart, hashEnd - hashStart)
-
-let private targetDbPath () =
-  Path.Combine(rootDir, $"{exampleDbPrefix}-{schemaHash ()}.sqlite")
-
 let private createLegacyDatabase () =
-  deleteIfExists legacyDbPath
   deleteIfExists "archive"
 
   use connection = new SqliteConnection($"Data Source={legacyDbPath}")
@@ -125,9 +102,7 @@ Target.create "BuildExample" (fun _ -> runDotNetCommand "build" $"\"{exampleProj
 
 Target.create "Init" (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPath}\" -- init -d \"{rootDir}\"")
 
-Target.create "CreateLegacySource" (fun _ ->
-  deleteIfExists (targetDbPath ())
-  createLegacyDatabase ())
+Target.create "CreateLegacySource" (fun _ -> createLegacyDatabase ())
 
 Target.create "Migrate" (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPath}\" -- migrate -d \"{rootDir}\"")
 

@@ -158,7 +158,7 @@ let ``cli codegen generates Db fs from runtime and MigSchema convention`` () =
 
   try
     writeCodegenLayout tempDir
-    let outputPath = Path.Combine(tempDir, "Db.fs")
+    let outputPath = Path.Combine(tempDir, "MigSchema", "Db.fs")
 
     let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "codegen" ]
 
