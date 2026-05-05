@@ -50,13 +50,6 @@ let private writeSchemaAssembly tempDir =
 let private writeSchemaSource tempDir =
   writeFile (schemaSourcePath tempDir) "module SchemaRoot.MigSchema"
 
-let private makeProject tempDir =
-  { dbInstance = "main"
-    dbDir = tempDir
-    targetSchema = TestGenerated.Db.Schema
-    dbApp = TestGenerated.Db.DbApp
-    schemaIdentity = TestGenerated.Db.SchemaIdentity }
-
 let private assertRegularErrorContains expectedText result =
   match result with
   | Error(MigError.Regular message) -> Assert.Contains(expectedText, message)
@@ -73,7 +66,7 @@ let ``resolveInputs uses project codegen conventions`` () =
     writeSchemaSource tempDir
     writeSchemaAssembly tempDir
 
-    match resolveInputs (makeProject tempDir) with
+    match resolveInputs tempDir with
     | Ok inputs ->
       Assert.Equal(Path.GetFullPath(runtimeProjectPath tempDir), inputs.project.runtimeProjectPath)
       Assert.Equal(Path.GetFullPath(schemaAssemblyPath tempDir), inputs.schemaAssembly.assemblyPath)
@@ -96,8 +89,7 @@ let ``resolveInputs fails when runtime RootNamespace is missing`` () =
     writeSchemaSource tempDir
     writeSchemaAssembly tempDir
 
-    resolveInputs (makeProject tempDir)
-    |> assertRegularErrorContains "runtime project"
+    resolveInputs tempDir |> assertRegularErrorContains "runtime project"
   finally
     Directory.Delete(tempDir, true)
 
@@ -111,8 +103,7 @@ let ``resolveInputs fails when schema RootNamespace is missing`` () =
     writeSchemaSource tempDir
     writeSchemaAssembly tempDir
 
-    resolveInputs (makeProject tempDir)
-    |> assertRegularErrorContains "schema project"
+    resolveInputs tempDir |> assertRegularErrorContains "schema project"
   finally
     Directory.Delete(tempDir, true)
 
@@ -125,7 +116,7 @@ let ``resolveInputs fails when MigSchema source is missing`` () =
     writeSchemaProject tempDir "SchemaRoot"
     writeSchemaAssembly tempDir
 
-    resolveInputs (makeProject tempDir)
+    resolveInputs tempDir
     |> assertRegularErrorContains "Schema source file was not found"
   finally
     Directory.Delete(tempDir, true)

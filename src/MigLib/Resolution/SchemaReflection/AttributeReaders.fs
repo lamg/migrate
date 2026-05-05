@@ -1,18 +1,20 @@
-module internal MigLib.Codegen.SchemaReflection.Attributes
+module internal MigLib.Resolution.SchemaReflection.Attributes
 
 open System
 open System.Reflection
 open Microsoft.FSharp.Reflection
+
+open MigLib.Types
 open MigLib.Schema.Types
 open MigLib.Db.Attributes
 open MigLib.TaskResult
 
-open MigLib.Codegen.SchemaReflection.Naming
+open MigLib.Resolution.SchemaReflection.Naming
 
 let getTypeAttributes<'a when 'a :> Attribute> (t: Type) : 'a list =
   t.GetCustomAttributes(typeof<'a>, true) |> Seq.cast<'a> |> Seq.toList
 
-let tryReadPreviousName (memberInfo: MemberInfo) : Result<string option, string> =
+let tryReadPreviousName (memberInfo: MemberInfo) : Result<string option, MigError> =
   let attributes =
     memberInfo.GetCustomAttributes(typeof<PreviousNameAttribute>, true)
     |> Seq.cast<PreviousNameAttribute>
@@ -21,18 +23,18 @@ let tryReadPreviousName (memberInfo: MemberInfo) : Result<string option, string>
   match attributes with
   | [] -> Ok None
   | [ attribute ] when String.IsNullOrWhiteSpace attribute.Name ->
-    Error $"PreviousName on '{memberInfo.Name}' cannot be empty."
+    Error(MigError.Regular $"PreviousName on '{memberInfo.Name}' cannot be empty.")
   | [ attribute ] -> Ok(Some attribute.Name)
-  | _ -> Error $"Member '{memberInfo.Name}' defines multiple PreviousName attributes."
+  | _ -> Error(MigError.Regular $"Member '{memberInfo.Name}' defines multiple PreviousName attributes.")
 
-let readDropColumns (recordType: Type) : Result<string list, string> =
+let readDropColumns (recordType: Type) : Result<string list, MigError> =
   let dropColumns =
     getTypeAttributes<DropColumnAttribute> recordType |> List.map _.Name
 
   let emptyNames = dropColumns |> List.filter String.IsNullOrWhiteSpace
 
   if not emptyNames.IsEmpty then
-    Error $"Type '{recordType.Name}' declares DropColumn with an empty name."
+    Error(MigError.Regular $"Type '{recordType.Name}' declares DropColumn with an empty name.")
   else
     let duplicateNames =
       dropColumns
@@ -45,9 +47,9 @@ let readDropColumns (recordType: Type) : Result<string list, string> =
       Ok dropColumns
     else
       let duplicates = String.concat ", " duplicateNames
-      Error $"Type '{recordType.Name}' declares duplicate DropColumn values: {duplicates}"
+      Error(MigError.Regular $"Type '{recordType.Name}' declares duplicate DropColumn values: {duplicates}")
 
-let resolveFieldByName (fields: PropertyInfo array) (fieldName: string) : Result<PropertyInfo, string> =
+let resolveFieldByName (fields: PropertyInfo array) (fieldName: string) : Result<PropertyInfo, MigError> =
   let target = fieldName.ToLowerInvariant()
 
   let matches =
@@ -61,10 +63,10 @@ let resolveFieldByName (fields: PropertyInfo array) (fieldName: string) : Result
   | [| field |] -> Ok field
   | [||] ->
     let available = fields |> Array.map _.Name |> String.concat ", "
-    Error $"Field '{fieldName}' not found. Available fields: {available}"
+    Error(MigError.Regular $"Field '{fieldName}' not found. Available fields: {available}")
   | _ ->
     let candidateNames = matches |> Array.map _.Name |> String.concat ", "
-    Error $"Field '{fieldName}' is ambiguous. Candidates: {candidateNames}"
+    Error(MigError.Regular $"Field '{fieldName}' is ambiguous. Candidates: {candidateNames}")
 
 let buildColumnResolver (fieldColumnPairs: (string * string) list) : Map<string, string> =
   fieldColumnPairs
@@ -98,7 +100,7 @@ let resolveColumnName
   (resolver: Map<string, string>)
   (typeName: string)
   (rawColumnName: string)
-  : Result<string, string> =
+  : Result<string, MigError> =
   let key = rawColumnName.ToLowerInvariant()
 
   match resolver.TryFind key with
@@ -112,13 +114,13 @@ let resolveColumnName
       |> List.sort
       |> String.concat ", "
 
-    Error $"Column '{rawColumnName}' was not found in type '{typeName}'. Available names: {available}"
+    Error(MigError.Regular $"Column '{rawColumnName}' was not found in type '{typeName}'. Available names: {available}")
 
 let addColumnConstraint
   (columnName: string)
   (constraintToAdd: ColumnConstraint)
   (columns: ColumnDef list)
-  : Result<ColumnDef list, string> =
+  : Result<ColumnDef list, MigError> =
   let mutable found = false
 
   let updated =
@@ -135,15 +137,15 @@ let addColumnConstraint
   if found then
     Ok updated
   else
-    Error $"Column '{columnName}' was not found while applying a constraint"
+    Error(MigError.Regular $"Column '{columnName}' was not found while applying a constraint")
 
-let readPrimaryKeyInfo (recordType: Type) : Result<PrimaryKeyInfo list, string> =
+let readPrimaryKeyInfo (recordType: Type) : Result<PrimaryKeyInfo list, MigError> =
   let fields = FSharpType.GetRecordFields(recordType, true)
   let autoAttributes = getTypeAttributes<AutoIncPKAttribute> recordType
   let pkAttributes = getTypeAttributes<PKAttribute> recordType
 
   if not autoAttributes.IsEmpty && not pkAttributes.IsEmpty then
-    Error $"Type '{recordType.Name}' has both AutoIncPK and PK attributes. Use only one."
+    Error(MigError.Regular $"Type '{recordType.Name}' has both AutoIncPK and PK attributes. Use only one.")
   else
     match autoAttributes, pkAttributes with
     | [ auto ], [] ->
@@ -156,8 +158,9 @@ let readPrimaryKeyInfo (recordType: Type) : Result<PrimaryKeyInfo list, string> 
             [ { columnName = toSnakeCase field.Name
                 sqlType = SqlInteger
                 isAutoIncrement = true } ]
-        | Some _ -> return! Error $"AutoIncPK on type '{recordType.Name}' must target an int64 field"
-        | None -> return! Error $"AutoIncPK on type '{recordType.Name}' must target a primitive int64 field"
+        | Some _ -> return! Error(MigError.Regular $"AutoIncPK on type '{recordType.Name}' must target an int64 field")
+        | None ->
+          return! Error(MigError.Regular $"AutoIncPK on type '{recordType.Name}' must target a primitive int64 field")
       }
     | [], pkAttrs when not pkAttrs.IsEmpty ->
       result {
@@ -165,7 +168,7 @@ let readPrimaryKeyInfo (recordType: Type) : Result<PrimaryKeyInfo list, string> 
           pkAttrs |> List.collect (fun pk -> pk.Columns |> List.ofArray)
 
         if requestedColumns.IsEmpty then
-          return! Error $"Type '{recordType.Name}' defines PK attributes without any columns."
+          return! Error(MigError.Regular $"Type '{recordType.Name}' defines PK attributes without any columns.")
 
         let duplicateColumns =
           requestedColumns
@@ -175,7 +178,7 @@ let readPrimaryKeyInfo (recordType: Type) : Result<PrimaryKeyInfo list, string> 
 
         if not duplicateColumns.IsEmpty then
           let duplicates = duplicateColumns |> String.concat ", "
-          return! Error $"Type '{recordType.Name}' defines duplicate PK columns: {duplicates}"
+          return! Error(MigError.Regular $"Type '{recordType.Name}' defines duplicate PK columns: {duplicates}")
 
         let! primaryKeyInfo =
           requestedColumns
@@ -192,7 +195,11 @@ let readPrimaryKeyInfo (recordType: Type) : Result<PrimaryKeyInfo list, string> 
                           sqlType = sqlType
                           isAutoIncrement = false } ]
                 | None ->
-                  return! Error $"PK on type '{recordType.Name}' must target a primitive field (int64, string, float)"
+                  return!
+                    Error(
+                      MigError.Regular
+                        $"PK on type '{recordType.Name}' must target a primitive field (int64, string, float)"
+                    )
               })
             []
 
@@ -204,18 +211,18 @@ let readPrimaryKeyInfo (recordType: Type) : Result<PrimaryKeyInfo list, string> 
 
         if not duplicateResolvedColumns.IsEmpty then
           let duplicates = duplicateResolvedColumns |> String.concat ", "
-          return! Error $"Type '{recordType.Name}' defines duplicate PK columns: {duplicates}"
+          return! Error(MigError.Regular $"Type '{recordType.Name}' defines duplicate PK columns: {duplicates}")
 
         return primaryKeyInfo
       }
     | [], [] -> Ok []
-    | _ -> Error $"Type '{recordType.Name}' defines multiple AutoIncPK attributes"
+    | _ -> Error(MigError.Regular $"Type '{recordType.Name}' defines multiple AutoIncPK attributes")
 
 let applyConstraintAttributes
   (recordType: Type)
   (resolver: Map<string, string>)
   (columns: ColumnDef list)
-  : Result<ColumnDef list * ColumnConstraint list, string> =
+  : Result<ColumnDef list * ColumnConstraint list, MigError> =
   result {
     let uniqueAttributes = getTypeAttributes<UniqueAttribute> recordType
     let defaultAttributes = getTypeAttributes<DefaultAttribute> recordType
@@ -272,12 +279,12 @@ let readOnDeleteActions
   (recordType: Type)
   (resolver: Map<string, string>)
   (relationshipResolver: Map<string, string list>)
-  : Result<Map<string list, FkAction>, string> =
+  : Result<Map<string list, FkAction>, MigError> =
   result {
     let cascadeAttributes = getTypeAttributes<OnDeleteCascadeAttribute> recordType
     let setNullAttributes = getTypeAttributes<OnDeleteSetNullAttribute> recordType
 
-    let resolveOnDeleteTarget (rawTarget: string) : Result<string list, string> =
+    let resolveOnDeleteTarget (rawTarget: string) : Result<string list, MigError> =
       let key = rawTarget.ToLowerInvariant()
 
       match relationshipResolver.TryFind key, resolver.TryFind key with
@@ -293,7 +300,10 @@ let readOnDeleteActions
           |> List.sort
           |> String.concat ", "
 
-        Error $"Column '{rawTarget}' was not found in type '{recordType.Name}'. Available names: {available}"
+        Error(
+          MigError.Regular
+            $"Column '{rawTarget}' was not found in type '{recordType.Name}'. Available names: {available}"
+        )
 
     let! cascades =
       cascadeAttributes
@@ -326,14 +336,15 @@ let readOnDeleteActions
       let columns =
         duplicates |> List.map (fst >> String.concat ", ") |> String.concat "; "
 
-      return! Error $"Type '{recordType.Name}' has conflicting on-delete actions for columns: {columns}"
+      return!
+        Error(MigError.Regular $"Type '{recordType.Name}' has conflicting on-delete actions for columns: {columns}")
   }
 
 let readForeignKeyAttributes
   (recordType: Type)
   (resolver: Map<string, string>)
   (onDeleteByColumns: Map<string list, FkAction>)
-  : Result<ForeignKey list, string> =
+  : Result<ForeignKey list, MigError> =
   let fkAttributes = getTypeAttributes<FKAttribute> recordType
 
   fkAttributes
@@ -373,7 +384,7 @@ let readIndexDefinitions
   (tableName: string)
   (recordType: Type)
   (resolver: Map<string, string>)
-  : Result<CreateIndex list, string> =
+  : Result<CreateIndex list, MigError> =
   let indexAttributes = getTypeAttributes<IndexAttribute> recordType
 
   indexAttributes
@@ -414,7 +425,7 @@ let readQueryAnnotations
       InsertOrIgnoreAnnotation list *
       DeleteAllAnnotation list *
       UpsertAnnotation list,
-      string
+      MigError
      >
   =
   result {

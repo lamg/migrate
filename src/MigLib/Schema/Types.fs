@@ -134,14 +134,3 @@ let emptyFile =
     tables = []
     indexes = []
     triggers = [] }
-
-let foldResults
-  (folder: 'state -> 'item -> Result<'state, string>)
-  (initial: 'state)
-  (items: 'item list)
-  : Result<'state, string> =
-  (Ok initial, items)
-  ||> List.fold (fun state item ->
-    match state with
-    | Error _ -> state
-    | Ok value -> folder value item)

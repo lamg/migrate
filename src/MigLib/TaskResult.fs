@@ -220,3 +220,14 @@ let traverseResultM (mapper: 'a -> Result<'b, 'e>) (items: 'a list) : Result<'b 
     | _, Error error -> Error error
 
   List.fold folder (Ok []) items
+
+let foldResults
+  (folder: 'state -> 'item -> Result<'state, 'err>)
+  (initial: 'state)
+  (items: 'item list)
+  : Result<'state, 'err> =
+  (Ok initial, items)
+  ||> List.fold (fun state item ->
+    match state with
+    | Error _ -> state
+    | Ok value -> folder value item)

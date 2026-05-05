@@ -1,4 +1,4 @@
-namespace MigLib.Codegen.SchemaReflection
+namespace MigLib.Resolution.SchemaReflection
 
 open MigLib.Schema.Types
 

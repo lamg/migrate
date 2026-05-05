@@ -6,7 +6,6 @@ open System.Threading.Tasks
 
 open MigLib.Types
 open MigLib.Init.SchemaInit
-open MigLib.Resolution.ProjectState
 open MigLib.TaskResult
 open MigLib.Sqlite
 
@@ -36,15 +35,13 @@ let runInitWithSchema (targetSchema: SqlFile) (newDbPath: string) : Task<Result<
     | ex -> return Error(MigError.Other ex)
   }
 
-let init (project: MigProject) : Task<Result<InitResult, MigError>> =
+let init (project: ResolvedProject) : Task<Result<InitResult, MigError>> =
   taskResult {
-    let! (projectState: ResolvedMigProject) = resolveProjectState project
-
-    if File.Exists projectState.targetDbPath then
+    if File.Exists project.targetDbPath then
       return
-        { newDbPath = projectState.targetDbPath
+        { newDbPath = project.targetDbPath
           seededRows = 0L }
     else
-      let! (initResult: InitResult) = runInitWithSchema project.targetSchema projectState.targetDbPath
+      let! (initResult: InitResult) = runInitWithSchema project.targetSchema.schema project.targetDbPath
       return initResult
   }

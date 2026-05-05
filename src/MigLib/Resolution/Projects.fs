@@ -2,9 +2,11 @@ module internal MigLib.Resolution.Projects
 
 open System
 open System.IO
+open System.Threading.Tasks
 
 open MigLib.Types
 open MigLib.Resolution.Types
+open MigLib.TaskResult
 
 let private regularError message = Error(MigError.Regular message)
 
@@ -14,11 +16,20 @@ let private isFsProjectPath (path: string) =
 let private schemaProjectPathFor (runtimeProjectDirectory: string) =
   Path.Combine(runtimeProjectDirectory, "MigSchema", "MigSchema.fsproj")
 
-let resolveProject
-  (runtimeProjectPath: string)
-  (dbInstance: string)
-  (dbDir: string)
-  : Result<ResolvedProject, MigError> =
+let private resolveDatabaseInstance fallbackDbInstance dbInstance =
+  if String.IsNullOrWhiteSpace dbInstance then
+    fallbackDbInstance
+  else
+    dbInstance.Trim()
+
+let private loadSourceSchema sourceDbPath : Task<Result<SqlFile option, MigError>> =
+  taskResult {
+    use connection = MigLib.Sqlite.openConnection sourceDbPath
+    let! (schema: SqlFile) = SchemaIntrospection.loadSchemaFromDatabase connection
+    return Some schema
+  }
+
+let resolveProjectLayout (runtimeProjectPath: string) : Result<ResolvedProjectLayout, MigError> =
   if String.IsNullOrWhiteSpace runtimeProjectPath then
     regularError "Runtime project path is empty."
   else
@@ -37,15 +48,13 @@ let resolveProject
         regularError $"Schema project file was not found: {schemaProjectPath}"
       else
         Ok
-          { dbInstance = dbInstance
-            dbDir = dbDir
-            runtimeProjectPath = fullProjectPath
+          { runtimeProjectPath = fullProjectPath
             runtimeProjectDirectory = runtimeProjectDirectory
             runtimeProjectName = Path.GetFileNameWithoutExtension fullProjectPath
             schemaProjectPath = schemaProjectPath
             schemaDirectory = schemaDirectory }
 
-let discoverProject (projectDir: string) (dbInstance: string) (dbDir: string) : Result<ResolvedProject, MigError> =
+let discoverProjectLayout (projectDir: string) : Result<ResolvedProjectLayout, MigError> =
   if String.IsNullOrWhiteSpace projectDir then
     regularError "Project discovery directory is empty."
   else
@@ -59,9 +68,54 @@ let discoverProject (projectDir: string) (dbInstance: string) (dbDir: string) : 
 
       match runtimeProjectCandidates with
       | [||] -> regularError $"Could not discover a runtime project. No .fsproj file was found in {fullDirectory}."
-      | [| projectPath |] -> resolveProject projectPath dbInstance dbDir
+      | [| projectPath |] -> resolveProjectLayout projectPath
       | many ->
         let projectList = many |> Array.map Path.GetFileName |> String.concat ", "
 
         regularError
           $"Could not discover a runtime project. Found multiple .fsproj files in {fullDirectory}: {projectList}. Pass the project path explicitly."
+
+let resolveProject
+  (runtimeProjectPath: string)
+  (dbInstance: string)
+  (dbDir: string)
+  : Task<Result<ResolvedProject, MigError>> =
+  taskResult {
+    let! layout = resolveProjectLayout runtimeProjectPath
+    let! fullDbDir = DatabasePaths.resolveDbDirectory dbDir
+    let! runtimeAssembly = Assemblies.resolveRuntimeAssembly layout
+
+    let! targetSchema =
+      GeneratedSchema.resolveGeneratedSchema runtimeAssembly
+      |> Result.map _.generatedModule
+
+    let instance = resolveDatabaseInstance targetSchema.defaultDbInstance dbInstance
+    let! dbFile = DatabasePaths.buildSchemaBoundDbFileName targetSchema.dbApp instance targetSchema.schemaHash
+    let targetDbPath = Path.Combine(fullDbDir, dbFile)
+
+    let! sourceDbPath = DatabasePaths.resolveSourceDbPath fullDbDir targetSchema.dbApp instance targetSchema.schemaHash
+
+    let! sourceDbSchema =
+      match sourceDbPath with
+      | Some path -> loadSourceSchema path
+      | None -> Task.FromResult(Ok None)
+
+    return
+      { sourceDbSchema = sourceDbSchema
+        sourceDbPath = sourceDbPath
+        archiveDir = Path.Combine(fullDbDir, "archive")
+        targetSchema = targetSchema
+        targetDbPath = targetDbPath }
+  }
+
+let discoverProject
+  (projectDir: string)
+  (dbInstance: string option)
+  (dbDir: string)
+  : Task<Result<ResolvedProject, MigError>> =
+  taskResult {
+    let! layout = discoverProjectLayout projectDir
+    let instance = dbInstance |> Option.defaultValue ""
+    let! (project: ResolvedProject) = resolveProject layout.runtimeProjectPath instance dbDir
+    return project
+  }

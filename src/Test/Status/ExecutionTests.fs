@@ -4,6 +4,7 @@ open System
 open System.IO
 
 open MigLib.Status.Execution
+open MigLib.Resolution.Projects
 open MigLib.Types
 open Xunit
 
@@ -49,11 +50,12 @@ let private writeProjectLayout tempDir =
   File.Copy(fixtureAssembly, targetAssemblyPath, true)
 
 let private makeProject tempDir =
-  { dbInstance = TestGenerated.Db.DefaultDbInstance
-    dbDir = tempDir
-    targetSchema = TestGenerated.Db.Schema
-    dbApp = TestGenerated.Db.DbApp
-    schemaIdentity = TestGenerated.Db.SchemaIdentity }
+  match
+    discoverProject tempDir (Some TestGenerated.Db.DefaultDbInstance) tempDir
+    |> fun task -> task.Result
+  with
+  | Ok project -> project
+  | Error error -> failwith $"Expected project to resolve, got: {error}"
 
 let private sourceDbPath tempDir =
   Path.Combine(tempDir, "generated-fixture-main-fedcba9876543210.sqlite")
@@ -153,7 +155,7 @@ let ``status lists archived databases`` () =
     Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``status fails when multiple source candidates match`` () =
+let ``project resolution fails when multiple source candidates match`` () =
   let tempDir = createTempDir "mig_status_multiple_sources"
 
   try
@@ -161,7 +163,7 @@ let ``status fails when multiple source candidates match`` () =
     writeFile (Path.Combine(tempDir, "generated-fixture-main-1111111111111111.sqlite")) ""
     writeFile (Path.Combine(tempDir, "generated-fixture-main-2222222222222222.sqlite")) ""
 
-    status (makeProject tempDir)
+    discoverProject tempDir (Some TestGenerated.Db.DefaultDbInstance) tempDir
     |> fun task -> task.Result
     |> assertRegularErrorContains "Found multiple candidates"
   finally

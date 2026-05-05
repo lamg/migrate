@@ -1,14 +1,16 @@
-module internal MigLib.Codegen.SchemaReflection.View
+module internal MigLib.Resolution.SchemaReflection.View
 
 open System
 open System.Collections.Generic
 open Microsoft.FSharp.Reflection
+
+open MigLib.Types
 open MigLib.Schema.Types
 open MigLib.Db.Attributes
 open MigLib.TaskResult
 
-open MigLib.Codegen.SchemaReflection.Naming
-open MigLib.Codegen.SchemaReflection.Attributes
+open MigLib.Resolution.SchemaReflection.Naming
+open MigLib.Resolution.SchemaReflection.Attributes
 
 let chooseViewBaseTable (joins: ViewJoin list) : string =
   let tableOrder =
@@ -103,17 +105,17 @@ let inferJoinCondition
   (leftAlias: string)
   (rightTableName: string)
   (rightAlias: string)
-  : Result<string, string> =
+  : Result<string, MigError> =
   result {
     let! leftTable =
       match tablesByName.TryFind leftTableName with
       | Some table -> Ok table
-      | None -> Error $"""Join references unknown table "{leftTableName}"."""
+      | None -> Error(MigError.Regular $"""Join references unknown table "{leftTableName}".""")
 
     let! rightTable =
       match tablesByName.TryFind rightTableName with
       | Some table -> Ok table
-      | None -> Error $"""Join references unknown table "{rightTableName}"."""
+      | None -> Error(MigError.Regular $"""Join references unknown table "{rightTableName}".""")
 
     let leftToRight = getForeignKeyReferences leftTable rightTableName rightTable
 
@@ -125,8 +127,10 @@ let inferJoinCondition
         |> String.concat " AND "
     | _ :: _ :: _ ->
       return!
-        Error
-          $"""Join between "{leftTableName}" and "{rightTableName}" is ambiguous (multiple foreign keys from left to right)."""
+        Error(
+          MigError.Regular
+            $"""Join between "{leftTableName}" and "{rightTableName}" is ambiguous (multiple foreign keys from left to right)."""
+        )
     | [] ->
       let rightToLeft = getForeignKeyReferences rightTable leftTableName leftTable
 
@@ -138,15 +142,22 @@ let inferJoinCondition
           |> String.concat " AND "
       | _ :: _ :: _ ->
         return!
-          Error
-            $"""Join between "{leftTableName}" and "{rightTableName}" is ambiguous (multiple foreign keys from right to left)."""
+          Error(
+            MigError.Regular
+              $"""Join between "{leftTableName}" and "{rightTableName}" is ambiguous (multiple foreign keys from right to left)."""
+          )
       | [] ->
         return!
-          Error
-            $"""Join between "{leftTableName}" and "{rightTableName}" has no foreign-key relationship in either direction."""
+          Error(
+            MigError.Regular
+              $"""Join between "{leftTableName}" and "{rightTableName}" has no foreign-key relationship in either direction."""
+          )
   }
 
-let getViewJoinAttributes (viewType: Type) (typeToTableName: Dictionary<Type, string>) : Result<ViewJoin list, string> =
+let getViewJoinAttributes
+  (viewType: Type)
+  (typeToTableName: Dictionary<Type, string>)
+  : Result<ViewJoin list, MigError> =
   let attributeData = viewType.GetCustomAttributesData() |> Seq.toList
 
   attributeData
@@ -155,31 +166,35 @@ let getViewJoinAttributes (viewType: Type) (typeToTableName: Dictionary<Type, st
     (fun joins attribute ->
       result {
         if attribute.ConstructorArguments.Count <> 2 then
-          return! Error $"""Invalid join attribute on view "{viewType.Name}"."""
+          return! Error(MigError.Regular $"""Invalid join attribute on view "{viewType.Name}".""")
 
         let! leftType =
           match attribute.ConstructorArguments.[0].Value with
           | :? Type as t -> Ok t
-          | _ -> Error $"""Invalid left type in join attribute on view "{viewType.Name}"."""
+          | _ -> Error(MigError.Regular $"""Invalid left type in join attribute on view "{viewType.Name}".""")
 
         let! rightType =
           match attribute.ConstructorArguments.[1].Value with
           | :? Type as t -> Ok t
-          | _ -> Error $"""Invalid right type in join attribute on view "{viewType.Name}"."""
+          | _ -> Error(MigError.Regular $"""Invalid right type in join attribute on view "{viewType.Name}".""")
 
         let! leftTable =
           match typeToTableName.TryGetValue leftType with
           | true, tableName -> Ok tableName
           | false, _ ->
-            Error
-              $"""Join on view "{viewType.Name}" references type "{leftType.Name}" that is not part of the reflected schema."""
+            Error(
+              MigError.Regular
+                $"""Join on view "{viewType.Name}" references type "{leftType.Name}" that is not part of the reflected schema."""
+            )
 
         let! rightTable =
           match typeToTableName.TryGetValue rightType with
           | true, tableName -> Ok tableName
           | false, _ ->
-            Error
-              $"""Join on view "{viewType.Name}" references type "{rightType.Name}" that is not part of the reflected schema."""
+            Error(
+              MigError.Regular
+                $"""Join on view "{viewType.Name}" references type "{rightType.Name}" that is not part of the reflected schema."""
+            )
 
         return
           joins
@@ -193,7 +208,7 @@ let resolveViewFieldProjection
   (joinedTables: string list)
   (aliasesByTable: Dictionary<string, string>)
   (fieldName: string)
-  : Result<string, string> =
+  : Result<string, MigError> =
   result {
     let fieldSnake = toSnakeCase fieldName
 
@@ -254,7 +269,7 @@ let resolveViewFieldProjection
           |> List.map (fun (table, column) -> $"{table}.{column}")
           |> String.concat ", "
 
-        Error $"""View field "{fieldName}" is ambiguous. Matching columns: {candidates}."""
+        Error(MigError.Regular $"""View field "{fieldName}" is ambiguous. Matching columns: {candidates}.""")
       | [] ->
         match directCandidates with
         | [ candidate ] -> Ok candidate
@@ -264,7 +279,7 @@ let resolveViewFieldProjection
             |> List.map (fun (table, column) -> $"{table}.{column}")
             |> String.concat ", "
 
-          Error $"""View field "{fieldName}" is ambiguous. Matching columns: {candidates}."""
+          Error(MigError.Regular $"""View field "{fieldName}" is ambiguous. Matching columns: {candidates}.""")
         | [] ->
           let available =
             joinedTables
@@ -273,8 +288,10 @@ let resolveViewFieldProjection
               |> List.map (fun column -> $"{tableName}.{column.name}"))
             |> String.concat ", "
 
-          Error
-            $"""Unable to resolve view field "{fieldName}" to a joined table column. Available columns: {available}."""
+          Error(
+            MigError.Regular
+              $"""Unable to resolve view field "{fieldName}" to a joined table column. Available columns: {available}."""
+          )
 
     let alias = aliasesByTable[tableName]
     return $"{alias}.{columnName} AS {fieldSnake}"
@@ -285,10 +302,10 @@ let synthesizeViewSql
   (viewType: Type)
   (joins: ViewJoin list)
   (tablesByName: Map<string, CreateTable>)
-  : Result<string * string list, string> =
+  : Result<string * string list, MigError> =
   result {
     if joins.IsEmpty then
-      return! Error $"""View "{viewName}" must declare at least one Join."""
+      return! Error(MigError.Regular $"""View "{viewName}" must declare at least one Join.""")
 
     let baseTable = chooseViewBaseTable joins
 
@@ -361,11 +378,15 @@ let synthesizeViewSql
         match duplicateJoin with
         | Some join ->
           return!
-            Error
-              $"""Table "{join.rightTable}" is joined more than once in view "{viewName}" (join "{join.leftTable}" -> "{join.rightTable}")."""
+            Error(
+              MigError.Regular
+                $"""Table "{join.rightTable}" is joined more than once in view "{viewName}" (join "{join.leftTable}" -> "{join.rightTable}")."""
+            )
         | None ->
           let next = pendingJoins.Head
-          return! Error $"""Join chain is disconnected at "{next.leftTable}" -> "{next.rightTable}"."""
+
+          return!
+            Error(MigError.Regular $"""Join chain is disconnected at "{next.leftTable}" -> "{next.rightTable}".""")
 
     let fields = FSharpType.GetRecordFields(viewType, true) |> Array.toList
 
@@ -398,7 +419,7 @@ let buildView
   (typeToTableName: Dictionary<Type, string>)
   (tablesByName: Map<string, CreateTable>)
   (viewType: Type)
-  : Result<CreateView, string> =
+  : Result<CreateView, MigError> =
   result {
     let tableName = toSnakeCase viewType.Name
     let! previousViewName = tryReadPreviousName viewType
@@ -418,7 +439,11 @@ let buildView
                     enumLikeDu = enumLikeDu
                     unitOfMeasure = None } ]
             )
-          | None -> Error $"View field '{viewType.Name}.{field.Name}' has unsupported type '{field.PropertyType.Name}'")
+          | None ->
+            Error(
+              MigError.Regular
+                $"View field '{viewType.Name}.{field.Name}' has unsupported type '{field.PropertyType.Name}'"
+            ))
         []
 
     let fieldColumnPairs =
@@ -442,8 +467,11 @@ let buildView
 
         Ok($"CREATE VIEW {tableName} AS {single.Sql}", dependencyNames)
       | [] when not viewAttributes.IsEmpty -> synthesizeViewSql tableName viewType joins tablesByName
-      | [] -> Error $"""View type "{viewType.Name}" must define [<ViewSql>] or [<View>] with Join attributes."""
-      | _ -> Error $"""View type "{viewType.Name}" defines multiple [<ViewSql>] attributes."""
+      | [] ->
+        Error(
+          MigError.Regular $"""View type "{viewType.Name}" must define [<ViewSql>] or [<View>] with Join attributes."""
+        )
+      | _ -> Error(MigError.Regular $"""View type "{viewType.Name}" defines multiple [<ViewSql>] attributes.""")
 
     let! queryByAnnotations,
          queryLikeAnnotations,

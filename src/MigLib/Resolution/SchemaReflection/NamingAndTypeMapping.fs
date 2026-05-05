@@ -1,4 +1,4 @@
-module internal MigLib.Codegen.SchemaReflection.Naming
+module internal MigLib.Resolution.SchemaReflection.Naming
 
 open System
 open System.Globalization

@@ -64,7 +64,9 @@ let private tryGetAssemblyTypes (assembly: Assembly) =
   try
     Ok(assembly.GetTypes())
   with ex ->
-    Error $"Could not enumerate types from assembly '{assembly.FullName}': {formatAssemblyLoadError ex}"
+    Error(
+      MigError.Regular $"Could not enumerate types from assembly '{assembly.FullName}': {formatAssemblyLoadError ex}"
+    )
 
 let private tryFindModuleType (assembly: Assembly) (moduleName: string) =
   tryGetAssemblyTypes assembly
@@ -74,7 +76,8 @@ let private tryFindModuleType (assembly: Assembly) (moduleName: string) =
       |> Array.tryFind (fun candidate -> String.Equals(candidate.FullName, moduleName, StringComparison.Ordinal))
     with
     | Some moduleType -> Ok moduleType
-    | None -> Error $"Compiled module '{moduleName}' was not found in assembly '{assembly.FullName}'.")
+    | None ->
+      Error(MigError.Regular $"Compiled module '{moduleName}' was not found in assembly '{assembly.FullName}'."))
 
 let private tryGetStaticMemberValue (moduleType: Type) (memberName: string) =
   let propertyInfo = moduleType.GetProperty(memberName, staticBindingFlags)
@@ -89,22 +92,27 @@ let private tryGetStaticMemberValue (moduleType: Type) (memberName: string) =
     else
       Ok None
 
-let private tryReadRequiredStaticValue<'T> (moduleType: Type) (memberName: string) : Result<'T, string> =
+let private tryReadRequiredStaticValue<'T> (moduleType: Type) (memberName: string) : Result<'T, MigError> =
   result {
     let! value =
       tryGetStaticMemberValue moduleType memberName
       |> Result.bind (
         ResultEx.requireSomeWith (fun () ->
-          $"Compiled module '{moduleType.FullName}' does not define a static '{memberName}' value.")
+          MigError.Regular $"Compiled module '{moduleType.FullName}' does not define a static '{memberName}' value.")
       )
 
     match value with
     | :? 'T as typedValue -> return typedValue
-    | null -> return! Error $"Compiled module '{moduleType.FullName}' defines '{memberName}', but it evaluates to null."
+    | null ->
+      return!
+        Error(
+          MigError.Regular $"Compiled module '{moduleType.FullName}' defines '{memberName}', but it evaluates to null."
+        )
     | _ ->
       return!
         Error(
-          $"Compiled module '{moduleType.FullName}' defines '{memberName}' with incompatible type '{value.GetType().FullName}'."
+          MigError.Regular
+            $"Compiled module '{moduleType.FullName}' defines '{memberName}' with incompatible type '{value.GetType().FullName}'."
         )
   }
 
@@ -131,14 +139,14 @@ type private GeneratedSchemaLoadContext(mainAssemblyPath: string) as this =
       else
         this.LoadFromAssemblyPath resolvedPath)
 
-let private withAssemblyResolver (assemblyPath: string) (work: string -> AssemblyLoadContext -> Result<'a, string>) =
+let private withAssemblyResolver (assemblyPath: string) (work: string -> AssemblyLoadContext -> Result<'a, MigError>) =
   if String.IsNullOrWhiteSpace assemblyPath then
-    Error "Compiled assembly path is empty."
+    Error(MigError.Regular "Compiled assembly path is empty.")
   else
     let fullAssemblyPath = Path.GetFullPath assemblyPath
 
     if not (File.Exists fullAssemblyPath) then
-      Error $"Compiled assembly was not found: {fullAssemblyPath}"
+      Error(MigError.Regular $"Compiled assembly was not found: {fullAssemblyPath}")
     else
       let loadContext = new GeneratedSchemaLoadContext(fullAssemblyPath)
 
@@ -168,7 +176,7 @@ let private loadGeneratedModule (assemblyPath: string) (moduleName: string) =
             defaultDbInstance = defaultDbInstance }
       }
     with ex ->
-      Error $"Could not load compiled assembly '{fullAssemblyPath}': {formatAssemblyLoadError ex}")
+      Error(MigError.Regular $"Could not load compiled assembly '{fullAssemblyPath}': {formatAssemblyLoadError ex}"))
 
 let resolveSchemaModuleName (assembly: ResolvedAssembly) : Result<string, MigError> =
   result {
@@ -188,9 +196,7 @@ let resolveGeneratedSchema (assembly: ResolvedAssembly) : Result<ResolvedGenerat
   result {
     let! moduleName = resolveSchemaModuleName assembly
 
-    let! generatedModule =
-      loadGeneratedModule assembly.assemblyPath moduleName
-      |> Result.mapError MigError.Regular
+    let! generatedModule = loadGeneratedModule assembly.assemblyPath moduleName
 
     return
       { assembly = assembly

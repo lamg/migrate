@@ -10,9 +10,7 @@ open MigLib.TaskResult
 
 let private tryLoadProjectDocument (projectKind: string) (projectPath: string) : Result<XDocument, MigError> =
   try
-    if String.IsNullOrWhiteSpace projectPath then
-      Error(MigError.Regular $"{projectKind} project path is empty.")
-    elif not (File.Exists projectPath) then
+    if not (File.Exists projectPath) then
       Error(MigError.Regular $"{projectKind} project file was not found: {Path.GetFullPath projectPath}")
     else
       Ok(XDocument.Load projectPath)
@@ -34,47 +32,49 @@ let private resolveAssemblyName (fallbackAssemblyName: string) (document: XDocum
 let private resolveTargetFramework (document: XDocument) =
   document |> tryReadProperty "TargetFramework" |> Option.defaultValue "net10.0"
 
-let private resolveAssemblyPath (projectDirectory: string) (targetFramework: string) (assemblyName: string) =
+let private buildAssemblyPath (projectDirectory: string) (targetFramework: string) (assemblyName: string) =
   Path.Combine(projectDirectory, "bin", "Debug", targetFramework, $"{assemblyName}.dll")
 
-let private resolveAssembly
-  (projectKind: string)
-  (projectPath: string)
-  (projectDirectory: string)
-  (fallbackAssemblyName: string)
-  (project: ResolvedProject)
-  : Result<ResolvedAssembly, MigError> =
+let resolveAssemblyPath (projectKind: string) (projectPath: string) =
   result {
     let! document = tryLoadProjectDocument projectKind projectPath
-    let assemblyName = resolveAssemblyName fallbackAssemblyName document
+    let projectDirectory = Path.GetDirectoryName projectPath
+    let fallbackName = Path.GetFileNameWithoutExtension projectPath
+    let assemblyName = resolveAssemblyName fallbackName document
     let targetFramework = resolveTargetFramework document
-    let assemblyPath = resolveAssemblyPath projectDirectory targetFramework assemblyName
+    let assemblyPath = buildAssemblyPath projectDirectory targetFramework assemblyName
     let fullAssemblyPath = Path.GetFullPath assemblyPath
-
-    if File.Exists fullAssemblyPath then
-      return
-        { project = project
-          assemblyName = assemblyName
-          assemblyPath = fullAssemblyPath }
-    else
-      return!
-        Error(
-          MigError.Regular
-            $"Could not resolve {projectKind} assembly. Expected build output at '{fullAssemblyPath}'. Build the {projectKind} project first."
-        )
+    return assemblyName, fullAssemblyPath
   }
 
-let resolveRuntimeAssembly (project: ResolvedProject) : Result<ResolvedAssembly, MigError> =
-  resolveAssembly
-    "runtime"
-    project.runtimeProjectPath
-    project.runtimeProjectDirectory
-    project.runtimeProjectName
-    project
+let private requireAssemblyFile projectKind buildHint (assemblyPath: string) =
+  if File.Exists assemblyPath then
+    Ok assemblyPath
+  else
+    Error(
+      MigError.Regular
+        $"Could not resolve {projectKind} assembly. Expected build output: {assemblyPath}. Build the {buildHint} project first."
+    )
 
-let resolveSchemaAssembly (project: ResolvedProject) : Result<ResolvedAssembly, MigError> =
-  // A conventional runtime project P stores its schema project at
-  // P/MigSchema/MigSchema.fsproj, with schema source in P/MigSchema/MigSchema.fs.
-  let schemaProjectName = Path.GetFileNameWithoutExtension project.schemaProjectPath
+let private resolveProjectAssembly projectKind buildHint projectPath project =
+  result {
+    let! assemblyName, assemblyPath = resolveAssemblyPath projectKind projectPath
+    let! existingAssemblyPath = requireAssemblyFile projectKind buildHint assemblyPath
 
-  resolveAssembly "schema" project.schemaProjectPath project.schemaDirectory schemaProjectName project
+    return
+      { project = project
+        assemblyName = assemblyName
+        assemblyPath = existingAssemblyPath }
+  }
+
+let resolveAssembly (projectPath: string) =
+  result {
+    let! _, assemblyPath = resolveAssemblyPath "project" projectPath
+    return assemblyPath
+  }
+
+let resolveRuntimeAssembly (project: ResolvedProjectLayout) =
+  resolveProjectAssembly "runtime" "runtime" project.runtimeProjectPath project
+
+let resolveSchemaAssembly (project: ResolvedProjectLayout) =
+  resolveProjectAssembly "schema" "schema" project.schemaProjectPath project

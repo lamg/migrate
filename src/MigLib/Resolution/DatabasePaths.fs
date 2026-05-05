@@ -4,7 +4,6 @@ open System
 open System.IO
 
 open MigLib.Types
-open MigLib.Resolution.Types
 open MigLib.TaskResult
 
 let private regularError message = Error(MigError.Regular message)
@@ -22,9 +21,7 @@ let private validateFileSegment (label: string) (value: string) =
   else
     Ok trimmed
 
-let private resolveDbDirectory (project: MigProject) =
-  let dbDir = project.dbDir
-
+let resolveDbDirectory (dbDir: string) =
   if String.IsNullOrWhiteSpace dbDir then
     regularError "Database directory is empty."
   else
@@ -35,11 +32,11 @@ let private resolveDbDirectory (project: MigProject) =
     else
       regularError $"Database directory was not found: {fullDbDir}"
 
-let private buildSchemaBoundDbFileName (project: MigProject) =
+let buildSchemaBoundDbFileName app dbInstance hash =
   result {
-    let! dbApp = validateFileSegment "app" project.dbApp
-    let! dbInstance = validateFileSegment "instance" project.dbInstance
-    let! schemaHash = validateFileSegment "schema hash" project.schemaIdentity.schemaHash
+    let! dbApp = validateFileSegment "app" app
+    let! dbInstance = validateFileSegment "instance" dbInstance
+    let! schemaHash = validateFileSegment "schema hash" hash
 
     if isHexHashSegment schemaHash then
       return $"{dbApp}-{dbInstance}-{schemaHash}.sqlite"
@@ -66,27 +63,21 @@ let private tryParseSchemaBoundDbFileName (dbApp: string) (dbInstance: string) (
       else
         None
 
-let private isSamePath (left: string) (right: string) =
-  String.Equals(Path.GetFullPath left, Path.GetFullPath right, StringComparison.OrdinalIgnoreCase)
-
-let resolveTargetDbPath (project: MigProject) : Result<string, MigError> =
+let resolveSourceDbPath
+  (dbDir: string)
+  (dbApp: string)
+  (dbInstance: string)
+  (targetSchemaHash: string)
+  : Result<string option, MigError> =
   result {
-    let! fullDbDir = resolveDbDirectory project
-    let! dbFileName = buildSchemaBoundDbFileName project
-    return Path.Combine(fullDbDir, dbFileName)
-  }
-
-let resolveSourceDbPath (project: MigProject) : Result<string option, MigError> =
-  result {
-    let! fullDbDir = resolveDbDirectory project
-    let! targetDbPath = resolveTargetDbPath project
-    let! dbApp = validateFileSegment "app" project.dbApp
-    let! dbInstance = validateFileSegment "instance" project.dbInstance
+    let! fullDbDir = resolveDbDirectory dbDir
 
     let candidates =
       Directory.GetFiles(fullDbDir, "*.sqlite")
-      |> Array.filter (fun path -> not (isSamePath path targetDbPath))
-      |> Array.filter (fun path -> tryParseSchemaBoundDbFileName dbApp dbInstance path |> Option.isSome)
+      |> Array.filter (fun path ->
+        match tryParseSchemaBoundDbFileName dbApp dbInstance path with
+        | Some hash -> not (String.Equals(hash, targetSchemaHash, StringComparison.OrdinalIgnoreCase))
+        | None -> false)
       |> Array.sort
 
     match candidates with
@@ -98,16 +89,4 @@ let resolveSourceDbPath (project: MigProject) : Result<string option, MigError> 
       return!
         regularError
           $"Could not infer source database automatically. Found multiple candidates matching '{dbApp}-{dbInstance}-<old-hash>.sqlite': {candidateList}."
-  }
-
-let resolveDatabasePaths (project: MigProject) : Result<ResolvedDatabasePaths, MigError> =
-  result {
-    let! fullDbDir = resolveDbDirectory project
-    let! targetDbPath = resolveTargetDbPath project
-    let! sourceDbPath = resolveSourceDbPath project
-
-    return
-      { targetDbPath = targetDbPath
-        sourceDbPath = sourceDbPath
-        archiveDirectory = Path.Combine(fullDbDir, "archive") }
   }

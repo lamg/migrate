@@ -1,19 +1,21 @@
-module internal MigLib.Codegen.SchemaReflection.Table
+module internal MigLib.Resolution.SchemaReflection.Table
 
 open System
 open System.Collections.Generic
 open Microsoft.FSharp.Reflection
+
+open MigLib.Types
 open MigLib.Schema.Types
 open MigLib.TaskResult
 
-open MigLib.Codegen.SchemaReflection.Naming
-open MigLib.Codegen.SchemaReflection.Attributes
+open MigLib.Resolution.SchemaReflection.Naming
+open MigLib.Resolution.SchemaReflection.Attributes
 
 let buildTable
   (schemaTypes: HashSet<Type>)
   (pkByType: Dictionary<Type, PrimaryKeyInfo list>)
   (recordType: Type)
-  : Result<CreateTable * CreateIndex list, string> =
+  : Result<CreateTable * CreateIndex list, MigError> =
   result {
     let tableName = toSnakeCase recordType.Name
     let! previousTableName = tryReadPreviousName recordType
@@ -28,12 +30,17 @@ let buildTable
           | Some _ -> Ok(pairs @ [ field.Name, toSnakeCase field.Name ], relationships)
           | None when isRecordType field.PropertyType ->
             if not (schemaTypes.Contains field.PropertyType) then
-              Error $"Field '{recordType.Name}.{field.Name}' references '{field.PropertyType.Name}' outside schema"
+              Error(
+                MigError.Regular
+                  $"Field '{recordType.Name}.{field.Name}' references '{field.PropertyType.Name}' outside schema"
+              )
             else
               match pkByType.TryGetValue field.PropertyType with
               | false, _ ->
-                Error
-                  $"Field '{recordType.Name}.{field.Name}' references '{field.PropertyType.Name}' which does not declare PK or AutoIncPK"
+                Error(
+                  MigError.Regular
+                    $"Field '{recordType.Name}.{field.Name}' references '{field.PropertyType.Name}' which does not declare PK or AutoIncPK"
+                )
               | true, referencedPk ->
                 let fkColumnNames = getForeignKeyColumnNames field.Name referencedPk
 
@@ -41,7 +48,11 @@ let buildTable
                   fkColumnNames |> List.map (fun columnName -> columnName, columnName)
 
                 Ok(pairs @ columnPairs, relationships @ [ field.Name, fkColumnNames ])
-          | None -> Error $"Field '{recordType.Name}.{field.Name}' has unsupported type '{field.PropertyType.Name}'")
+          | None ->
+            Error(
+              MigError.Regular
+                $"Field '{recordType.Name}.{field.Name}' has unsupported type '{field.PropertyType.Name}'"
+            ))
         ([], [])
 
     let resolver = buildColumnResolver fieldColumnPairs
@@ -73,15 +84,19 @@ let buildTable
             | None when isRecordType field.PropertyType ->
               match pkByType.TryGetValue field.PropertyType with
               | false, _ ->
-                Error
-                  $"Field '{recordType.Name}.{field.Name}' references '{field.PropertyType.Name}' which does not declare PK or AutoIncPK"
+                Error(
+                  MigError.Regular
+                    $"Field '{recordType.Name}.{field.Name}' references '{field.PropertyType.Name}' which does not declare PK or AutoIncPK"
+                )
               | true, referencedPk ->
                 let fkColumnNames = getForeignKeyColumnNames field.Name referencedPk
                 let onDelete = onDeleteByColumns.TryFind fkColumnNames
 
                 if previousColumnName.IsSome && referencedPk.Length > 1 then
-                  Error
-                    $"Field '{recordType.Name}.{field.Name}' expands to multiple foreign-key columns and cannot also declare PreviousName."
+                  Error(
+                    MigError.Regular
+                      $"Field '{recordType.Name}.{field.Name}' expands to multiple foreign-key columns and cannot also declare PreviousName."
+                  )
                 else
                   let fkColumns =
                     (fkColumnNames, referencedPk)
@@ -116,7 +131,11 @@ let buildTable
                         onUpdate = None }
 
                     Ok(cols @ fkColumns, constraints @ [ ForeignKey foreignKey ])
-            | None -> Error $"Field '{recordType.Name}.{field.Name}' has unsupported type '{field.PropertyType.Name}'")
+            | None ->
+              Error(
+                MigError.Regular
+                  $"Field '{recordType.Name}.{field.Name}' has unsupported type '{field.PropertyType.Name}'"
+              ))
         ([], [])
 
     let! primaryKeyInfo = readPrimaryKeyInfo recordType

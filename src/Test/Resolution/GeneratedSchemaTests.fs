@@ -29,9 +29,7 @@ let private makeAssembly tempDir projectXml =
   writeFile runtimeProjectPath projectXml
 
   { project =
-      { dbInstance = "main"
-        dbDir = tempDir
-        runtimeProjectPath = runtimeProjectPath
+      { runtimeProjectPath = runtimeProjectPath
         runtimeProjectDirectory = tempDir
         runtimeProjectName = "Runtime"
         schemaProjectPath = Path.Combine(schemaDirectory, "MigSchema.fsproj")

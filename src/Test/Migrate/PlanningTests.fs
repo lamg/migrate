@@ -6,6 +6,7 @@ open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 
 open MigLib.Migrate.Planning
+open MigLib.Resolution.Projects
 open MigLib.Types
 open Xunit
 
@@ -61,11 +62,12 @@ let private writeProjectLayout tempDir =
   File.Copy(fixtureAssembly, targetAssemblyPath, true)
 
 let private makeProject tempDir =
-  { dbInstance = TestGenerated.Db.DefaultDbInstance
-    dbDir = tempDir
-    targetSchema = TestGenerated.Db.Schema
-    dbApp = TestGenerated.Db.DbApp
-    schemaIdentity = TestGenerated.Db.SchemaIdentity }
+  match
+    discoverProject tempDir (Some TestGenerated.Db.DefaultDbInstance) tempDir
+    |> fun task -> task.Result
+  with
+  | Ok project -> project
+  | Error error -> failwith $"Expected project to resolve, got: {error}"
 
 let private report _ = Task.FromResult()
 

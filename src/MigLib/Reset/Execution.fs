@@ -5,7 +5,6 @@ open System.IO
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 
-open MigLib.Resolution.ProjectState
 open MigLib.Types
 open MigLib.TaskResult
 open MigLib.Sqlite
@@ -29,14 +28,21 @@ let private removeReadonlyMarker dbPath =
     tx.Commit()
   }
 
-let reset (project: MigProject) : Task<Result<ResetResult, MigError>> =
+let reset (project: ResolvedProject) : Task<Result<ResetResult, MigError>> =
   taskResult {
     try
-      let! (projectState: ResolvedMigProject) = resolveProjectState project
-      let targetDbPath = Path.GetFullPath projectState.targetDbPath
+      let targetDbPath = Path.GetFullPath project.targetDbPath
       let dbDirectory = Path.GetDirectoryName targetDbPath
 
-      let archivedDbPath = latestArchivedDatabase projectState.archivedDbPaths
+      let archivedDbPaths =
+        if Directory.Exists project.archiveDir then
+          Directory.GetFiles(project.archiveDir, "*.sqlite")
+          |> Array.map Path.GetFullPath
+          |> Array.toList
+        else
+          []
+
+      let archivedDbPath = latestArchivedDatabase archivedDbPaths
 
       let restoredDbPath =
         archivedDbPath

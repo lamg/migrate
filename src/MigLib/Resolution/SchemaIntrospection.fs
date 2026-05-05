@@ -1,4 +1,4 @@
-module internal MigLib.Migrate.SchemaIntrospection
+module internal MigLib.Resolution.SchemaIntrospection
 
 open System
 open System.Threading.Tasks

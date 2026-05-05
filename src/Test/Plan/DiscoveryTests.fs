@@ -4,6 +4,7 @@ open System
 open System.IO
 
 open MigLib.Plan.Discovery
+open MigLib.Resolution.Projects
 open MigLib.Types
 open Xunit
 
@@ -49,14 +50,15 @@ let private writeProjectLayout tempDir =
   File.Copy(fixtureAssembly, targetAssemblyPath, true)
 
 let private makeProject tempDir =
-  { dbInstance = TestGenerated.Db.DefaultDbInstance
-    dbDir = tempDir
-    targetSchema = TestGenerated.Db.Schema
-    dbApp = TestGenerated.Db.DbApp
-    schemaIdentity = TestGenerated.Db.SchemaIdentity }
+  match
+    discoverProject tempDir (Some TestGenerated.Db.DefaultDbInstance) tempDir
+    |> fun task -> task.Result
+  with
+  | Ok project -> project
+  | Error error -> failwith $"Expected project to resolve, got: {error}"
 
 [<Fact>]
-let ``resolvePlanInputs reuses migration input discovery`` () =
+let ``resolvePlanInputs returns resolved project`` () =
   let tempDir = createTempDir "mig_plan_discovery"
 
   try

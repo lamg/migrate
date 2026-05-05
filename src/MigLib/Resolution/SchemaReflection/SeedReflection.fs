@@ -1,16 +1,18 @@
-module internal MigLib.Codegen.SchemaReflection.Seed
+module internal MigLib.Resolution.SchemaReflection.Seed
 
 open System
 open System.Collections.Generic
 open System.Globalization
 open System.Reflection
 open Microsoft.FSharp.Reflection
+
+open MigLib.Types
 open MigLib.Schema.Types
 open MigLib.TaskResult
 
-open MigLib.Codegen.SchemaReflection.Naming
-open MigLib.Codegen.SchemaReflection.Attributes
-open MigLib.Codegen.SchemaReflection.Assembly
+open MigLib.Resolution.SchemaReflection.Naming
+open MigLib.Resolution.SchemaReflection.Attributes
+open MigLib.Resolution.SchemaReflection.Assembly
 
 let isTypeUnderModuleName (moduleName: string) (candidate: Type) =
   let fullName = candidate.FullName
@@ -56,7 +58,7 @@ let getStaticModuleSeedValues (moduleType: Type) (recordTypes: Type list) =
   |> Array.sortBy (fun (name, _, _) -> name)
   |> Array.toList
 
-let toSeedExpr (_recordTypes: Type list) (fieldType: Type) (value: obj) : Result<Expr, string> =
+let toSeedExpr (_recordTypes: Type list) (fieldType: Type) (value: obj) : Result<Expr, MigError> =
   if isNull value then
     Ok(Value "NULL")
   else
@@ -74,18 +76,20 @@ let toSeedExpr (_recordTypes: Type list) (fieldType: Type) (value: obj) : Result
       if unionFields.Length = 0 then
         Ok(String unionCase.Name)
       else
-        Error $"Seed value for type '{fieldType.Name}' must be an enum-like union with no payload fields."
+        Error(
+          MigError.Regular $"Seed value for type '{fieldType.Name}' must be an enum-like union with no payload fields."
+        )
     | Some(SqlText, None) -> Ok(String(unbox<string> value))
     | Some(SqlReal, _) -> Ok(Real(unbox<float> value))
     | Some(SqlTimestamp, _) -> Ok(String(string value))
     | Some(SqlString, _) -> Ok(String(string value))
-    | None -> Error $"Seed value field type '{fieldType.Name}' is not supported."
+    | None -> Error(MigError.Regular $"Seed value field type '{fieldType.Name}' is not supported.")
 
 let toSeedColumnValues
   (recordTypes: Type list)
   (field: PropertyInfo)
   (recordValue: obj)
-  : Result<(string * Expr) list, string> =
+  : Result<(string * Expr) list, MigError> =
   result {
     let value = field.GetValue recordValue
 
@@ -95,7 +99,10 @@ let toSeedColumnValues
       let! referencedPk =
         readPrimaryKeyInfo field.PropertyType
         |> Result.bind (function
-          | [] -> Error $"Seed value for nested record type '{field.PropertyType.Name}' requires a primary key."
+          | [] ->
+            Error(
+              MigError.Regular $"Seed value for nested record type '{field.PropertyType.Name}' requires a primary key."
+            )
           | xs -> Ok xs)
 
       let fkColumnNames = getForeignKeyColumnNames field.Name referencedPk
@@ -117,7 +124,7 @@ let toSeedColumnValues
       return [ toSnakeCase field.Name, expr ]
   }
 
-let buildSeedInsert (recordTypes: Type list) (recordType: Type) (recordValue: obj) : Result<InsertInto, string> =
+let buildSeedInsert (recordTypes: Type list) (recordType: Type) (recordValue: obj) : Result<InsertInto, MigError> =
   result {
     let! columnValues =
       FSharpType.GetRecordFields(recordType, true)
@@ -148,7 +155,7 @@ let readSeedInsertsFromModule
   (assembly: Assembly)
   (moduleName: string)
   (recordTypes: Type list)
-  : Result<InsertInto list, string> =
+  : Result<InsertInto list, MigError> =
   match tryFindModuleType assembly moduleName with
   | None -> Ok []
   | Some moduleType ->
@@ -162,9 +169,9 @@ let readSeedInsertsFromModule
       []
     |> Result.map mergeSeedInserts
 
-let buildSchemaFromAssemblyModule (assembly: Assembly) (moduleName: string) : Result<SqlFile, string> =
+let buildSchemaFromAssemblyModule (assembly: Assembly) (moduleName: string) : Result<SqlFile, MigError> =
   if String.IsNullOrWhiteSpace moduleName then
-    Error "Schema module name cannot be empty."
+    Error(MigError.Regular "Schema module name cannot be empty.")
   else
     let types =
       assembly.GetTypes()
@@ -174,7 +181,7 @@ let buildSchemaFromAssemblyModule (assembly: Assembly) (moduleName: string) : Re
       |> Array.toList
 
     if types.IsEmpty then
-      Error $"No record or union schema types were found under compiled module '{moduleName}'."
+      Error(MigError.Regular $"No record or union schema types were found under compiled module '{moduleName}'.")
     else
       result {
         let recordTypes = types |> List.filter isRecordType

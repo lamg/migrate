@@ -9,7 +9,7 @@ open MigLib.Schema.Types
 open MigLib.Types
 open MigLib.Codegen.Generation
 open MigLib.Codegen.Inputs
-open MigLib.Codegen.SchemaReflection
+open MigLib.Resolution.SchemaReflection
 open MigLib.TaskResult
 
 let private staticBindingFlags =
@@ -136,11 +136,15 @@ let private loadSchema inputs =
       result {
         let! moduleType = tryFindModuleType assembly inputs.schemaModuleName
 
-        match SchemaReflection.Seed.buildSchemaFromAssemblyModule assembly inputs.schemaModuleName with
+        match Seed.buildSchemaFromAssemblyModule assembly inputs.schemaModuleName with
         | Ok schema -> return schema
-        | Error reflectionError when reflectionError.StartsWith("No record or union schema types were found") ->
+        | Error(MigError.Regular reflectionError) when
+          reflectionError.StartsWith "No record or union schema types were found"
+          ->
           return! tryReadRequiredStaticValue<SqlFile> moduleType "Schema"
-        | Error reflectionError -> return! Error reflectionError
+        | Error(MigError.Regular reflectionError) -> return! Error reflectionError
+        | Error(MigError.Sqlite ex) -> return! Error ex.Message
+        | Error(MigError.Other ex) -> return! Error ex.Message
       }
     with ex ->
       Error $"Could not load compiled schema assembly '{fullAssemblyPath}': {formatAssemblyLoadError ex}")
@@ -159,8 +163,8 @@ let runCodegen (inputs: CodegenInputs) : Result<CodegenResult, MigError> =
         generatedFiles = stats.generatedFiles }
   }
 
-let codegen (project: MigProject) : Result<CodegenResult, MigError> =
+let codegen (projectDir: string) : Result<CodegenResult, MigError> =
   result {
-    let! inputs = resolveInputs project
+    let! inputs = resolveInputs projectDir
     return! runCodegen inputs
   }

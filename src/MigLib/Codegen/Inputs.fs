@@ -11,7 +11,7 @@ open MigLib.Resolution.Types
 open MigLib.TaskResult
 
 type CodegenInputs =
-  { project: ResolvedProject
+  { project: ResolvedProjectLayout
     schemaAssembly: ResolvedAssembly
     schemaModuleName: string
     generatedModuleName: string
@@ -50,7 +50,7 @@ let private resolveRequiredRootNamespace (projectKind: string) (projectPath: str
         MigError.Regular $"{projectKind} project '{Path.GetFullPath projectPath}' must define <RootNamespace>.")
   }
 
-let private resolveSchemaSourcePath (project: ResolvedProject) =
+let private resolveSchemaSourcePath (project: ResolvedProjectLayout) =
   let schemaSourcePath = Path.Combine(project.schemaDirectory, "MigSchema.fs")
   let fullSchemaSourcePath = Path.GetFullPath schemaSourcePath
 
@@ -59,9 +59,9 @@ let private resolveSchemaSourcePath (project: ResolvedProject) =
   else
     regularError $"Schema source file was not found: {fullSchemaSourcePath}"
 
-let resolveInputs (project: MigProject) : Result<CodegenInputs, MigError> =
+let resolveInputs (projectDir: string) : Result<CodegenInputs, MigError> =
   result {
-    let! resolvedProject = discoverProject project.dbDir project.dbInstance project.dbDir
+    let! resolvedProject = discoverProjectLayout projectDir
     let! schemaAssembly = resolveSchemaAssembly resolvedProject
     let! runtimeRootNamespace = resolveRequiredRootNamespace "runtime" resolvedProject.runtimeProjectPath
     let! schemaRootNamespace = resolveRequiredRootNamespace "schema" resolvedProject.schemaProjectPath

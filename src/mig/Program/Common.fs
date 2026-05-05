@@ -64,11 +64,15 @@ module internal ProgramCommon =
     else
       Error $"Project discovery directory was not found: {targetDirectory}"
 
-  let resolveCliProject (candidateDirectory: string option) (instance: string option) : Result<MigProject, string> =
+  let resolveCliProject
+    (candidateDirectory: string option)
+    (instance: string option)
+    : Result<ResolvedProject, string> =
     result {
       let! targetDirectory = resolveCliDirectory candidateDirectory
 
       return!
         MigLib.discoverProject targetDirectory instance targetDirectory
+        |> fun task -> task.Result
         |> Result.mapError formatMigError
     }

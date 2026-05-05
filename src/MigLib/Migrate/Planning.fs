@@ -3,7 +3,6 @@ module internal MigLib.Migrate.Planning
 open System
 open System.Threading.Tasks
 
-open MigLib.Resolution.ProjectState
 open MigLib.Schema.Types
 open MigLib.Types
 open MigLib.TaskResult
@@ -170,12 +169,11 @@ let private analyzeSchemaDifferences (sourceSchema: SqlFile) (targetSchema: SqlF
 
   supported, unsupported
 
-let buildPlan (reportProgress: ProgReport) (project: MigProject) : Task<Result<MigrationPlan, MigError>> =
+let buildPlan (reportProgress: ProgReport) (project: ResolvedProject) : Task<Result<MigrationPlan, MigError>> =
   taskResult {
-    let! (projectState: ResolvedMigProject) = resolveProjectState project
-    let targetSchema = project.targetSchema
-    do! reportProgress $"Planning migration to target database: {projectState.targetDbPath}"
-    let sourceSchema = projectState.sourceSchema
+    let targetSchema = project.targetSchema.schema
+    do! reportProgress $"Planning migration to target database: {project.targetDbPath}"
+    let sourceSchema = project.sourceDbSchema
 
     let supportedDifferences, unsupportedDifferences =
       match sourceSchema with
@@ -186,8 +184,8 @@ let buildPlan (reportProgress: ProgReport) (project: MigProject) : Task<Result<M
       { sourceSchema = sourceSchema
         targetSchema = targetSchema
         result =
-          { sourceDbPath = projectState.sourceDbPath
-            targetDbPath = projectState.targetDbPath
+          { sourceDbPath = project.sourceDbPath
+            targetDbPath = project.targetDbPath
             canMigrate = unsupportedDifferences.IsEmpty
             supportedDifferences = supportedDifferences
             unsupportedDifferences = unsupportedDifferences } }

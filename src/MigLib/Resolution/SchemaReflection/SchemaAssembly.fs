@@ -1,19 +1,21 @@
-module internal MigLib.Codegen.SchemaReflection.Assembly
+module internal MigLib.Resolution.SchemaReflection.Assembly
 
 open System
 open System.Collections.Generic
 open System.Reflection
+
+open MigLib.Types
 open MigLib.Schema.Types
 open MigLib.Db.Attributes
 open MigLib.TaskResult
 
-open MigLib.Codegen.SchemaReflection.Naming
-open MigLib.Codegen.SchemaReflection.Attributes
-open MigLib.Codegen.SchemaReflection.Table
-open MigLib.Codegen.SchemaReflection.View
-open MigLib.Codegen.SchemaReflection.UnionExtensions
+open MigLib.Resolution.SchemaReflection.Naming
+open MigLib.Resolution.SchemaReflection.Attributes
+open MigLib.Resolution.SchemaReflection.Table
+open MigLib.Resolution.SchemaReflection.View
+open MigLib.Resolution.SchemaReflection.UnionExtensions
 
-let ensureUniqueTableNames (tables: CreateTable list) : Result<unit, string> =
+let ensureUniqueTableNames (tables: CreateTable list) : Result<unit, MigError> =
   let duplicates =
     tables
     |> List.groupBy _.name
@@ -23,11 +25,11 @@ let ensureUniqueTableNames (tables: CreateTable list) : Result<unit, string> =
     Ok()
   else
     let names = duplicates |> List.map fst |> String.concat ", "
-    Error $"Schema produced duplicate table names: {names}"
+    Error(MigError.Regular $"Schema produced duplicate table names: {names}")
 
-let buildSchemaFromTypes (types: Type list) : Result<SqlFile, string> =
+let buildSchemaFromTypes (types: Type list) : Result<SqlFile, MigError> =
   if types.IsEmpty then
-    Error "No types were provided for schema reflection"
+    Error(MigError.Regular "No types were provided for schema reflection")
   else
     result {
       let schemaTypes = HashSet<Type>(types)
@@ -124,7 +126,7 @@ let buildSchemaFromTypes (types: Type list) : Result<SqlFile, string> =
             views = views }
     }
 
-let buildSchemaFromAssembly (assembly: Assembly) : Result<SqlFile, string> =
+let buildSchemaFromAssembly (assembly: Assembly) : Result<SqlFile, MigError> =
   let types =
     assembly.GetTypes()
     |> Array.filter (fun t -> t.Assembly = assembly)

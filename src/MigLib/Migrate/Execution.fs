@@ -19,7 +19,7 @@ let private formatUnsupportedDifferences (differences: string list) =
 
   $"Migration plan has unsupported differences:{Environment.NewLine}{details}"
 
-let migrate (reportProgress: ProgReport) (project: MigProject) : Task<Result<MigrateResult, MigError>> =
+let migrate (reportProgress: ProgReport) (project: ResolvedProject) : Task<Result<MigrateResult, MigError>> =
   taskResult {
     let! migrationPlan = buildPlan reportProgress project
 

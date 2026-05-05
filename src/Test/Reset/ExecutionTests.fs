@@ -5,6 +5,7 @@ open System.IO
 open Microsoft.Data.Sqlite
 
 open MigLib.Reset.Execution
+open MigLib.Resolution.Projects
 open MigLib.Types
 open Xunit
 
@@ -64,11 +65,12 @@ let private writeProjectLayout tempDir =
   File.Copy(fixtureAssembly, targetAssemblyPath, true)
 
 let private makeProject tempDir =
-  { dbInstance = TestGenerated.Db.DefaultDbInstance
-    dbDir = tempDir
-    targetSchema = TestGenerated.Db.Schema
-    dbApp = TestGenerated.Db.DbApp
-    schemaIdentity = TestGenerated.Db.SchemaIdentity }
+  match
+    discoverProject tempDir (Some TestGenerated.Db.DefaultDbInstance) tempDir
+    |> fun task -> task.Result
+  with
+  | Ok project -> project
+  | Error error -> failwith $"Expected project to resolve, got: {error}"
 
 let private targetDbPath tempDir =
   Path.Combine(tempDir, "generated-fixture-main-0123456789abcdef.sqlite")

@@ -6,7 +6,7 @@ open MigLib.Migrate.Planning
 open MigLib.Types
 open MigLib.TaskResult
 
-let plan (project: MigProject) : Task<Result<PlanResult, MigError>> =
+let plan (project: ResolvedProject) : Task<Result<PlanResult, MigError>> =
   let reportProgress _ = Task.FromResult()
 
   taskResult {

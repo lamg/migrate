@@ -4,32 +4,24 @@ open System.IO
 open System.Threading.Tasks
 
 open MigLib.Init.Execution
-open MigLib.Resolution.ProjectState
 open MigLib.Types
 open MigLib.TaskResult
 
-let resolveMigrationInputs (project: MigProject) : Task<Result<ResolvedMigProject, MigError>> =
-  resolveProjectState project
-
-let findOldSchema (reportProgress: ProgReport) (project: MigProject) : Task<Result<SqlFile option, MigError>> =
+let findOldSchema (reportProgress: ProgReport) (project: ResolvedProject) : Task<Result<SqlFile option, MigError>> =
   taskResult {
-    let! (projectState: ResolvedMigProject) = resolveProjectState project
-
-    match projectState.sourceDbPath, projectState.sourceSchema with
+    match project.sourceDbPath, project.sourceDbSchema with
     | Some sourceDbPath, Some sourceSchema ->
       do! reportProgress $"Reading source database schema: {sourceDbPath}"
       return Some sourceSchema
     | _ -> return None
   }
 
-let prepareNewDb (reportProgress: ProgReport) (project: MigProject) : Task<Result<string, MigError>> =
+let prepareNewDb (reportProgress: ProgReport) (project: ResolvedProject) : Task<Result<string, MigError>> =
   taskResult {
-    let! (projectState: ResolvedMigProject) = resolveProjectState project
-
-    if File.Exists projectState.targetDbPath then
-      return! Error(MigError.Regular $"Target database already exists: {Path.GetFullPath projectState.targetDbPath}")
+    if File.Exists project.targetDbPath then
+      return! Error(MigError.Regular $"Target database already exists: {Path.GetFullPath project.targetDbPath}")
     else
-      do! reportProgress $"Creating target database: {projectState.targetDbPath}"
-      let! (initResult: InitResult) = runInitWithSchema project.targetSchema projectState.targetDbPath
+      do! reportProgress $"Creating target database: {project.targetDbPath}"
+      let! (initResult: InitResult) = runInitWithSchema project.targetSchema.schema project.targetDbPath
       return initResult.newDbPath
   }

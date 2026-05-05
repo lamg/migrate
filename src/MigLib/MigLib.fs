@@ -5,7 +5,6 @@ open System.Threading.Tasks
 open MigLib.Db
 open MigLib.TaskResult
 
-type MigProject = Types.MigProject
 type MigError = Types.MigError
 type CodegenResult = Types.CodegenResult
 type InitResult = Types.InitResult
@@ -14,38 +13,26 @@ type MigrateResult = Types.MigrateResult
 type StatusResult = Types.StatusResult
 type ResetResult = Types.ResetResult
 type ProgReport = Types.ProgReport
+type ResolvedProject = Types.ResolvedProject
 
-let codegen (project: MigProject) : Result<CodegenResult, MigError> = Codegen.Execution.codegen project
+let codegen (projectDir: string) : Result<CodegenResult, MigError> = Codegen.Execution.codegen projectDir
 
-let discoverProject (directory: string) (instance: string option) (dbDir: string) : Result<MigProject, MigError> =
-  let resolveDatabaseInstance (instance: string option) =
-    match instance with
-    | Some value when not (System.String.IsNullOrWhiteSpace value) -> value.Trim()
-    | _ -> "main"
+let discoverProject
+  (projDir: string)
+  (instance: string option)
+  (dbDir: string)
+  : Task<Result<ResolvedProject, MigError>> =
+  MigLib.Resolution.Projects.discoverProject projDir instance dbDir
 
-  result {
-    let dbInstance = resolveDatabaseInstance instance
-    let! resolvedProject = Resolution.Projects.discoverProject directory dbInstance dbDir
-    let! runtimeAssembly = Resolution.Assemblies.resolveRuntimeAssembly resolvedProject
-    let! generatedSchema = Resolution.GeneratedSchema.resolveGeneratedSchema runtimeAssembly
+let init (project: ResolvedProject) : Task<Result<InitResult, MigError>> = Init.Execution.init project
 
-    return
-      { dbInstance = dbInstance
-        dbDir = dbDir
-        targetSchema = generatedSchema.generatedModule.schema
-        dbApp = generatedSchema.generatedModule.dbApp
-        schemaIdentity = generatedSchema.generatedModule.schemaIdentity }
-  }
-
-let init (project: MigProject) : Task<Result<InitResult, MigError>> = Init.Execution.init project
-
-let migrate (reportProgress: ProgReport) (project: MigProject) : Task<Result<MigrateResult, MigError>> =
+let migrate (reportProgress: ProgReport) (project: ResolvedProject) : Task<Result<MigrateResult, MigError>> =
   Migrate.Execution.migrate reportProgress project
 
-let plan (project: MigProject) : Task<Result<PlanResult, MigError>> = Plan.Reporting.plan project
+let plan (project: ResolvedProject) : Task<Result<PlanResult, MigError>> = Plan.Reporting.plan project
 
 // reports if the current database needs a migration
-let status (project: MigProject) : Task<Result<StatusResult, MigError>> = Status.Execution.status project
+let status (project: ResolvedProject) : Task<Result<StatusResult, MigError>> = Status.Execution.status project
 
 // eliminates the current database and brings the parent database from the archive directory
-let reset (project: MigProject) : Task<Result<ResetResult, MigError>> = Reset.Execution.reset project
+let reset (project: ResolvedProject) : Task<Result<ResetResult, MigError>> = Reset.Execution.reset project

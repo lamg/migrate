@@ -2,7 +2,6 @@ namespace Mig
 
 open Argu
 open MigLib
-open MigLib.Schema.Types
 open MigLib.TaskResult
 open ProgramArgs
 open ProgramCommon
@@ -13,16 +12,7 @@ module internal ProgramBuildCommands =
       result {
         let! currentDirectory = resolveCliDirectory (args.TryGetResult CodegenArgs.Dir)
 
-        let project: MigProject =
-          { dbInstance = "main"
-            dbDir = currentDirectory
-            targetSchema = emptyFile
-            dbApp = ""
-            schemaIdentity =
-              { schemaHash = "0000000000000000"
-                schemaCommit = None } }
-
-        let! codegenResult = MigLib.codegen project |> Result.mapError formatMigError
+        let! codegenResult = MigLib.codegen currentDirectory |> Result.mapError formatMigError
 
         printfn "Codegen complete."
         printfn $"Output path: {codegenResult.outputPath}"

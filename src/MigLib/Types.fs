@@ -6,21 +6,12 @@ open Microsoft.Data.Sqlite
 open MigLib.Schema.Types
 open MigLib.Db.Transactions
 
-type MigProject =
-  { dbInstance: string
-    dbDir: string
-    targetSchema: SqlFile
+type ResolvedGeneratedSchemaModule =
+  { schema: SqlFile
+    schemaIdentity: SchemaIdentity
+    schemaHash: string
     dbApp: string
-    schemaIdentity: SchemaIdentity }
-
-type internal ResolvedMigProject =
-  { project: MigProject
-    targetDbPath: string
-    sourceDbPath: string option
-    archiveDirectory: string
-    archivedDbPaths: string list
-    currentDbPath: string option
-    sourceSchema: SqlFile option }
+    defaultDbInstance: string }
 
 [<RequireQualifiedAccess>]
 type MigError =
@@ -62,3 +53,10 @@ type ResetResult =
     removedCurrentDbPath: string option }
 
 type ProgReport = string -> Task<unit>
+
+type ResolvedProject =
+  { targetDbPath: string
+    targetSchema: ResolvedGeneratedSchemaModule
+    sourceDbPath: string option
+    sourceDbSchema: SqlFile option
+    archiveDir: string }

@@ -26,11 +26,28 @@ let private runtimeProjectPath tempDir name = Path.Combine(tempDir, $"{name}.fsp
 let private schemaProjectPath tempDir =
   Path.Combine(tempDir, "MigSchema", "MigSchema.fsproj")
 
+let private runtimeAssemblyPath tempDir =
+  let assemblyName =
+    Path.GetFileNameWithoutExtension(typeof<TestGenerated.Db.Marker>.Assembly.Location)
+
+  Path.Combine(tempDir, "bin", "Debug", "net10.0", $"{assemblyName}.dll")
+
 let private writeRuntimeProject tempDir name =
-  writeFile (runtimeProjectPath tempDir name) "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
+  let fixtureAssembly = typeof<TestGenerated.Db.Marker>.Assembly.Location
+  let assemblyName = Path.GetFileNameWithoutExtension fixtureAssembly
+
+  writeFile
+    (runtimeProjectPath tempDir name)
+    $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>TestGenerated</RootNamespace><AssemblyName>{assemblyName}</AssemblyName></PropertyGroup></Project>"
+
+  let targetAssemblyPath = runtimeAssemblyPath tempDir
+  Directory.CreateDirectory(Path.GetDirectoryName targetAssemblyPath) |> ignore
+  File.Copy(fixtureAssembly, targetAssemblyPath, true)
 
 let private writeSchemaProject tempDir =
-  writeFile (schemaProjectPath tempDir) "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
+  writeFile
+    (schemaProjectPath tempDir)
+    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>TestGeneratedSchema</RootNamespace></PropertyGroup></Project>"
 
 let private assertRegularErrorContains expectedText result =
   match result with
@@ -39,29 +56,43 @@ let private assertRegularErrorContains expectedText result =
   | Ok value -> failwith $"Expected error, got: {value}"
 
 [<Fact>]
-let ``resolveProject resolves explicit runtime project and MigSchema project`` () =
+let ``resolveProjectLayout resolves explicit runtime project and MigSchema project`` () =
+  let tempDir = createTempDir "mig_resolve_project_layout_explicit"
+
+  try
+    writeRuntimeProject tempDir "Runtime"
+    writeSchemaProject tempDir
+
+    match resolveProjectLayout (runtimeProjectPath tempDir "Runtime") with
+    | Ok resolved ->
+      Assert.Equal(Path.GetFullPath(runtimeProjectPath tempDir "Runtime"), resolved.runtimeProjectPath)
+      Assert.Equal(tempDir, resolved.runtimeProjectDirectory)
+      Assert.Equal("Runtime", resolved.runtimeProjectName)
+      Assert.Equal(schemaProjectPath tempDir, resolved.schemaProjectPath)
+      Assert.Equal(Path.Combine(tempDir, "MigSchema"), resolved.schemaDirectory)
+    | Error error -> failwith $"Expected project layout to resolve, got: {error}"
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``resolveProject returns runtime schema and database paths`` () =
   let tempDir = createTempDir "mig_resolve_project_explicit"
 
   try
     writeRuntimeProject tempDir "Runtime"
     writeSchemaProject tempDir
 
-    let project =
-      { dbInstance = "main"
-        dbDir = tempDir
-        targetSchema = TestGenerated.Db.Schema
-        dbApp = TestGenerated.Db.DbApp
-        schemaIdentity = TestGenerated.Db.SchemaIdentity }
-
-    match resolveProject (runtimeProjectPath tempDir "Runtime") project.dbInstance project.dbDir with
+    match
+      resolveProject (runtimeProjectPath tempDir "Runtime") "main" tempDir
+      |> fun task -> task.Result
+    with
     | Ok resolved ->
-      Assert.Equal(project.dbInstance, resolved.dbInstance)
-      Assert.Equal(project.dbDir, resolved.dbDir)
-      Assert.Equal(Path.GetFullPath(runtimeProjectPath tempDir "Runtime"), resolved.runtimeProjectPath)
-      Assert.Equal(tempDir, resolved.runtimeProjectDirectory)
-      Assert.Equal("Runtime", resolved.runtimeProjectName)
-      Assert.Equal(schemaProjectPath tempDir, resolved.schemaProjectPath)
-      Assert.Equal(Path.Combine(tempDir, "MigSchema"), resolved.schemaDirectory)
+      Assert.Equal(TestGenerated.Db.DbApp, resolved.targetSchema.dbApp)
+      Assert.Equal(TestGenerated.Db.SchemaHash, resolved.targetSchema.schemaHash)
+      Assert.Equal(Path.Combine(tempDir, "generated-fixture-main-0123456789abcdef.sqlite"), resolved.targetDbPath)
+      Assert.Equal(None, resolved.sourceDbPath)
+      Assert.Equal(None, resolved.sourceDbSchema)
+      Assert.Equal(Path.Combine(tempDir, "archive"), resolved.archiveDir)
     | Error error -> failwith $"Expected project to resolve, got: {error}"
   finally
     Directory.Delete(tempDir, true)
@@ -74,12 +105,10 @@ let ``discoverProject resolves a single runtime project in directory`` () =
     writeRuntimeProject tempDir "Runtime"
     writeSchemaProject tempDir
 
-    match discoverProject tempDir "tenant" tempDir with
+    match discoverProject tempDir (Some "tenant") tempDir |> fun task -> task.Result with
     | Ok resolved ->
-      Assert.Equal(Path.GetFullPath(runtimeProjectPath tempDir "Runtime"), resolved.runtimeProjectPath)
-      Assert.Equal("tenant", resolved.dbInstance)
-      Assert.Equal(tempDir, resolved.dbDir)
-      Assert.Equal(schemaProjectPath tempDir, resolved.schemaProjectPath)
+      Assert.Equal(Path.Combine(tempDir, "generated-fixture-tenant-0123456789abcdef.sqlite"), resolved.targetDbPath)
+      Assert.Equal(Path.Combine(tempDir, "archive"), resolved.archiveDir)
     | Error error -> failwith $"Expected project to resolve, got: {error}"
   finally
     Directory.Delete(tempDir, true)
@@ -89,14 +118,8 @@ let ``resolveProject fails when runtime project is missing`` () =
   let tempDir = createTempDir "mig_resolve_project_missing_runtime"
 
   try
-    let project =
-      { dbInstance = "main"
-        dbDir = tempDir
-        targetSchema = TestGenerated.Db.Schema
-        dbApp = TestGenerated.Db.DbApp
-        schemaIdentity = TestGenerated.Db.SchemaIdentity }
-
-    resolveProject (runtimeProjectPath tempDir "Missing") project.dbInstance project.dbDir
+    resolveProject (runtimeProjectPath tempDir "Missing") "main" tempDir
+    |> fun task -> task.Result
     |> assertRegularErrorContains "Runtime project file was not found"
   finally
     Directory.Delete(tempDir, true)
@@ -108,14 +131,8 @@ let ``resolveProject fails when MigSchema project is missing`` () =
   try
     writeRuntimeProject tempDir "Runtime"
 
-    let project =
-      { dbInstance = "main"
-        dbDir = tempDir
-        targetSchema = TestGenerated.Db.Schema
-        dbApp = TestGenerated.Db.DbApp
-        schemaIdentity = TestGenerated.Db.SchemaIdentity }
-
-    resolveProject (runtimeProjectPath tempDir "Runtime") project.dbInstance project.dbDir
+    resolveProject (runtimeProjectPath tempDir "Runtime") "main" tempDir
+    |> fun task -> task.Result
     |> assertRegularErrorContains "Schema project file was not found"
   finally
     Directory.Delete(tempDir, true)
@@ -125,7 +142,8 @@ let ``discoverProject fails when directory has no runtime project`` () =
   let tempDir = createTempDir "mig_discover_project_none"
 
   try
-    discoverProject tempDir "main" tempDir
+    discoverProject tempDir None tempDir
+    |> fun task -> task.Result
     |> assertRegularErrorContains "No .fsproj file was found"
   finally
     Directory.Delete(tempDir, true)
@@ -138,7 +156,8 @@ let ``discoverProject fails when directory has multiple runtime projects`` () =
     writeRuntimeProject tempDir "First"
     writeRuntimeProject tempDir "Second"
 
-    discoverProject tempDir "main" tempDir
+    discoverProject tempDir None tempDir
+    |> fun task -> task.Result
     |> assertRegularErrorContains "Found multiple .fsproj files"
   finally
     Directory.Delete(tempDir, true)

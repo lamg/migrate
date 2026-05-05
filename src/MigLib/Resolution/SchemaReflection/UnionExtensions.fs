@@ -1,19 +1,21 @@
-module internal MigLib.Codegen.SchemaReflection.UnionExtensions
+module internal MigLib.Resolution.SchemaReflection.UnionExtensions
 
 open System
 open System.Collections.Generic
 open Microsoft.FSharp.Reflection
+
+open MigLib.Types
 open MigLib.Schema.Types
 open MigLib.TaskResult
 
-open MigLib.Codegen.SchemaReflection.Naming
-open MigLib.Codegen.SchemaReflection.Attributes
+open MigLib.Resolution.SchemaReflection.Naming
+open MigLib.Resolution.SchemaReflection.Attributes
 
 let buildUnionExtensionTables
   (schemaTypes: HashSet<Type>)
   (pkByType: Dictionary<Type, PrimaryKeyInfo list>)
   (unionType: Type)
-  : Result<CreateTable list, string> =
+  : Result<CreateTable list, MigError> =
   let unionCases = FSharpType.GetUnionCases(unionType, true) |> Array.toList
 
   unionCases
@@ -36,8 +38,10 @@ let buildUnionExtensionTables
               match pkByType.TryGetValue baseType with
               | true, pk -> Ok pk
               | false, _ ->
-                Error
-                  $"Union case '{unionType.Name}.{unionCase.Name}' references base type '{baseType.Name}' without PK"
+                Error(
+                  MigError.Regular
+                    $"Union case '{unionType.Name}.{unionCase.Name}' references base type '{baseType.Name}' without PK"
+                )
 
             let baseTableName = toSnakeCase baseType.Name
 
@@ -116,8 +120,10 @@ let buildUnionExtensionTables
                             unitOfMeasure = None } ]
                     )
                   | None ->
-                    Error
-                      $"Union case '{unionType.Name}.{unionCase.Name}' has unsupported field type '{field.PropertyType.Name}'. Extension fields must be primitive.")
+                    Error(
+                      MigError.Regular
+                        $"Union case '{unionType.Name}.{unionCase.Name}' has unsupported field type '{field.PropertyType.Name}'. Extension fields must be primitive."
+                    ))
                 []
 
             let extensionTable =
