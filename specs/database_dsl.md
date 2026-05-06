@@ -658,13 +658,7 @@ The runtime directory must contain exactly one runtime `.fsproj`. The schema pro
 
 `mig codegen` writes `Db.fs` into the runtime project root. The generated module contains:
 
-- `DbApp`
-- `DefaultDbInstance`
-- `SchemaHash`
-- `DbFileForInstance`
-- `DbFile`
-- `SchemaIdentity`
-- `Schema`
+- `GeneratedSchema`
 - generated record and DU types
 - generated CRUD/query helpers based on the schema attributes
 

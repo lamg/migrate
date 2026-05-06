@@ -81,5 +81,5 @@ Expected result:
 ## Operational Notes
 
 - `mig` resolves database files by app prefix, instance, and schema hash.
-- The generated runtime module exposes `DbFileForInstance` and `DbFile`; application code should use those values instead of hardcoded filenames.
+- The generated runtime module exposes `GeneratedSchema`; application code should resolve schema-bound database paths through MigLib project resolution instead of hardcoded filenames.
 - `mig migrate` is the workflow that creates the new target and archives the previous source. There are no separate `drain`, `cutover`, or `archive-old` commands in the current CLI.

@@ -8,7 +8,6 @@ open MigLib.Db.Transactions
 
 type ResolvedGeneratedSchemaModule =
   { schema: SqlFile
-    schemaIdentity: SchemaIdentity
     schemaHash: string
     dbApp: string
     defaultDbInstance: string }

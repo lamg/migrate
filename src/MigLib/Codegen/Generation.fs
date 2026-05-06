@@ -289,43 +289,18 @@ let private generateCode
         yield "open System.Threading.Tasks"
         yield "open Microsoft.Data.Sqlite"
         yield "open MigLib.Schema.Types"
+        yield "open MigLib.Types"
         yield "open MigLib.Codegen.Helpers"
         yield "open MigLib.Db"
         yield ""
-        match dbApp with
-        | Some appName ->
-          yield "[<Literal>]"
-          yield $"let DbApp = {renderStringLiteral appName}"
-          yield ""
-          yield "[<Literal>]"
-          yield "let DefaultDbInstance = \"main\""
-          yield ""
-        | None -> ()
-        match schemaHash with
-        | Some value ->
-          yield "[<Literal>]"
-          yield $"let SchemaHash = {renderStringLiteral value}"
-          yield ""
-          yield "let SchemaIdentity : SchemaIdentity ="
-          yield "  { schemaHash = SchemaHash"
-          yield "    schemaCommit = None }"
-          yield ""
-
-          match dbApp with
-          | Some _ ->
-            yield "let DbFileForInstance (instance: string option) ="
-            yield "  let resolvedInstance ="
-            yield "    match instance with"
-            yield "    | Some value when not (String.IsNullOrWhiteSpace value) -> value.Trim()"
-            yield "    | _ -> DefaultDbInstance"
-            yield ""
-            yield "  $\"{DbApp}-{resolvedInstance}-{SchemaHash}.sqlite\""
-            yield ""
-            yield "let DbFile = DbFileForInstance None"
-            yield ""
-          | None -> ()
-        | None -> ()
-        yield $"let Schema : SqlFile = {renderSqlFile schema}"
+        match dbApp, schemaHash with
+        | Some appName, Some hash ->
+          yield "let GeneratedSchema: ResolvedGeneratedSchemaModule ="
+          yield $"  {{ schema = {renderSqlFile schema}"
+          yield $"    schemaHash = {renderStringLiteral hash}"
+          yield $"    dbApp = {renderStringLiteral appName}"
+          yield "    defaultDbInstance = \"main\" }"
+        | _ -> yield $"let Schema: SqlFile = {renderSqlFile schema}"
         yield ""
         yield!
           schema.measureTypes

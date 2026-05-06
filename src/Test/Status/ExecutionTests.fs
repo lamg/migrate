@@ -51,7 +51,7 @@ let private writeProjectLayout tempDir =
 
 let private makeProject tempDir =
   match
-    discoverProject tempDir (Some TestGenerated.Db.DefaultDbInstance) tempDir
+    discoverProject tempDir (Some TestGenerated.Db.GeneratedSchema.defaultDbInstance) tempDir
     |> fun task -> task.Result
   with
   | Ok project -> project
@@ -163,7 +163,7 @@ let ``project resolution fails when multiple source candidates match`` () =
     writeFile (Path.Combine(tempDir, "generated-fixture-main-1111111111111111.sqlite")) ""
     writeFile (Path.Combine(tempDir, "generated-fixture-main-2222222222222222.sqlite")) ""
 
-    discoverProject tempDir (Some TestGenerated.Db.DefaultDbInstance) tempDir
+    discoverProject tempDir (Some TestGenerated.Db.GeneratedSchema.defaultDbInstance) tempDir
     |> fun task -> task.Result
     |> assertRegularErrorContains "Found multiple candidates"
   finally

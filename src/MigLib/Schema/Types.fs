@@ -123,10 +123,6 @@ type SqlFile =
     indexes: CreateIndex list
     triggers: CreateTrigger list }
 
-type SchemaIdentity =
-  { schemaHash: string
-    schemaCommit: string option }
-
 let emptyFile =
   { measureTypes = []
     inserts = []

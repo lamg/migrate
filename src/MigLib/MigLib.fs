@@ -24,6 +24,13 @@ let discoverProject
   : Task<Result<ResolvedProject, MigError>> =
   MigLib.Resolution.Projects.discoverProject projDir instance dbDir
 
+let resolveProjectFromGeneratedSchema
+  (dbDir: string)
+  (instance: string option)
+  (generatedSchema: Types.ResolvedGeneratedSchemaModule)
+  : Task<Result<ResolvedProject, MigError>> =
+  MigLib.Resolution.Projects.resolveProjectFromGeneratedSchema dbDir instance generatedSchema
+
 let init (project: ResolvedProject) : Task<Result<InitResult, MigError>> = Init.Execution.init project
 
 let migrate (reportProgress: ProgReport) (project: ResolvedProject) : Task<Result<MigrateResult, MigError>> =

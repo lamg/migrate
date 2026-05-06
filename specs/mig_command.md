@@ -23,13 +23,7 @@ Required conventions:
 
 `mig codegen` generates a runtime module that contains:
 
-- `DbApp`
-- `DefaultDbInstance`
-- `SchemaHash`
-- `DbFileForInstance`
-- `DbFile`
-- `SchemaIdentity`
-- `Schema`
+- `GeneratedSchema`
 - generated CRUD/query helpers driven by schema attributes
 
 Database files follow this pattern:
@@ -69,7 +63,7 @@ mig init [--dir|-d /path/to/project] [--instance|-i name]
 Behavior:
 
 1. Discover the runtime project and generated runtime module from the compiled runtime assembly.
-2. Resolve the target database path from `DbApp`, `instance`, and `SchemaIdentity.schemaHash`.
+2. Resolve the target database path from `GeneratedSchema.dbApp`, `instance`, and `GeneratedSchema.schemaHash`.
 3. If the target database already exists, return success without recreating it.
 4. Otherwise create the schema-matched database and apply seed inserts.
 

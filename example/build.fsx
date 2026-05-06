@@ -1,11 +1,9 @@
 #r "nuget: Fake.Core.Target, 6.1.3"
 #r "nuget: Fake.DotNet.Cli, 6.1.3"
 #r "nuget: Fake.IO.FileSystem, 6.1.3"
-#r "nuget: Microsoft.Data.Sqlite, 9.0.0"
 
 open System
 open System.IO
-open Microsoft.Data.Sqlite
 open Fake.Core
 open Fake.Core.TargetOperators
 open Fake.DotNet
@@ -20,30 +18,34 @@ let schemaDir = Path.Combine(rootDir, "MigSchema")
 let schemaProjectPath = Path.Combine(schemaDir, "MigSchema.fsproj")
 let exampleProjectPath = Path.Combine(rootDir, "example.fsproj")
 let migProjectPath = Path.Combine(rootDir, "..", "src", "mig", "mig.fsproj")
-
-let generatedDbPath = Path.Combine(rootDir, "Db.fs")
+let generatedDbPath = Path.Combine(schemaDir, "Db.fs")
 let exampleDbPrefix = "ExampleApp-main"
 
-let legacyDbPath =
-  Path.Combine(rootDir, $"{exampleDbPrefix}-1111111111111111.sqlite")
+[<Literal>]
+let clean = "clean"
 
-let cliArgs =
-  let commandLineArgs = Environment.GetCommandLineArgs() |> Array.toList
+[<Literal>]
+let restore = "restore"
 
-  match commandLineArgs |> List.tryFindIndex ((=) "--") with
-  | Some separatorIndex -> commandLineArgs |> List.skip (separatorIndex + 1)
-  | None -> commandLineArgs |> List.skip 1
+[<Literal>]
+let buildSchema = "build-schema"
 
-let requestedTarget =
-  let rec loop args =
-    match args with
-    | "--target" :: target :: _ -> target
-    | "-t" :: target :: _ -> target
-    | arg :: _ when arg.StartsWith "--target=" -> arg.Substring "--target=".Length
-    | _ :: rest -> loop rest
-    | [] -> "Run"
+[<Literal>]
+let codegen = "codegen"
 
-  loop cliArgs
+[<Literal>]
+let buildExample = "build-example"
+
+[<Literal>]
+let init = "init"
+
+[<Literal>]
+let run = "run"
+
+let target =
+  match Environment.GetCommandLineArgs() with
+  | [| _; _; t |] -> t
+  | _ -> run
 
 let private runDotNetCommand command args =
   let result = DotNet.exec id command args
@@ -57,28 +59,8 @@ let private deleteIfExists path =
   else if Directory.Exists path then
     Directory.delete path
 
-let private createLegacyDatabase () =
-  deleteIfExists "archive"
-
-  use connection = new SqliteConnection($"Data Source={legacyDbPath}")
-  connection.Open()
-
-  use createTable =
-    new SqliteCommand(
-      "CREATE TABLE student(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, age INTEGER NOT NULL DEFAULT 18);",
-      connection
-    )
-
-  createTable.ExecuteNonQuery() |> ignore
-
-  use seedRows =
-    new SqliteCommand("INSERT INTO student(name, age) VALUES ('Alice', 21), ('Bob', 24);", connection)
-
-  seedRows.ExecuteNonQuery() |> ignore
-
-Target.create "Clean" (fun _ ->
+Target.create clean (fun _ ->
   deleteIfExists generatedDbPath
-  deleteIfExists legacyDbPath
 
   Directory.GetFiles(rootDir, $"{exampleDbPrefix}-*.sqlite")
   |> Seq.iter deleteIfExists
@@ -89,33 +71,21 @@ Target.create "Clean" (fun _ ->
     Path.Combine(schemaDir, "obj") ]
   |> Shell.cleanDirs)
 
-Target.create "Restore" (fun _ ->
+Target.create restore (fun _ ->
   runDotNetCommand "restore" $"\"{migProjectPath}\""
   runDotNetCommand "restore" $"\"{schemaProjectPath}\""
   runDotNetCommand "restore" $"\"{exampleProjectPath}\"")
 
-Target.create "BuildSchema" (fun _ -> runDotNetCommand "build" $"\"{schemaProjectPath}\" --no-restore")
+Target.create buildSchema (fun _ -> runDotNetCommand "build" $"\"{schemaProjectPath}\" --no-restore")
 
-Target.create "Codegen" (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPath}\" -- codegen -d \"{rootDir}\"")
+Target.create codegen (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPath}\" -- codegen -d \"{rootDir}\"")
 
-Target.create "BuildExample" (fun _ -> runDotNetCommand "build" $"\"{exampleProjectPath}\" --no-restore")
+Target.create buildExample (fun _ -> runDotNetCommand "build" $"\"{exampleProjectPath}\" --no-restore")
 
-Target.create "Init" (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPath}\" -- init -d \"{rootDir}\"")
+Target.create init (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPath}\" -- init -d \"{rootDir}\"")
 
-Target.create "CreateLegacySource" (fun _ -> createLegacyDatabase ())
+Target.create run (fun _ -> runDotNetCommand "run" $"--project \"{exampleProjectPath}\" --no-build")
 
-Target.create "Migrate" (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPath}\" -- migrate -d \"{rootDir}\"")
+clean ==> restore ==> buildSchema ==> codegen ==> buildExample ==> init ==> run
 
-Target.create "RunProgram" (fun _ -> runDotNetCommand "run" $"--project \"{exampleProjectPath}\" --no-build")
-
-Target.create "RunInitExample" (fun _ -> runDotNetCommand "run" $"--project \"{exampleProjectPath}\" --no-build")
-
-Target.create "RunMigrationExample" (fun _ -> runDotNetCommand "run" $"--project \"{exampleProjectPath}\" --no-build")
-
-"Clean" ==> "Restore" ==> "BuildSchema" ==> "Codegen" ==> "BuildExample"
-
-"BuildExample" ==> "Init" ==> "RunInitExample"
-
-"BuildExample" ==> "CreateLegacySource" ==> "Migrate" ==> "RunMigrationExample"
-
-Target.runOrDefault requestedTarget
+Target.runOrDefault target

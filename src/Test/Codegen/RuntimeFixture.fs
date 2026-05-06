@@ -4,33 +4,11 @@ open System
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 open MigLib.Schema.Types
+open MigLib.Types
 open MigLib.Codegen.Helpers
 open MigLib.Db
 
 type Marker = class end
-
-[<Literal>]
-let DbApp = "runtime-fixture"
-
-[<Literal>]
-let DefaultDbInstance = "main"
-
-[<Literal>]
-let SchemaHash = "fedcba9876543210"
-
-let SchemaIdentity: SchemaIdentity =
-  { schemaHash = SchemaHash
-    schemaCommit = None }
-
-let DbFileForInstance (instance: string option) =
-  let resolvedInstance =
-    match instance with
-    | Some value when not (String.IsNullOrWhiteSpace value) -> value.Trim()
-    | _ -> DefaultDbInstance
-
-  $"{DbApp}-{resolvedInstance}-{SchemaHash}.sqlite"
-
-let DbFile = DbFileForInstance None
 
 let Schema: SqlFile =
   { measureTypes = []
@@ -74,6 +52,12 @@ let Schema: SqlFile =
           upsertAnnotations = [ UpsertAnnotation ] } ]
     indexes = []
     triggers = [] }
+
+let GeneratedSchema: ResolvedGeneratedSchemaModule =
+  { schema = Schema
+    schemaHash = "fedcba9876543210"
+    dbApp = "runtime-fixture"
+    defaultDbInstance = "main" }
 
 type Student = { Id: int64; Name: string; Age: int64 }
 

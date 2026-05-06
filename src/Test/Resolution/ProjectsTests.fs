@@ -87,8 +87,8 @@ let ``resolveProject returns runtime schema and database paths`` () =
       |> fun task -> task.Result
     with
     | Ok resolved ->
-      Assert.Equal(TestGenerated.Db.DbApp, resolved.targetSchema.dbApp)
-      Assert.Equal(TestGenerated.Db.SchemaHash, resolved.targetSchema.schemaHash)
+      Assert.Equal(TestGenerated.Db.GeneratedSchema.dbApp, resolved.targetSchema.dbApp)
+      Assert.Equal(TestGenerated.Db.GeneratedSchema.schemaHash, resolved.targetSchema.schemaHash)
       Assert.Equal(Path.Combine(tempDir, "generated-fixture-main-0123456789abcdef.sqlite"), resolved.targetDbPath)
       Assert.Equal(None, resolved.sourceDbPath)
       Assert.Equal(None, resolved.sourceDbSchema)

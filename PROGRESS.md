@@ -12,6 +12,7 @@ The public contract should be truthful and easy to reason about:
 - old databases become readonly before data is copied
 - successful migrations archive the old readonly database
 - command workflows are available to both direct MigLib users and the `mig` CLI
+- generated runtime modules expose one `GeneratedSchema` value for migration workflows instead of separate schema identity fields
 
 This replaces the current hot-migration lifecycle with a blocking startup and command model.
 

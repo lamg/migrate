@@ -66,7 +66,7 @@ let private writeProjectLayout tempDir =
 
 let private makeProject tempDir =
   match
-    discoverProject tempDir (Some TestGenerated.Db.DefaultDbInstance) tempDir
+    discoverProject tempDir (Some TestGenerated.Db.GeneratedSchema.defaultDbInstance) tempDir
     |> fun task -> task.Result
   with
   | Ok project -> project

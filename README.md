@@ -29,13 +29,7 @@ The schema project must also define `<RootNamespace>`. The compiled schema modul
 
 `mig codegen` emits a runtime module that contains:
 
-- `DbApp`
-- `DefaultDbInstance`
-- `SchemaHash`
-- `DbFileForInstance`
-- `DbFile`
-- `SchemaIdentity`
-- `Schema`
+- `GeneratedSchema`
 - generated record and DU types
 - generated CRUD/query helpers driven by schema annotations
 
@@ -109,11 +103,16 @@ Generated helpers execute inside `dbTxn` or `txn` transaction workflows.
 
 ```fsharp
 open System.IO
+open MigLib
 open MigLib.Db.Transactions
 open MyApp.Db
 
-let dbPath = Path.Combine(dataDirectory, DbFile)
-let db = dbTxn dbPath
+let project =
+  MigLib.resolveProjectFromGeneratedSchema dataDirectory None GeneratedSchema
+  |> fun task -> task.Result
+  |> Result.defaultWith (fun error -> failwithf "%A" error)
+
+let db = dbTxn project.targetDbPath
 
 let result =
   db {

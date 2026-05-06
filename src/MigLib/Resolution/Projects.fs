@@ -29,6 +29,35 @@ let private loadSourceSchema sourceDbPath : Task<Result<SqlFile option, MigError
     return Some schema
   }
 
+let resolveProjectFromGeneratedSchema
+  (dbDir: string)
+  (dbInstance: string option)
+  (targetSchema: ResolvedGeneratedSchemaModule)
+  : Task<Result<ResolvedProject, MigError>> =
+  taskResult {
+    let! fullDbDir = DatabasePaths.resolveDbDirectory dbDir
+
+    let instance =
+      resolveDatabaseInstance targetSchema.defaultDbInstance (dbInstance |> Option.defaultValue "")
+
+    let! dbFile = DatabasePaths.buildSchemaBoundDbFileName targetSchema.dbApp instance targetSchema.schemaHash
+    let targetDbPath = Path.Combine(fullDbDir, dbFile)
+
+    let! sourceDbPath = DatabasePaths.resolveSourceDbPath fullDbDir targetSchema.dbApp instance targetSchema.schemaHash
+
+    let! sourceDbSchema =
+      match sourceDbPath with
+      | Some path -> loadSourceSchema path
+      | None -> Task.FromResult(Ok None)
+
+    return
+      { sourceDbSchema = sourceDbSchema
+        sourceDbPath = sourceDbPath
+        archiveDir = Path.Combine(fullDbDir, "archive")
+        targetSchema = targetSchema
+        targetDbPath = targetDbPath }
+  }
+
 let resolveProjectLayout (runtimeProjectPath: string) : Result<ResolvedProjectLayout, MigError> =
   if String.IsNullOrWhiteSpace runtimeProjectPath then
     regularError "Runtime project path is empty."
@@ -82,30 +111,14 @@ let resolveProject
   : Task<Result<ResolvedProject, MigError>> =
   taskResult {
     let! layout = resolveProjectLayout runtimeProjectPath
-    let! fullDbDir = DatabasePaths.resolveDbDirectory dbDir
     let! runtimeAssembly = Assemblies.resolveRuntimeAssembly layout
 
     let! targetSchema =
       GeneratedSchema.resolveGeneratedSchema runtimeAssembly
       |> Result.map _.generatedModule
 
-    let instance = resolveDatabaseInstance targetSchema.defaultDbInstance dbInstance
-    let! dbFile = DatabasePaths.buildSchemaBoundDbFileName targetSchema.dbApp instance targetSchema.schemaHash
-    let targetDbPath = Path.Combine(fullDbDir, dbFile)
-
-    let! sourceDbPath = DatabasePaths.resolveSourceDbPath fullDbDir targetSchema.dbApp instance targetSchema.schemaHash
-
-    let! sourceDbSchema =
-      match sourceDbPath with
-      | Some path -> loadSourceSchema path
-      | None -> Task.FromResult(Ok None)
-
-    return
-      { sourceDbSchema = sourceDbSchema
-        sourceDbPath = sourceDbPath
-        archiveDir = Path.Combine(fullDbDir, "archive")
-        targetSchema = targetSchema
-        targetDbPath = targetDbPath }
+    let! (project: ResolvedProject) = resolveProjectFromGeneratedSchema dbDir (Some dbInstance) targetSchema
+    return project
   }
 
 let discoverProject

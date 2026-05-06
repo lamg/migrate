@@ -1,21 +1,9 @@
 module TestGenerated.Db
 
 open MigLib.Schema.Types
+open MigLib.Types
 
 type Marker = class end
-
-[<Literal>]
-let DbApp = "generated-fixture"
-
-[<Literal>]
-let DefaultDbInstance = "main"
-
-[<Literal>]
-let SchemaHash = "0123456789abcdef"
-
-let SchemaIdentity: SchemaIdentity =
-  { schemaHash = SchemaHash
-    schemaCommit = Some "generated-fixture-commit" }
 
 let Schema: SqlFile =
   { measureTypes = []
@@ -42,3 +30,9 @@ let Schema: SqlFile =
           upsertAnnotations = [] } ]
     indexes = []
     triggers = [] }
+
+let GeneratedSchema: ResolvedGeneratedSchemaModule =
+  { schema = Schema
+    schemaHash = "0123456789abcdef"
+    dbApp = "generated-fixture"
+    defaultDbInstance = "main" }

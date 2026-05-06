@@ -4,74 +4,56 @@ open System
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 open MigLib.Schema.Types
+open MigLib.Types
 open MigLib.Codegen.Helpers
 open MigLib.Db
 
-[<Literal>]
-let DbApp = "ExampleApp"
-
-[<Literal>]
-let DefaultDbInstance = "main"
-
-[<Literal>]
-let SchemaHash = "a1b718d52621c7ac"
-
-let SchemaIdentity: SchemaIdentity =
-  { schemaHash = SchemaHash
-    schemaCommit = None }
-
-let DbFileForInstance (instance: string option) =
-  let resolvedInstance =
-    match instance with
-    | Some value when not (String.IsNullOrWhiteSpace value) -> value.Trim()
-    | _ -> DefaultDbInstance
-
-  $"{DbApp}-{resolvedInstance}-{SchemaHash}.sqlite"
-
-let DbFile = DbFileForInstance None
-
-let Schema: SqlFile =
-  { measureTypes = []
-    inserts = []
-    views = []
-    tables =
-      [ { name = "student"
-          previousName = None
-          dropColumns = []
-          columns =
-            [ { name = "id"
-                previousName = None
-                columnType = SqlType.SqlInteger
-                constraints =
-                  [ ColumnConstraint.NotNull
-                    ColumnConstraint.PrimaryKey
-                      { constraintName = None
-                        columns = []
-                        isAutoincrement = true } ]
-                enumLikeDu = None
-                unitOfMeasure = None }
-              { name = "name"
-                previousName = None
-                columnType = SqlType.SqlText
-                constraints = [ ColumnConstraint.NotNull; ColumnConstraint.Unique [] ]
-                enumLikeDu = None
-                unitOfMeasure = None }
-              { name = "age"
-                previousName = None
-                columnType = SqlType.SqlInteger
-                constraints = [ ColumnConstraint.NotNull; ColumnConstraint.Default(Expr.Integer 18) ]
-                enumLikeDu = None
-                unitOfMeasure = None } ]
-          constraints = []
-          queryByAnnotations = [ { columns = [ "name" ] } ]
-          queryLikeAnnotations = [ { columns = [ "name" ] } ]
-          queryByOrCreateAnnotations = [ { columns = [ "name" ] } ]
-          selectOneAnnotations = [ SelectOneAnnotation ]
-          insertOrIgnoreAnnotations = [ InsertOrIgnoreAnnotation ]
-          deleteAllAnnotations = [ DeleteAllAnnotation ]
-          upsertAnnotations = [ UpsertAnnotation ] } ]
-    indexes = []
-    triggers = [] }
+let GeneratedSchema: ResolvedGeneratedSchemaModule =
+  { schema =
+      { measureTypes = []
+        inserts = []
+        views = []
+        tables =
+          [ { name = "student"
+              previousName = None
+              dropColumns = []
+              columns =
+                [ { name = "id"
+                    previousName = None
+                    columnType = SqlType.SqlInteger
+                    constraints =
+                      [ ColumnConstraint.NotNull
+                        ColumnConstraint.PrimaryKey
+                          { constraintName = None
+                            columns = []
+                            isAutoincrement = true } ]
+                    enumLikeDu = None
+                    unitOfMeasure = None }
+                  { name = "name"
+                    previousName = None
+                    columnType = SqlType.SqlText
+                    constraints = [ ColumnConstraint.NotNull; ColumnConstraint.Unique [] ]
+                    enumLikeDu = None
+                    unitOfMeasure = None }
+                  { name = "age"
+                    previousName = None
+                    columnType = SqlType.SqlInteger
+                    constraints = [ ColumnConstraint.NotNull; ColumnConstraint.Default(Expr.Integer 18) ]
+                    enumLikeDu = None
+                    unitOfMeasure = None } ]
+              constraints = []
+              queryByAnnotations = [ { columns = [ "name" ] } ]
+              queryLikeAnnotations = [ { columns = [ "name" ] } ]
+              queryByOrCreateAnnotations = [ { columns = [ "name" ] } ]
+              selectOneAnnotations = [ SelectOneAnnotation ]
+              insertOrIgnoreAnnotations = [ InsertOrIgnoreAnnotation ]
+              deleteAllAnnotations = [ DeleteAllAnnotation ]
+              upsertAnnotations = [ UpsertAnnotation ] } ]
+        indexes = []
+        triggers = [] }
+    schemaHash = "a1b718d52621c7ac"
+    dbApp = "ExampleApp"
+    defaultDbInstance = "main" }
 
 type Student = { Id: int64; Name: string; Age: int64 }
 
