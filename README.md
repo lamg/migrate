@@ -65,18 +65,10 @@ For library usage:
 
 ## Local Tool Build
 
-Build, pack, and install the current branch as a global `mig` tool from the local package output:
+Build and install the current branch as a global `mig` tool from the local package output:
 
 ```sh
-dotnet fsi build.fsx
-```
-
-Useful targets:
-
-```sh
-dotnet fsi build.fsx -- --target Build
-dotnet fsi build.fsx -- --target packTool
-dotnet fsi build.fsx -- --target InstallTool
+dotnet fsi build.fsx install
 ```
 
 ## Quickstart: Init
