@@ -49,8 +49,8 @@ let studentOperations (db: DbTxnBuilder) : Task<Result<unit, MigError>> =
 let main _ =
   let result =
     taskResult {
-      let! proj = DbProject.Project.resolveFromGeneratedSchema __SOURCE_DIRECTORY__ None Db.GeneratedSchema
-      let! migRes = DbProject.Project.migrate proj
+      let! proj = MigProject.Mig.resolveFromGeneratedSchema __SOURCE_DIRECTORY__ None Db.GeneratedSchema
+      let! migRes = MigProject.Mig.migrate proj
       do! studentOperations migRes.db
       return ()
     }

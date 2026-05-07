@@ -78,7 +78,7 @@
     <Compile Include="Plan/Reporting.fs" />
     <Compile Include="Status/Execution.fs" />
     <Compile Include="Reset/Execution.fs" />
-    <Compile Include="DbProject.fs" />
+    <Compile Include="MigProject.fs" />
     <Content Include="../../README.md" Pack="true" PackagePath="\" />
     <Content Include="../../images/logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>

@@ -2,7 +2,7 @@
 /// project-level workflow functions for discovering or resolving a database
 /// project, generating code, initializing databases, planning migrations,
 /// migrating, checking status, and resetting from archives.
-module MigLib.DbProject
+module MigLib.MigProject
 
 open System.Threading.Tasks
 open MigLib.TaskResult
@@ -58,9 +58,9 @@ let result = TaskResult.result
 /// <c>Task&lt;Result&lt;_, _&gt;&gt;</c> workflows.
 let taskResult = TaskResult.taskResult
 
-/// Project-level workflows for code generation, initialization, migration,
-/// status, and reset operations.
-module Project =
+/// CLI-shaped workflows for code generation, initialization, migration, status,
+/// and reset operations.
+module Mig =
   /// Generates typed schema and query source files for the database project at
   /// <paramref name="projectDir"/>.
   let codegen (projectDir: string) : Result<CodegenResult, MigError> = Codegen.Execution.codegen projectDir

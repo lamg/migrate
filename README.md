@@ -104,11 +104,11 @@ Generated helpers execute inside `dbTxn` or `txn` transaction workflows.
 ```fsharp
 open System.IO
 open MigLib
-open MigLib.DbProject
+open MigLib.MigProject
 open MyApp.Db
 
 let project =
-  DbProject.Project.resolveFromGeneratedSchema dataDirectory None GeneratedSchema
+  MigProject.Mig.resolveFromGeneratedSchema dataDirectory None GeneratedSchema
   |> fun task -> task.Result
   |> Result.defaultWith (fun error -> failwithf "%A" error)
 

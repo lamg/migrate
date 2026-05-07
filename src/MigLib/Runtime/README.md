@@ -2,7 +2,7 @@
 
 This directory contains runtime support modules used by generated code, transaction helpers, and migration workflows.
 
-Most public consumers should use `MigLib.DbProject` instead of opening these modules directly. Generated code opens `MigLib.Runtime` and uses the runtime modules primarily through:
+Most public consumers should use `MigLib.MigProject` instead of opening these modules directly. Generated code opens `MigLib.Runtime` and uses the runtime modules primarily through:
 
 - `MigLib.Runtime.TxnStep`
 - `MigLib.Runtime.Recording`
@@ -25,7 +25,7 @@ Most public consumers should use `MigLib.DbProject` instead of opening these mod
 ### TxnStep
 
 - `TxnStep`
-- transaction execution internals used by `MigLib.DbProject` public builders
+- transaction execution internals used by `MigLib.MigProject` public builders
 
 ## Dependency Direction
 
