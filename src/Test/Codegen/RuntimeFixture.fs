@@ -6,7 +6,7 @@ open Microsoft.Data.Sqlite
 open MigLib.Schema.Types
 open MigLib.Types
 open MigLib.Codegen.Helpers
-open MigLib.Db
+open MigLib.Runtime
 
 type Marker = class end
 

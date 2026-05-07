@@ -6,7 +6,7 @@ open System.Reflection
 
 open MigLib.Types
 open MigLib.Schema.Types
-open MigLib.Db.Attributes
+open MigLib.Dsl.Attributes
 open MigLib.TaskResult
 
 open MigLib.Resolution.SchemaReflection.Naming

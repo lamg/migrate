@@ -73,7 +73,7 @@ module internal ProgramCommon =
       let! targetDirectory = resolveCliDirectory candidateDirectory
 
       return!
-        DbProject.discoverProject targetDirectory instance targetDirectory
+        DbProject.Project.discover targetDirectory instance targetDirectory
         |> fun task -> task.Result
         |> Result.mapError formatMigError
     }

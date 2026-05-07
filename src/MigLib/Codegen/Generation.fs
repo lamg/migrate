@@ -291,7 +291,7 @@ let private generateCode
         yield "open MigLib.Schema.Types"
         yield "open MigLib.Types"
         yield "open MigLib.Codegen.Helpers"
-        yield "open MigLib.Db"
+        yield "open MigLib.Runtime"
         yield ""
         match dbApp, schemaHash with
         | Some appName, Some hash ->

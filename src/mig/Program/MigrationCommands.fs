@@ -22,7 +22,7 @@ module internal ProgramMigrationCommands =
         let! project = resolveCliProject (args.TryGetResult MigrateArgs.Dir) (args.TryGetResult MigrateArgs.Instance)
 
         let! migrateResult =
-          DbProject.migrate reportProgress project
+          DbProject.Project.migrate reportProgress project
           |> fun task -> task.Result
           |> Result.mapError formatMigError
 
@@ -46,7 +46,7 @@ module internal ProgramMigrationCommands =
         let! project = resolveCliProject (args.TryGetResult PlanArgs.Dir) (args.TryGetResult PlanArgs.Instance)
 
         let! planResult =
-          DbProject.plan project
+          DbProject.Project.plan project
           |> (fun task -> task.Result)
           |> Result.mapError formatMigError
 
@@ -73,7 +73,7 @@ module internal ProgramMigrationCommands =
         let! project = resolveCliProject (args.TryGetResult ResetArgs.Dir) (args.TryGetResult ResetArgs.Instance)
 
         let! resetResult =
-          DbProject.reset project
+          DbProject.Project.reset project
           |> (fun task -> task.Result)
           |> Result.mapError formatMigError
 
@@ -98,7 +98,7 @@ module internal ProgramMigrationCommands =
         let! project = resolveCliProject (args.TryGetResult StatusArgs.Dir) (args.TryGetResult StatusArgs.Instance)
 
         let! statusResult =
-          DbProject.status project
+          DbProject.Project.status project
           |> (fun task -> task.Result)
           |> Result.mapError formatMigError
 

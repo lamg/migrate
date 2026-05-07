@@ -31,9 +31,9 @@ It is designed for ASP.NET Core services that already use MigLib's `TxnStep`, ge
 | `ResponseEffect<'custom>` | Deferred response step: status, headers, body, JSON, redirect, cookies, or a custom effect |
 | `WebRuntime<'env, 'appError, 'custom>` | Runtime environment, default JSON options, and custom-effect interpreter |
 | `IClock` | Injectable time source for request logic |
-| `IHasDbRuntime` | Environment contract from `MigLib.Db.Transactions` required by `run` and `runSimple` |
+| `IHasDbRuntime` | Environment contract from `MigLib.DbProject` required by `run` and `runSimple` |
 
-`MigLib.Db.Transactions` exposes `DbRuntime.RunInTransaction` so `webResult` can reuse the same transaction machinery as `dbTxn` while mapping database failures into `WebError.DbError`.
+`MigLib.DbProject` exposes `DbRuntime.RunInTransaction` so `webResult` can reuse the same transaction machinery as `dbTxn` while mapping database failures into `WebError.DbError`.
 
 ## Execution model
 
@@ -188,7 +188,7 @@ Execution:
 open System
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
-open MigLib.Db.Transactions
+open MigLib.DbProject
 open MigLib.Web
 
 type Env =

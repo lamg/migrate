@@ -4,7 +4,7 @@ open System.Threading.Tasks
 
 open Microsoft.Data.Sqlite
 
-open MigLib.Db
+open MigLib.Runtime
 
 let querySingle
   (sql: string)

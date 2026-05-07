@@ -23,10 +23,10 @@
     <Compile Include="Sqlite.fs" />
     <Compile Include="TaskResult.fs" />
     <Compile Include="Schema/Types.fs" />
-    <Compile Include="Db/Attributes.fs" />
-    <Compile Include="Db/Core.fs" />
-    <Compile Include="Db/Recording.fs" />
-    <Compile Include="Db/TxnStep.fs" />
+    <Compile Include="Dsl/Attributes.fs" />
+    <Compile Include="Runtime/Core.fs" />
+    <Compile Include="Runtime/Recording.fs" />
+    <Compile Include="Runtime/TxnStep.fs" />
     <Compile Include="Types.fs" />
 
     <Compile Include="Resolution/SchemaReflection/Types.fs" />

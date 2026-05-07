@@ -81,7 +81,7 @@ let ``runCodegen writes Db fs with metadata types and CRUD helpers`` () =
 
       Assert.Contains("module RuntimeRoot.Db", generated)
       Assert.Contains("open MigLib.Codegen.Helpers", generated)
-      Assert.Contains("open MigLib.Db", generated)
+      Assert.Contains("open MigLib.Runtime", generated)
       Assert.Contains("let GeneratedSchema", generated)
       Assert.Contains("dbApp = \"RuntimeRoot\"", generated)
       Assert.Contains("defaultDbInstance = \"main\"", generated)

@@ -1,6 +1,6 @@
 module SchemaReflectionFixture
 
-open MigLib.Db.Attributes
+open MigLib.Dsl.Attributes
 
 [<Measure>]
 type Byte

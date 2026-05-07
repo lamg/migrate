@@ -4,7 +4,7 @@ open System
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 open MigLib.Schema.Types
-open MigLib.Db.TxnStep
+open MigLib.Runtime.TxnStep
 
 type ResolvedGeneratedSchemaModule =
   { schema: SqlFile

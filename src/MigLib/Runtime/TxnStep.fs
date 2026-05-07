@@ -1,4 +1,4 @@
-module MigLib.Db.TxnStep
+module MigLib.Runtime.TxnStep
 
 open System
 open System.Threading.Tasks
@@ -87,27 +87,27 @@ let internal runTransactionInternal
   (body: SqliteTransaction -> Task<Result<'a, 'e>>)
   : Task<Result<'a, 'e>> =
   task {
-    match Db.Core.resolveDatabasePath dbPath with
+    match Core.resolveDatabasePath dbPath with
     | Error message -> return Error(mapDbError (SqliteException(message, 0)))
     | Ok resolvedDbPath ->
-      use connection = Db.Core.openSqliteConnection resolvedDbPath
+      use connection = Core.openSqliteConnection resolvedDbPath
       use transaction = connection.BeginTransaction()
-      let! readinessResult = Db.Recording.ensureNewDatabaseReadyForTransactions transaction
+      let! readinessResult = Recording.ensureNewDatabaseReadyForTransactions transaction
 
       match readinessResult with
       | Error ex ->
         transaction.Rollback()
         return Error(mapDbError ex)
       | Ok() ->
-        let! mode = Db.Recording.detectMigrationMode transaction
+        let! mode = Recording.detectMigrationMode transaction
 
         let context =
-          { Db.Core.TxnContext.tx = transaction
-            Db.Core.TxnContext.mode = mode
-            Db.Core.TxnContext.writes = ResizeArray() }
+          { Core.TxnContext.tx = transaction
+            Core.TxnContext.mode = mode
+            Core.TxnContext.writes = ResizeArray() }
 
-        let previousContext = Db.Core.txnContext.Value
-        Db.Core.txnContext.Value <- Some context
+        let previousContext = Core.txnContext.Value
+        Core.txnContext.Value <- Some context
 
         try
           try
@@ -115,7 +115,7 @@ let internal runTransactionInternal
 
             match result with
             | Ok value ->
-              let! flushResult = Db.Recording.flushRecordedWrites context
+              let! flushResult = Recording.flushRecordedWrites context
 
               match flushResult with
               | Ok() ->
@@ -131,5 +131,5 @@ let internal runTransactionInternal
             transaction.Rollback()
             return Error(mapDbError ex)
         finally
-          Db.Core.txnContext.Value <- previousContext
+          Core.txnContext.Value <- previousContext
   }

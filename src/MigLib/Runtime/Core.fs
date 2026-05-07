@@ -1,4 +1,4 @@
-module internal MigLib.Db.Core
+module internal MigLib.Runtime.Core
 
 open System
 open System.Globalization

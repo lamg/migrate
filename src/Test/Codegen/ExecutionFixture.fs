@@ -1,6 +1,6 @@
 module TestCodegenSchema.MigSchema
 
-open MigLib.Db.Attributes
+open MigLib.Dsl.Attributes
 
 type Marker = class end
 

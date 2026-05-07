@@ -1,6 +1,6 @@
 module ExampleSchema.MigSchema
 
-open MigLib.Db.Attributes
+open MigLib.Dsl.Attributes
 
 [<AutoIncPK "id">]
 [<Unique "name">]
