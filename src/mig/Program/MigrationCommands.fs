@@ -22,7 +22,7 @@ module internal ProgramMigrationCommands =
         let! project = resolveCliProject (args.TryGetResult MigrateArgs.Dir) (args.TryGetResult MigrateArgs.Instance)
 
         let! migrateResult =
-          MigLib.migrate reportProgress project
+          DbProject.migrate reportProgress project
           |> fun task -> task.Result
           |> Result.mapError formatMigError
 
@@ -46,8 +46,8 @@ module internal ProgramMigrationCommands =
         let! project = resolveCliProject (args.TryGetResult PlanArgs.Dir) (args.TryGetResult PlanArgs.Instance)
 
         let! planResult =
-          MigLib.plan project
-          |> fun task -> task.Result
+          DbProject.plan project
+          |> (fun task -> task.Result)
           |> Result.mapError formatMigError
 
         printfn "Migration plan."
@@ -73,8 +73,8 @@ module internal ProgramMigrationCommands =
         let! project = resolveCliProject (args.TryGetResult ResetArgs.Dir) (args.TryGetResult ResetArgs.Instance)
 
         let! resetResult =
-          MigLib.reset project
-          |> fun task -> task.Result
+          DbProject.reset project
+          |> (fun task -> task.Result)
           |> Result.mapError formatMigError
 
         printfn "Reset complete."
@@ -98,8 +98,8 @@ module internal ProgramMigrationCommands =
         let! project = resolveCliProject (args.TryGetResult StatusArgs.Dir) (args.TryGetResult StatusArgs.Instance)
 
         let! statusResult =
-          MigLib.status project
-          |> fun task -> task.Result
+          DbProject.status project
+          |> (fun task -> task.Result)
           |> Result.mapError formatMigError
 
         match statusResult.currentDbPath with

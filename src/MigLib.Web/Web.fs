@@ -11,7 +11,8 @@ open System.Threading.Tasks
 open Microsoft.AspNetCore.Http
 open Microsoft.Data.Sqlite
 
-open MigLib.Db.Transactions
+open MigLib.Types
+open MigLib.Db.TxnStep
 
 type IClock =
   abstract UtcNow: unit -> DateTimeOffset

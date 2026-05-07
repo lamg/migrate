@@ -3,7 +3,7 @@ module Test.Codegen.RuntimeTests
 open System
 open System.IO
 open Microsoft.Data.Sqlite
-open MigLib.Db.Transactions
+open MigLib.Types
 open Xunit
 
 let private createTempDir name =
@@ -63,7 +63,7 @@ let ``generated CRUD helper style works against sqlite`` () =
       |> fun task -> task.Result
 
     match result with
-    | Error ex -> failwith $"Expected generated CRUD flow to succeed, got: {ex.Message}"
+    | Error ex -> failwith $"Expected generated CRUD flow to succeed, got: {ex}"
     | Ok(insertedId, insertedAgain, byId, byName, byLike, first, reused, created, afterUpsert, remaining) ->
       Assert.Equal(None, insertedAgain)
       Assert.Equal(Some insertedId, byId |> Option.map _.Id)

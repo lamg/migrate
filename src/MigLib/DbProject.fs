@@ -1,5 +1,4 @@
-[<AutoOpen>]
-module MigLib.MigLib
+module MigLib.DbProject
 
 open System.Threading.Tasks
 open MigLib.Db

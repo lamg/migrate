@@ -3,13 +3,13 @@ module internal MigLib.Migrate.Execution
 open System
 open System.Threading.Tasks
 
+open MigLib.Types
+open MigLib.TaskResult
+
 open MigLib.Migrate.Archive
 open MigLib.Migrate.DataCopy
 open MigLib.Migrate.Discovery
 open MigLib.Migrate.Planning
-open MigLib.Types
-open MigLib.Db.Transactions
-open MigLib.TaskResult
 
 let private formatUnsupportedDifferences (differences: string list) =
   let details =

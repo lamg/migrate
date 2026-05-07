@@ -19,14 +19,16 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
+
     <Compile Include="Sqlite.fs" />
     <Compile Include="TaskResult.fs" />
+    <Compile Include="Schema/Types.fs" />
     <Compile Include="Db/Attributes.fs" />
     <Compile Include="Db/Core.fs" />
     <Compile Include="Db/Recording.fs" />
-    <Compile Include="Db/Transactions.fs" />
-    <Compile Include="Schema/Types.fs" />
+    <Compile Include="Db/TxnStep.fs" />
     <Compile Include="Types.fs" />
+
     <Compile Include="Resolution/SchemaReflection/Types.fs" />
     <Compile Include="Resolution/SchemaReflection/NamingAndTypeMapping.fs" />
     <Compile Include="Resolution/SchemaReflection/AttributeReaders.fs" />
@@ -76,7 +78,7 @@
     <Compile Include="Plan/Reporting.fs" />
     <Compile Include="Status/Execution.fs" />
     <Compile Include="Reset/Execution.fs" />
-    <Compile Include="MigLib.fs" />
+    <Compile Include="DbProject.fs" />
     <Content Include="../../README.md" Pack="true" PackagePath="\" />
     <Content Include="../../images/logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>

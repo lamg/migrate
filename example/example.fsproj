@@ -15,4 +15,8 @@
     <ProjectReference Include="../src/MigLib/MigLib.fsproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+  </ItemGroup>
+
 </Project>

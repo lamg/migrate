@@ -46,7 +46,7 @@ let ensureNewDatabaseReadyForTransactions (tx: SqliteTransaction) : Task<Result<
         )
   }
 
-let detectMigrationMode (tx: SqliteTransaction) : Task<Db.Core.MigrationMode> =
+let internal detectMigrationMode (tx: SqliteTransaction) : Task<Db.Core.MigrationMode> =
   task {
     let! markerExists = Db.Core.tableExists tx "_migration_marker"
 
@@ -67,7 +67,7 @@ let detectMigrationMode (tx: SqliteTransaction) : Task<Db.Core.MigrationMode> =
         | _ -> return Db.Core.Normal
   }
 
-let flushRecordedWrites (context: Db.Core.TxnContext) : Task<Result<unit, SqliteException>> =
+let internal flushRecordedWrites (context: Db.Core.TxnContext) : Task<Result<unit, SqliteException>> =
   task {
     try
       match context.mode with

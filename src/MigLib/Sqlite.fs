@@ -1,4 +1,4 @@
-module MigLib.Sqlite
+module internal MigLib.Sqlite
 
 open Microsoft.Data.Sqlite
 

@@ -3,6 +3,7 @@ namespace Mig
 open System
 open System.IO
 open MigLib
+open MigLib.Types
 open MigLib.TaskResult
 open ProgramArgs
 
@@ -72,7 +73,7 @@ module internal ProgramCommon =
       let! targetDirectory = resolveCliDirectory candidateDirectory
 
       return!
-        MigLib.discoverProject targetDirectory instance targetDirectory
+        DbProject.discoverProject targetDirectory instance targetDirectory
         |> fun task -> task.Result
         |> Result.mapError formatMigError
     }
