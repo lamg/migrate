@@ -62,7 +62,7 @@ let private deleteIfExists path =
 Target.create clean (fun _ ->
   deleteIfExists generatedDbPath
 
-  Directory.GetFiles(rootDir, $"{exampleDbPrefix}-*.sqlite")
+  Directory.GetFiles(rootDir, $"{exampleDbPrefix}-*.sqlite*")
   |> Seq.iter deleteIfExists
 
   [ Path.Combine(rootDir, "bin")
@@ -86,6 +86,8 @@ Target.create init (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPat
 
 Target.create run (fun _ -> runDotNetCommand "run" $"--project \"{exampleProjectPath}\" --no-build")
 
-clean ==> restore ==> buildSchema ==> codegen ==> buildExample ==> init ==> run
+clean ==> restore ==> buildSchema ==> codegen ==> buildExample ==> run
+
+clean ==> restore ==> buildSchema ==> codegen ==> init
 
 Target.runOrDefault target

@@ -16,6 +16,12 @@ let printStudents (label: string) (students: Db.Student list) =
   students
   |> List.iter (fun student -> printfn $"  id={student.Id} name={student.Name} age={student.Age}")
 
+let reportProgress (message: string) =
+  task {
+    printfn $"{message}"
+    return ()
+  }
+
 let studentOperations (db: DbTxnBuilder) : Task<Result<unit, MigError>> =
   db {
     let! existingStudents = Db.Student.SelectAll
@@ -38,7 +44,7 @@ let studentOperations (db: DbTxnBuilder) : Task<Result<unit, MigError>> =
     printStudents "Rows returned by generated Student.SelectByName \"Carol\":" carol
     printStudents "Rows returned by generated Student.SelectNameLike \"ar\":" fuzzyMatch
 
-    printfn "SelectByNameOrInsert returned: id={ensuredStudent.Id} name={ensuredStudent.Name} age={ensuredStudent.Age}"
+    printfn $"SelectByNameOrInsert returned: id={ensuredStudent.Id} name={ensuredStudent.Name} age={ensuredStudent.Age}"
 
     printStudents "All students after generated CRUD operations:" allStudents
     return ()
@@ -50,7 +56,7 @@ let main _ =
   let result =
     taskResult {
       let! proj = MigProject.Mig.resolveFromGeneratedSchema __SOURCE_DIRECTORY__ None Db.GeneratedSchema
-      let! migRes = MigProject.Mig.migrate proj
+      let! migRes = MigProject.Mig.migrate reportProgress proj
       do! studentOperations migRes.db
       return ()
     }
