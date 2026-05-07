@@ -288,10 +288,7 @@ let private generateCode
         yield "open System"
         yield "open System.Threading.Tasks"
         yield "open Microsoft.Data.Sqlite"
-        yield "open MigLib.Schema.Types"
-        yield "open MigLib.Types"
-        yield "open MigLib.Codegen.Helpers"
-        yield "open MigLib.Runtime"
+        yield "open MigLib.Generated"
         yield ""
         match dbApp, schemaHash with
         | Some appName, Some hash ->

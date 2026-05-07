@@ -64,6 +64,7 @@
     <Compile Include="Codegen/QueryGenerator/ViewGenerate.fs" />
     <Compile Include="Codegen/QueryGenerator.fs" />
     <Compile Include="Codegen/Helpers.fs" />
+    <Compile Include="Generated.fs" />
     <Compile Include="Codegen/Generation.fs" />
     <Compile Include="Codegen/Inputs.fs" />
     <Compile Include="Codegen/Execution.fs" />

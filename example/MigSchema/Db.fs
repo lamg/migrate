@@ -3,10 +3,7 @@ module ExampleApp.Db
 open System
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
-open MigLib.Schema.Types
-open MigLib.Types
-open MigLib.Codegen.Helpers
-open MigLib.Runtime
+open MigLib.Generated
 
 let GeneratedSchema: ResolvedGeneratedSchemaModule =
   { schema =

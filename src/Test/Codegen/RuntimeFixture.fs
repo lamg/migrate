@@ -3,10 +3,7 @@ module TestCodegenRuntime.Db
 open System
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
-open MigLib.Schema.Types
-open MigLib.Types
-open MigLib.Codegen.Helpers
-open MigLib.Runtime
+open MigLib.Generated
 
 type Marker = class end
 
@@ -21,10 +18,10 @@ let Schema: SqlFile =
           columns =
             [ { name = "id"
                 previousName = None
-                columnType = SqlInteger
+                columnType = SqlType.SqlInteger
                 constraints =
-                  [ NotNull
-                    PrimaryKey
+                  [ ColumnConstraint.NotNull
+                    ColumnConstraint.PrimaryKey
                       { constraintName = None
                         columns = []
                         isAutoincrement = true } ]
@@ -32,14 +29,14 @@ let Schema: SqlFile =
                 unitOfMeasure = None }
               { name = "name"
                 previousName = None
-                columnType = SqlText
-                constraints = [ NotNull; Unique [] ]
+                columnType = SqlType.SqlText
+                constraints = [ ColumnConstraint.NotNull; ColumnConstraint.Unique [] ]
                 enumLikeDu = None
                 unitOfMeasure = None }
               { name = "age"
                 previousName = None
-                columnType = SqlInteger
-                constraints = [ NotNull; Default(Integer 18) ]
+                columnType = SqlType.SqlInteger
+                constraints = [ ColumnConstraint.NotNull; ColumnConstraint.Default(Expr.Integer 18) ]
                 enumLikeDu = None
                 unitOfMeasure = None } ]
           constraints = []
