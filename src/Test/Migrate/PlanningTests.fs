@@ -37,7 +37,7 @@ let private executeSql (connection: SqliteConnection) sql =
 let private runtimeProjectPath tempDir = Path.Combine(tempDir, "Runtime.fsproj")
 
 let private schemaProjectPath tempDir =
-  Path.Combine(tempDir, "MigSchema", "MigSchema.fsproj")
+  Path.Combine(tempDir, "DomainModeling", "DomainModeling.fsproj")
 
 let private runtimeAssemblyPath tempDir =
   let assemblyName =
@@ -53,9 +53,7 @@ let private writeProjectLayout tempDir =
     (runtimeProjectPath tempDir)
     $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>TestGenerated</RootNamespace><AssemblyName>{assemblyName}</AssemblyName></PropertyGroup></Project>"
 
-  writeFile
-    (schemaProjectPath tempDir)
-    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>TestGeneratedSchema</RootNamespace></PropertyGroup></Project>"
+  writeFile (schemaProjectPath tempDir) "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
 
   let targetAssemblyPath = runtimeAssemblyPath tempDir
   Directory.CreateDirectory(Path.GetDirectoryName targetAssemblyPath) |> ignore

@@ -71,7 +71,7 @@ module ProgramArgs =
       member this.Usage =
         match this with
         | Dir _ ->
-          "runtime project directory containing the runtime and MigSchema projects (default: current directory)"
+          "runtime project directory containing the runtime and DomainModeling projects (default: current directory)"
 
   type Command =
     | [<AltCommandLine("-v")>] Version
@@ -87,7 +87,7 @@ module ProgramArgs =
         match this with
         | Version -> "print mig version"
         | Init _ -> "initialize a schema-matched database from the runtime project convention"
-        | Codegen _ -> "generate Db.fs from the runtime project and MigSchema convention"
+        | Codegen _ -> "generate Db.fs from the runtime project and DomainModeling convention"
         | Migrate _ -> "create a new database, copy data, and archive the old database"
         | Plan _ -> "show a dry-run migration plan from the runtime project convention"
         | Reset _ -> "remove the current database and restore the latest archived database"

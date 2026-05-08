@@ -22,20 +22,20 @@ let private writeFile (path: string) (text: string) =
 
   File.WriteAllText(path, text)
 
-let private makeAssembly tempDir projectXml =
+let private makeAssembly tempDir assemblyPath =
   let runtimeProjectPath = Path.Combine(tempDir, "Runtime.fsproj")
-  let schemaDirectory = Path.Combine(tempDir, "MigSchema")
+  let domainModelingDirectory = Path.Combine(tempDir, "DomainModeling")
 
-  writeFile runtimeProjectPath projectXml
+  writeFile runtimeProjectPath "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
 
   { project =
       { runtimeProjectPath = runtimeProjectPath
         runtimeProjectDirectory = tempDir
         runtimeProjectName = "Runtime"
-        schemaProjectPath = Path.Combine(schemaDirectory, "MigSchema.fsproj")
-        schemaDirectory = schemaDirectory }
+        domainModelingProjectPath = Path.Combine(domainModelingDirectory, "DomainModeling.fsproj")
+        domainModelingDirectory = domainModelingDirectory }
     assemblyName = "Test"
-    assemblyPath = typeof<TestGenerated.Db.Marker>.Assembly.Location }
+    assemblyPath = assemblyPath }
 
 let private assertRegularErrorContains expectedText result =
   match result with
@@ -44,30 +44,16 @@ let private assertRegularErrorContains expectedText result =
   | Ok value -> failwith $"Expected error, got: {value}"
 
 [<Fact>]
-let ``resolveSchemaModuleName uses runtime project RootNamespace`` () =
+let ``resolveSchemaModuleName finds compiled module containing GeneratedSchema`` () =
   let tempDir = createTempDir "mig_resolve_generated_schema_module"
 
   try
     let assembly =
-      makeAssembly
-        tempDir
-        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>TestGenerated</RootNamespace></PropertyGroup></Project>"
+      makeAssembly tempDir typeof<TestGenerated.Db.Marker>.Assembly.Location
 
     match resolveSchemaModuleName assembly with
     | Ok moduleName -> Assert.Equal("TestGenerated.Db", moduleName)
     | Error error -> failwith $"Expected module name to resolve, got: {error}"
-  finally
-    Directory.Delete(tempDir, true)
-
-[<Fact>]
-let ``resolveSchemaModuleName fails when RootNamespace is absent`` () =
-  let tempDir = createTempDir "mig_resolve_generated_schema_missing_root_namespace"
-
-  try
-    let assembly = makeAssembly tempDir "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
-
-    resolveSchemaModuleName assembly
-    |> assertRegularErrorContains "must define <RootNamespace>"
   finally
     Directory.Delete(tempDir, true)
 
@@ -77,9 +63,7 @@ let ``resolveGeneratedSchema loads Schema from conventional Db module`` () =
 
   try
     let assembly =
-      makeAssembly
-        tempDir
-        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>TestGenerated</RootNamespace></PropertyGroup></Project>"
+      makeAssembly tempDir typeof<TestGenerated.Db.Marker>.Assembly.Location
 
     match resolveGeneratedSchema assembly with
     | Ok resolved ->
@@ -95,16 +79,13 @@ let ``resolveGeneratedSchema loads Schema from conventional Db module`` () =
     Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``resolveGeneratedSchema fails when conventional Db module is absent`` () =
+let ``resolveGeneratedSchema fails when generated Db module is absent`` () =
   let tempDir = createTempDir "mig_resolve_generated_schema_missing_module"
 
   try
-    let assembly =
-      makeAssembly
-        tempDir
-        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>MissingGenerated</RootNamespace></PropertyGroup></Project>"
+    let assembly = makeAssembly tempDir typeof<CodegenResult>.Assembly.Location
 
     resolveGeneratedSchema assembly
-    |> assertRegularErrorContains "Compiled module 'MissingGenerated.Db' was not found"
+    |> assertRegularErrorContains "Compiled generated Db module with static GeneratedSchema was not found"
   finally
     Directory.Delete(tempDir, true)

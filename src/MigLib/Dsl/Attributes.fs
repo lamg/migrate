@@ -6,6 +6,11 @@ open System
 let Rfc3339UtcNow = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now', 'utc')"
 
 [<AttributeUsage(AttributeTargets.Class)>]
+type GeneratedDbNamespaceAttribute(namespaceName: string) =
+  inherit Attribute()
+  member _.NamespaceName = namespaceName
+
+[<AttributeUsage(AttributeTargets.Class)>]
 type AutoIncPKAttribute(column: string) =
   inherit Attribute()
   member _.Column = column

@@ -13,8 +13,8 @@ let private regularError message = Error(MigError.Regular message)
 let private isFsProjectPath (path: string) =
   String.Equals(Path.GetExtension path, ".fsproj", StringComparison.OrdinalIgnoreCase)
 
-let private schemaProjectPathFor (runtimeProjectDirectory: string) =
-  Path.Combine(runtimeProjectDirectory, "MigSchema", "MigSchema.fsproj")
+let private domainModelingProjectPathFor (runtimeProjectDirectory: string) =
+  Path.Combine(runtimeProjectDirectory, "DomainModeling", "DomainModeling.fsproj")
 
 let private resolveDatabaseInstance fallbackDbInstance dbInstance =
   if String.IsNullOrWhiteSpace dbInstance then
@@ -70,18 +70,18 @@ let resolveProjectLayout (runtimeProjectPath: string) : Result<ResolvedProjectLa
       regularError $"Runtime project file was not found: {fullProjectPath}"
     else
       let runtimeProjectDirectory = Path.GetDirectoryName fullProjectPath
-      let schemaProjectPath = schemaProjectPathFor runtimeProjectDirectory
-      let schemaDirectory = Path.GetDirectoryName schemaProjectPath
+      let domainModelingProjectPath = domainModelingProjectPathFor runtimeProjectDirectory
+      let domainModelingDirectory = Path.GetDirectoryName domainModelingProjectPath
 
-      if not (File.Exists schemaProjectPath) then
-        regularError $"Schema project file was not found: {schemaProjectPath}"
+      if not (File.Exists domainModelingProjectPath) then
+        regularError $"DomainModeling project file was not found: {domainModelingProjectPath}"
       else
         Ok
           { runtimeProjectPath = fullProjectPath
             runtimeProjectDirectory = runtimeProjectDirectory
             runtimeProjectName = Path.GetFileNameWithoutExtension fullProjectPath
-            schemaProjectPath = schemaProjectPath
-            schemaDirectory = schemaDirectory }
+            domainModelingProjectPath = domainModelingProjectPath
+            domainModelingDirectory = domainModelingDirectory }
 
 let discoverProjectLayout (projectDir: string) : Result<ResolvedProjectLayout, MigError> =
   if String.IsNullOrWhiteSpace projectDir then

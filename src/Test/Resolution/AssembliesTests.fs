@@ -24,19 +24,19 @@ let private writeFile (path: string) (text: string) =
 
 let private makeProject tempDir projectName =
   let projectPath = Path.Combine(tempDir, $"{projectName}.fsproj")
-  let schemaDirectory = Path.Combine(tempDir, "MigSchema")
+  let domainModelingDirectory = Path.Combine(tempDir, "DomainModeling")
 
   { runtimeProjectPath = projectPath
     runtimeProjectDirectory = tempDir
     runtimeProjectName = projectName
-    schemaProjectPath = Path.Combine(schemaDirectory, "MigSchema.fsproj")
-    schemaDirectory = schemaDirectory }
+    domainModelingProjectPath = Path.Combine(domainModelingDirectory, "DomainModeling.fsproj")
+    domainModelingDirectory = domainModelingDirectory }
 
 let private runtimeDllPath tempDir targetFramework assemblyName =
   Path.Combine(tempDir, "bin", "Debug", targetFramework, $"{assemblyName}.dll")
 
-let private schemaDllPath tempDir targetFramework assemblyName =
-  Path.Combine(tempDir, "MigSchema", "bin", "Debug", targetFramework, $"{assemblyName}.dll")
+let private domainModelingDllPath tempDir targetFramework assemblyName =
+  Path.Combine(tempDir, "DomainModeling", "bin", "Debug", targetFramework, $"{assemblyName}.dll")
 
 let private assertRegularErrorContains expectedText result =
   match result with
@@ -159,115 +159,119 @@ let ``resolveRuntimeAssembly trims project property values`` () =
     Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``resolveSchemaAssembly uses MigSchema project file name when AssemblyName is absent`` () =
-  let tempDir = createTempDir "mig_resolve_schema_assembly_default_name"
+let ``resolveDomainModelingAssembly uses DomainModeling project file name when AssemblyName is absent`` () =
+  let tempDir = createTempDir "mig_resolve_domain_modeling_assembly_default_name"
 
   try
     let project = makeProject tempDir "Runtime"
-    writeFile project.schemaProjectPath "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
+    writeFile project.domainModelingProjectPath "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
 
-    let expectedAssemblyPath = schemaDllPath tempDir "net10.0" "MigSchema"
+    let expectedAssemblyPath = domainModelingDllPath tempDir "net10.0" "DomainModeling"
     writeFile expectedAssemblyPath ""
 
-    match resolveSchemaAssembly project with
+    match resolveDomainModelingAssembly project with
     | Ok assembly ->
       Assert.Equal(project, assembly.project)
-      Assert.Equal("MigSchema", assembly.assemblyName)
+      Assert.Equal("DomainModeling", assembly.assemblyName)
       Assert.Equal(Path.GetFullPath expectedAssemblyPath, assembly.assemblyPath)
-    | Error error -> failwith $"Expected schema assembly to resolve, got: {error}"
+    | Error error -> failwith $"Expected DomainModeling assembly to resolve, got: {error}"
   finally
     Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``resolveSchemaAssembly uses AssemblyName when present`` () =
-  let tempDir = createTempDir "mig_resolve_schema_assembly_custom_name"
+let ``resolveDomainModelingAssembly uses AssemblyName when present`` () =
+  let tempDir = createTempDir "mig_resolve_domain_modeling_assembly_custom_name"
 
   try
     let project = makeProject tempDir "Runtime"
 
     writeFile
-      project.schemaProjectPath
-      "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><AssemblyName>Custom.Schema</AssemblyName></PropertyGroup></Project>"
+      project.domainModelingProjectPath
+      "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><AssemblyName>Custom.DomainModeling</AssemblyName></PropertyGroup></Project>"
 
-    let expectedAssemblyPath = schemaDllPath tempDir "net10.0" "Custom.Schema"
+    let expectedAssemblyPath =
+      domainModelingDllPath tempDir "net10.0" "Custom.DomainModeling"
+
     writeFile expectedAssemblyPath ""
 
-    match resolveSchemaAssembly project with
+    match resolveDomainModelingAssembly project with
     | Ok assembly ->
-      Assert.Equal("Custom.Schema", assembly.assemblyName)
+      Assert.Equal("Custom.DomainModeling", assembly.assemblyName)
       Assert.Equal(Path.GetFullPath expectedAssemblyPath, assembly.assemblyPath)
-    | Error error -> failwith $"Expected schema assembly to resolve, got: {error}"
+    | Error error -> failwith $"Expected DomainModeling assembly to resolve, got: {error}"
   finally
     Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``resolveSchemaAssembly uses TargetFramework when present`` () =
-  let tempDir = createTempDir "mig_resolve_schema_assembly_target_framework"
+let ``resolveDomainModelingAssembly uses TargetFramework when present`` () =
+  let tempDir = createTempDir "mig_resolve_domain_modeling_assembly_target_framework"
 
   try
     let project = makeProject tempDir "Runtime"
 
     writeFile
-      project.schemaProjectPath
+      project.domainModelingProjectPath
       "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup></Project>"
 
-    let expectedAssemblyPath = schemaDllPath tempDir "net9.0" "MigSchema"
+    let expectedAssemblyPath = domainModelingDllPath tempDir "net9.0" "DomainModeling"
     writeFile expectedAssemblyPath ""
 
-    match resolveSchemaAssembly project with
+    match resolveDomainModelingAssembly project with
     | Ok assembly ->
-      Assert.Equal("MigSchema", assembly.assemblyName)
+      Assert.Equal("DomainModeling", assembly.assemblyName)
       Assert.Equal(Path.GetFullPath expectedAssemblyPath, assembly.assemblyPath)
-    | Error error -> failwith $"Expected schema assembly to resolve, got: {error}"
+    | Error error -> failwith $"Expected DomainModeling assembly to resolve, got: {error}"
   finally
     Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``resolveSchemaAssembly returns regular error when project file is missing`` () =
-  let tempDir = createTempDir "mig_resolve_schema_assembly_missing_project"
+let ``resolveDomainModelingAssembly returns regular error when project file is missing`` () =
+  let tempDir = createTempDir "mig_resolve_domain_modeling_assembly_missing_project"
 
   try
     let project = makeProject tempDir "Runtime"
 
-    resolveSchemaAssembly project
-    |> assertRegularErrorContains "schema project file was not found"
+    resolveDomainModelingAssembly project
+    |> assertRegularErrorContains "DomainModeling project file was not found"
   finally
     Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``resolveSchemaAssembly returns regular error when build output is missing`` () =
-  let tempDir = createTempDir "mig_resolve_schema_assembly_missing_dll"
+let ``resolveDomainModelingAssembly returns regular error when build output is missing`` () =
+  let tempDir = createTempDir "mig_resolve_domain_modeling_assembly_missing_dll"
 
   try
     let project = makeProject tempDir "Runtime"
-    writeFile project.schemaProjectPath "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
+    writeFile project.domainModelingProjectPath "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
 
-    let result = resolveSchemaAssembly project
+    let result = resolveDomainModelingAssembly project
 
-    result |> assertRegularErrorContains "Could not resolve schema assembly"
+    result |> assertRegularErrorContains "Could not resolve DomainModeling assembly"
     result |> assertRegularErrorContains "Expected build output"
-    result |> assertRegularErrorContains "Build the schema project first"
+    result |> assertRegularErrorContains "Build the DomainModeling project first"
   finally
     Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``resolveSchemaAssembly trims project property values`` () =
-  let tempDir = createTempDir "mig_resolve_schema_assembly_trimmed_values"
+let ``resolveDomainModelingAssembly trims project property values`` () =
+  let tempDir = createTempDir "mig_resolve_domain_modeling_assembly_trimmed_values"
 
   try
     let project = makeProject tempDir "Runtime"
 
     writeFile
-      project.schemaProjectPath
-      "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><AssemblyName>  Custom.Schema  </AssemblyName><TargetFramework>  net9.0  </TargetFramework></PropertyGroup></Project>"
+      project.domainModelingProjectPath
+      "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><AssemblyName>  Custom.DomainModeling  </AssemblyName><TargetFramework>  net9.0  </TargetFramework></PropertyGroup></Project>"
 
-    let expectedAssemblyPath = schemaDllPath tempDir "net9.0" "Custom.Schema"
+    let expectedAssemblyPath =
+      domainModelingDllPath tempDir "net9.0" "Custom.DomainModeling"
+
     writeFile expectedAssemblyPath ""
 
-    match resolveSchemaAssembly project with
+    match resolveDomainModelingAssembly project with
     | Ok assembly ->
-      Assert.Equal("Custom.Schema", assembly.assemblyName)
+      Assert.Equal("Custom.DomainModeling", assembly.assemblyName)
       Assert.Equal(Path.GetFullPath expectedAssemblyPath, assembly.assemblyPath)
-    | Error error -> failwith $"Expected schema assembly to resolve, got: {error}"
+    | Error error -> failwith $"Expected DomainModeling assembly to resolve, got: {error}"
   finally
     Directory.Delete(tempDir, true)

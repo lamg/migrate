@@ -76,5 +76,5 @@ let resolveAssembly (projectPath: string) =
 let resolveRuntimeAssembly (project: ResolvedProjectLayout) =
   resolveProjectAssembly "runtime" "runtime" project.runtimeProjectPath project
 
-let resolveSchemaAssembly (project: ResolvedProjectLayout) =
-  resolveProjectAssembly "schema" "schema" project.schemaProjectPath project
+let resolveDomainModelingAssembly (project: ResolvedProjectLayout) =
+  resolveProjectAssembly "DomainModeling" "DomainModeling" project.domainModelingProjectPath project

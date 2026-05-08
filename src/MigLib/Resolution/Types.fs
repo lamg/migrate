@@ -7,8 +7,8 @@ type ResolvedProjectLayout =
   { runtimeProjectPath: string
     runtimeProjectDirectory: string
     runtimeProjectName: string
-    schemaProjectPath: string
-    schemaDirectory: string }
+    domainModelingProjectPath: string
+    domainModelingDirectory: string }
 
 type ResolvedAssembly =
   { project: ResolvedProjectLayout

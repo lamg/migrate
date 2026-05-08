@@ -26,10 +26,10 @@ let private writeFile (path: string) (text: string) =
 
 let private runtimeProjectPath tempDir = Path.Combine(tempDir, "Runtime.fsproj")
 
-let private schemaDirectory tempDir = Path.Combine(tempDir, "MigSchema")
+let private schemaDirectory tempDir = Path.Combine(tempDir, "DomainModeling")
 
 let private schemaProjectPath tempDir =
-  Path.Combine(schemaDirectory tempDir, "MigSchema.fsproj")
+  Path.Combine(schemaDirectory tempDir, "DomainModeling.fsproj")
 
 let private runtimeAssemblyPath tempDir =
   let assemblyName =
@@ -45,9 +45,7 @@ let private writeProjectLayout tempDir =
     (runtimeProjectPath tempDir)
     $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>TestGenerated</RootNamespace><AssemblyName>{assemblyName}</AssemblyName></PropertyGroup></Project>"
 
-  writeFile
-    (schemaProjectPath tempDir)
-    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>TestGeneratedSchema</RootNamespace></PropertyGroup></Project>"
+  writeFile (schemaProjectPath tempDir) "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
 
   let targetAssemblyPath = runtimeAssemblyPath tempDir
   Directory.CreateDirectory(Path.GetDirectoryName targetAssemblyPath) |> ignore

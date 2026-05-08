@@ -1,3 +1,4 @@
+[<MigLib.Dsl.Attributes.GeneratedDbNamespace("TestGeneratedDb")>]
 module TestCodegenSchema.MigSchema
 
 open MigLib.Dsl.Attributes

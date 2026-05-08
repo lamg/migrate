@@ -235,10 +235,10 @@ let private formatGeneratedCode (code: string) : Result<string, string> =
 
 let private generateCode
   (moduleName: string)
-  (dbApp: string option)
+  (dbApp: string)
   (schema: SqlFile)
   (outputFilePath: string)
-  (schemaHash: string option)
+  (schemaHash: string)
   : Result<CodegenStats, string> =
   result {
     do! validateModuleName moduleName
@@ -305,14 +305,11 @@ let private generateCode
         yield "open Microsoft.Data.Sqlite"
         yield "open MigLib.Generated"
         yield ""
-        match dbApp, schemaHash with
-        | Some appName, Some hash ->
-          yield "let GeneratedSchema: ResolvedGeneratedSchemaModule ="
-          yield $"  {{ schema = {renderSqlFile schema}"
-          yield $"    schemaHash = {renderStringLiteral hash}"
-          yield $"    dbApp = {renderStringLiteral appName}"
-          yield "    defaultDbInstance = \"main\" }"
-        | _ -> yield $"let Schema: SqlFile = {renderSqlFile schema}"
+        yield "let GeneratedSchema: ResolvedGeneratedSchemaModule ="
+        yield $"  {{ schema = {renderSqlFile schema}"
+        yield $"    schemaHash = {renderStringLiteral schemaHash}"
+        yield $"    dbApp = {renderStringLiteral dbApp}"
+        yield "    defaultDbInstance = \"main\" }"
         yield ""
         yield!
           schema.measureTypes
@@ -364,5 +361,5 @@ let generateCodeFromSchema
       return! Error "Database app name is empty."
 
     let! schemaHash = computeShortSchemaHash schemaSourcePath
-    return! generateCode moduleName (Some(dbApp.Trim())) schema outputPath (Some schemaHash)
+    return! generateCode moduleName (dbApp.Trim()) schema outputPath schemaHash
   }

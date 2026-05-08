@@ -11,7 +11,7 @@ This runbook describes the current blocking migration workflow.
 ## Preflight
 
 1. Confirm backups exist for the current SQLite file.
-2. Build the schema project.
+2. Build the domain modeling project.
 3. Run `mig codegen`.
 4. Build the runtime project so the compiled runtime assembly includes the generated module.
 5. Run `mig plan` and resolve any unsupported differences before migrating.
@@ -19,7 +19,7 @@ This runbook describes the current blocking migration workflow.
 Example:
 
 ```sh
-dotnet build ./my-app/MigSchema/MigSchema.fsproj
+dotnet build ./my-app/DomainModeling/DomainModeling.fsproj
 mig codegen -d ./my-app
 dotnet build ./my-app/my-app.fsproj
 mig plan -d ./my-app

@@ -65,7 +65,7 @@ module Mig =
   /// <paramref name="projectDir"/>.
   let codegen (projectDir: string) : Result<CodegenResult, MigError> = Codegen.Execution.codegen projectDir
 
-  /// Discovers a database project by reflecting over the schema source in
+  /// Discovers a database project by reflecting over the generated schema in
   /// <paramref name="projDir"/> and returns the resolved project configuration.
   /// Use this before code generation, or in any other situation where the
   /// compiled assembly containing a <see cref="Types.ResolvedGeneratedSchemaModule"/>

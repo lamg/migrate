@@ -9,6 +9,7 @@ open MigLib.Schema.Types
 open MigLib.Types
 open MigLib.Codegen.Generation
 open MigLib.Codegen.Inputs
+open MigLib.Dsl.Attributes
 open MigLib.Resolution.SchemaReflection
 open MigLib.TaskResult
 
@@ -56,6 +57,37 @@ let private tryFindModuleType (assembly: Assembly) (moduleName: string) =
     with
     | Some moduleType -> Ok moduleType
     | None -> Error $"Compiled schema module '{moduleName}' was not found in assembly '{assembly.FullName}'.")
+
+let private tryGetGeneratedDbNamespaceAttribute (candidate: Type) =
+  let attribute = candidate.GetCustomAttribute<GeneratedDbNamespaceAttribute>()
+
+  if isNull (box attribute) then None else Some attribute
+
+let private tryResolveAttributedSchemaModule (assembly: Assembly) =
+  result {
+    let! types = tryGetAssemblyTypes assembly
+
+    let candidates =
+      types
+      |> Array.choose (fun candidate ->
+        tryGetGeneratedDbNamespaceAttribute candidate
+        |> Option.map (fun attribute -> candidate, attribute.NamespaceName.Trim()))
+
+    match candidates with
+    | [| moduleType, generatedDbNamespace |] when String.IsNullOrWhiteSpace generatedDbNamespace ->
+      return! Error $"Compiled schema module '{moduleType.FullName}' has an empty GeneratedDbNamespace value."
+    | [| moduleType, generatedDbNamespace |] -> return moduleType.FullName, generatedDbNamespace
+    | [||] ->
+      return!
+        Error
+          $"Compiled DomainModeling assembly '{assembly.FullName}' does not contain a module marked with GeneratedDbNamespaceAttribute."
+    | many ->
+      let moduleList = many |> Array.map (fst >> _.FullName) |> String.concat ", "
+
+      return!
+        Error
+          $"Compiled DomainModeling assembly '{assembly.FullName}' contains multiple modules marked with GeneratedDbNamespaceAttribute: {moduleList}."
+  }
 
 let private tryGetStaticMemberValue (moduleType: Type) (memberName: string) =
   let propertyInfo = moduleType.GetProperty(memberName, staticBindingFlags)
@@ -114,12 +146,12 @@ type private CodegenLoadContext(mainAssemblyPath: string) as this =
 
 let private withAssemblyResolver assemblyPath work =
   if String.IsNullOrWhiteSpace assemblyPath then
-    Error "Compiled schema assembly path is empty."
+    Error "Compiled DomainModeling assembly path is empty."
   else
     let fullAssemblyPath = Path.GetFullPath assemblyPath
 
     if not (File.Exists fullAssemblyPath) then
-      Error $"Compiled schema assembly was not found: {fullAssemblyPath}"
+      Error $"Compiled DomainModeling assembly was not found: {fullAssemblyPath}"
     else
       let loadContext = new CodegenLoadContext(fullAssemblyPath)
 
@@ -129,37 +161,42 @@ let private withAssemblyResolver assemblyPath work =
         loadContext.Unload()
 
 let private loadSchema inputs =
-  withAssemblyResolver inputs.schemaAssembly.assemblyPath (fun fullAssemblyPath loadContext ->
+  withAssemblyResolver inputs.domainModelingAssembly.assemblyPath (fun fullAssemblyPath loadContext ->
     try
       let assembly = loadContext.LoadFromAssemblyPath fullAssemblyPath
 
       result {
-        let! moduleType = tryFindModuleType assembly inputs.schemaModuleName
+        let! schemaModuleName, generatedDbNamespace = tryResolveAttributedSchemaModule assembly
+        let! moduleType = tryFindModuleType assembly schemaModuleName
 
-        match Seed.buildSchemaFromAssemblyModule assembly inputs.schemaModuleName with
-        | Ok schema -> return schema
-        | Error(MigError.Regular reflectionError) when
-          reflectionError.StartsWith "No record or union schema types were found"
-          ->
-          return! tryReadRequiredStaticValue<SqlFile> moduleType "Schema"
-        | Error(MigError.Regular reflectionError) -> return! Error reflectionError
-        | Error(MigError.Sqlite ex) -> return! Error ex.Message
-        | Error(MigError.Other ex) -> return! Error ex.Message
+        let! schema =
+          match Seed.buildSchemaFromAssemblyModule assembly schemaModuleName with
+          | Ok schema -> Ok schema
+          | Error(MigError.Regular reflectionError) when
+            reflectionError.StartsWith "No record or union schema types were found"
+            ->
+            tryReadRequiredStaticValue<SqlFile> moduleType "Schema"
+          | Error(MigError.Regular reflectionError) -> Error reflectionError
+          | Error(MigError.Sqlite ex) -> Error ex.Message
+          | Error(MigError.Other ex) -> Error ex.Message
+
+        return schema, generatedDbNamespace
       }
     with ex ->
-      Error $"Could not load compiled schema assembly '{fullAssemblyPath}': {formatAssemblyLoadError ex}")
+      Error $"Could not load compiled DomainModeling assembly '{fullAssemblyPath}': {formatAssemblyLoadError ex}")
 
 let runCodegen (inputs: CodegenInputs) : Result<CodegenResult, MigError> =
   result {
-    let! schema = loadSchema inputs |> Result.mapError MigError.Regular
+    let! schema, generatedDbNamespace = loadSchema inputs |> Result.mapError MigError.Regular
+    let generatedModuleName = $"{generatedDbNamespace}.Db"
 
     let! stats =
-      generateCodeFromSchema inputs.generatedModuleName inputs.dbApp inputs.schemaSourcePath schema inputs.outputPath
+      generateCodeFromSchema generatedModuleName generatedDbNamespace inputs.schemaSourcePath schema inputs.outputPath
       |> Result.mapError MigError.Regular
 
     return
       { outputPath = Path.GetFullPath inputs.outputPath
-        generatedModuleName = inputs.generatedModuleName
+        generatedModuleName = generatedModuleName
         generatedFiles = stats.generatedFiles }
   }
 

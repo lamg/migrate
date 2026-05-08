@@ -7,7 +7,7 @@
 [![NuGet Downloads][nuget-downloads]][migtool]
 ![Tests][tests]
 
-Migrate is a SQLite-first migration toolchain built around a schema project, generated `Db.fs`, and compiled schema modules.
+Migrate is a SQLite-first migration toolchain built around a `DomainModeling` project, generated `Db.fs`, and compiled schema modules.
 It generates typed CRUD/query helpers from compiled schema definitions and provides blocking `init`, `plan`, `migrate`, `status`, and `reset` workflows for schema-bound SQLite files.
 
 ## Project Convention
@@ -15,15 +15,20 @@ It generates typed CRUD/query helpers from compiled schema definitions and provi
 The current convention is:
 
 1. Keep the runtime project in the working directory.
-2. Keep the schema project at `MigSchema/MigSchema.fsproj`.
-3. Keep the schema source at `MigSchema/MigSchema.fs`.
+2. Keep the domain modeling project at `DomainModeling/DomainModeling.fsproj`.
+3. Keep the schema source at `DomainModeling/MigSchema.fs`.
 4. Run `mig codegen` from the runtime project directory.
-5. Let `mig codegen` write `Db.fs` into the runtime project root.
+5. Let `mig codegen` write `Db.fs` into the domain modeling directory.
 6. Build the runtime project after code generation so the compiled runtime assembly contains the generated module.
 
-The runtime project must define `<RootNamespace>`. `mig codegen` uses it to generate the runtime module `<RootNamespace>.Db` and to derive the SQLite filename prefix.
+`MigSchema.fs` must mark the schema module with `GeneratedDbNamespace`:
 
-The schema project must also define `<RootNamespace>`. The compiled schema module is resolved as `<SchemaRootNamespace>.MigSchema`.
+```fsharp
+[<MigLib.Dsl.Attributes.GeneratedDbNamespace("MyApp")>]
+module MyApp.DomainModeling.MigSchema
+```
+
+`mig codegen` uses that attribute to generate `MyApp.Db` and derive the SQLite filename prefix.
 
 ## Generated Code
 
@@ -67,10 +72,10 @@ dotnet fsi build.fsx install
 
 ## Quickstart: Init
 
-Build the schema project, generate `Db.fs`, build the runtime project, and initialize the schema-bound database:
+Build the domain modeling project, generate `Db.fs`, build the runtime project, and initialize the schema-bound database:
 
 ```sh
-dotnet build ./my-app/MigSchema/MigSchema.fsproj
+dotnet build ./my-app/DomainModeling/DomainModeling.fsproj
 mig codegen -d ./my-app
 dotnet build ./my-app/my-app.fsproj
 mig init -d ./my-app
@@ -83,7 +88,7 @@ mig init -d ./my-app
 When a previous schema-bound SQLite file already exists for the same app/instance prefix, `mig migrate` creates the new target database, copies compatible data, and archives the old file into `archive/` next to the database directory.
 
 ```sh
-dotnet build ./my-app/MigSchema/MigSchema.fsproj
+dotnet build ./my-app/DomainModeling/DomainModeling.fsproj
 mig codegen -d ./my-app
 dotnet build ./my-app/my-app.fsproj
 mig plan -d ./my-app
@@ -127,8 +132,8 @@ let result =
 `example/` shows the full convention in a working project:
 
 - runtime project at `example/example.fsproj`
-- schema project at `example/MigSchema/MigSchema.fsproj`
-- generated `Db.fs` at `example/Db.fs`
+- domain modeling project at `example/DomainModeling/DomainModeling.fsproj`
+- generated `Db.fs` at `example/DomainModeling/Db.fs`
 - generated CRUD usage in `example/Program.fs`
 - scripted `init` and `migrate` flows in `example/build.fsx`
 
@@ -140,7 +145,7 @@ dotnet fsi example/build.fsx
 
 ## Commands
 
-- `mig codegen`: generate `Db.fs` from the compiled `MigSchema` module and schema source file
+- `mig codegen`: generate `Db.fs` from the compiled `DomainModeling` project and `MigSchema.fs` source file
 - `mig init`: create the current schema-bound database when it does not exist yet
 - `mig plan`: report inferred source/target paths plus supported and unsupported schema differences
 - `mig migrate`: create the target database, copy data, and archive the previous source database

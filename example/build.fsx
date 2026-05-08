@@ -14,11 +14,14 @@ if not (Context.isFakeContext ()) then
   Context.RuntimeContext.Fake executionContext |> Context.setExecutionContext
 
 let rootDir = Path.GetFullPath __SOURCE_DIRECTORY__
-let schemaDir = Path.Combine(rootDir, "MigSchema")
-let schemaProjectPath = Path.Combine(schemaDir, "MigSchema.fsproj")
+let domainModelingDir = Path.Combine(rootDir, "DomainModeling")
+
+let domainModelingProjectPath =
+  Path.Combine(domainModelingDir, "DomainModeling.fsproj")
+
 let exampleProjectPath = Path.Combine(rootDir, "example.fsproj")
 let migProjectPath = Path.Combine(rootDir, "..", "src", "mig", "mig.fsproj")
-let generatedDbPath = Path.Combine(schemaDir, "Db.fs")
+let generatedDbPath = Path.Combine(domainModelingDir, "Db.fs")
 let exampleDbPrefix = "ExampleApp-main"
 
 [<Literal>]
@@ -28,7 +31,7 @@ let clean = "clean"
 let restore = "restore"
 
 [<Literal>]
-let buildSchema = "build-schema"
+let buildDomainModeling = "build-domain-modeling"
 
 [<Literal>]
 let codegen = "codegen"
@@ -67,16 +70,16 @@ Target.create clean (fun _ ->
 
   [ Path.Combine(rootDir, "bin")
     Path.Combine(rootDir, "obj")
-    Path.Combine(schemaDir, "bin")
-    Path.Combine(schemaDir, "obj") ]
+    Path.Combine(domainModelingDir, "bin")
+    Path.Combine(domainModelingDir, "obj") ]
   |> Shell.cleanDirs)
 
 Target.create restore (fun _ ->
   runDotNetCommand "restore" $"\"{migProjectPath}\""
-  runDotNetCommand "restore" $"\"{schemaProjectPath}\""
+  runDotNetCommand "restore" $"\"{domainModelingProjectPath}\""
   runDotNetCommand "restore" $"\"{exampleProjectPath}\"")
 
-Target.create buildSchema (fun _ -> runDotNetCommand "build" $"\"{schemaProjectPath}\" --no-restore")
+Target.create buildDomainModeling (fun _ -> runDotNetCommand "build" $"\"{domainModelingProjectPath}\" --no-restore")
 
 Target.create codegen (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPath}\" -- codegen -d \"{rootDir}\"")
 
@@ -86,8 +89,8 @@ Target.create init (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPat
 
 Target.create run (fun _ -> runDotNetCommand "run" $"--project \"{exampleProjectPath}\" --no-build")
 
-clean ==> restore ==> buildSchema ==> codegen ==> buildExample ==> run
+clean ==> restore ==> buildDomainModeling ==> codegen ==> buildExample ==> run
 
-clean ==> restore ==> buildSchema ==> codegen ==> init
+clean ==> restore ==> buildDomainModeling ==> codegen ==> init
 
 Target.runOrDefault target

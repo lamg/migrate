@@ -23,8 +23,8 @@ let private writeFile (path: string) (text: string) =
 
 let private runtimeProjectPath tempDir name = Path.Combine(tempDir, $"{name}.fsproj")
 
-let private schemaProjectPath tempDir =
-  Path.Combine(tempDir, "MigSchema", "MigSchema.fsproj")
+let private domainModelingProjectPath tempDir =
+  Path.Combine(tempDir, "DomainModeling", "DomainModeling.fsproj")
 
 let private runtimeAssemblyPath tempDir =
   let assemblyName =
@@ -44,10 +44,8 @@ let private writeRuntimeProject tempDir name =
   Directory.CreateDirectory(Path.GetDirectoryName targetAssemblyPath) |> ignore
   File.Copy(fixtureAssembly, targetAssemblyPath, true)
 
-let private writeSchemaProject tempDir =
-  writeFile
-    (schemaProjectPath tempDir)
-    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>TestGeneratedSchema</RootNamespace></PropertyGroup></Project>"
+let private writeDomainModelingProject tempDir =
+  writeFile (domainModelingProjectPath tempDir) "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
 
 let private assertRegularErrorContains expectedText result =
   match result with
@@ -56,20 +54,20 @@ let private assertRegularErrorContains expectedText result =
   | Ok value -> failwith $"Expected error, got: {value}"
 
 [<Fact>]
-let ``resolveProjectLayout resolves explicit runtime project and MigSchema project`` () =
+let ``resolveProjectLayout resolves explicit runtime project and DomainModeling project`` () =
   let tempDir = createTempDir "mig_resolve_project_layout_explicit"
 
   try
     writeRuntimeProject tempDir "Runtime"
-    writeSchemaProject tempDir
+    writeDomainModelingProject tempDir
 
     match resolveProjectLayout (runtimeProjectPath tempDir "Runtime") with
     | Ok resolved ->
       Assert.Equal(Path.GetFullPath(runtimeProjectPath tempDir "Runtime"), resolved.runtimeProjectPath)
       Assert.Equal(tempDir, resolved.runtimeProjectDirectory)
       Assert.Equal("Runtime", resolved.runtimeProjectName)
-      Assert.Equal(schemaProjectPath tempDir, resolved.schemaProjectPath)
-      Assert.Equal(Path.Combine(tempDir, "MigSchema"), resolved.schemaDirectory)
+      Assert.Equal(domainModelingProjectPath tempDir, resolved.domainModelingProjectPath)
+      Assert.Equal(Path.Combine(tempDir, "DomainModeling"), resolved.domainModelingDirectory)
     | Error error -> failwith $"Expected project layout to resolve, got: {error}"
   finally
     Directory.Delete(tempDir, true)
@@ -80,7 +78,7 @@ let ``resolveProject returns runtime schema and database paths`` () =
 
   try
     writeRuntimeProject tempDir "Runtime"
-    writeSchemaProject tempDir
+    writeDomainModelingProject tempDir
 
     match
       resolveProject (runtimeProjectPath tempDir "Runtime") "main" tempDir
@@ -103,7 +101,7 @@ let ``discoverProject resolves a single runtime project in directory`` () =
 
   try
     writeRuntimeProject tempDir "Runtime"
-    writeSchemaProject tempDir
+    writeDomainModelingProject tempDir
 
     match discoverProject tempDir (Some "tenant") tempDir |> fun task -> task.Result with
     | Ok resolved ->
@@ -125,15 +123,15 @@ let ``resolveProject fails when runtime project is missing`` () =
     Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``resolveProject fails when MigSchema project is missing`` () =
-  let tempDir = createTempDir "mig_resolve_project_missing_schema"
+let ``resolveProject fails when DomainModeling project is missing`` () =
+  let tempDir = createTempDir "mig_resolve_project_missing_domain_modeling"
 
   try
     writeRuntimeProject tempDir "Runtime"
 
     resolveProject (runtimeProjectPath tempDir "Runtime") "main" tempDir
     |> fun task -> task.Result
-    |> assertRegularErrorContains "Schema project file was not found"
+    |> assertRegularErrorContains "DomainModeling project file was not found"
   finally
     Directory.Delete(tempDir, true)
 

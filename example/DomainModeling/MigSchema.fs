@@ -1,4 +1,5 @@
-module ExampleSchema.MigSchema
+[<MigLib.Dsl.Attributes.GeneratedDbNamespace("ExampleApp")>]
+module ExampleDomainModeling.MigSchema
 
 open MigLib.Dsl.Attributes
 

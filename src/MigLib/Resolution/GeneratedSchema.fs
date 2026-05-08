@@ -4,7 +4,6 @@ open System
 open System.IO
 open System.Reflection
 open System.Runtime.Loader
-open System.Xml.Linq
 
 open MigLib.Schema.Types
 open MigLib.Types
@@ -42,24 +41,6 @@ let private formatAssemblyLoadError (ex: exn) =
       $"{reflectionError.Message}{Environment.NewLine}{loaderDetails}"
   | _ -> ex.Message
 
-let private tryLoadProjectDocument (projectPath: string) : Result<XDocument, MigError> =
-  try
-    if String.IsNullOrWhiteSpace projectPath then
-      regularError "Runtime project path is empty."
-    elif not (File.Exists projectPath) then
-      regularError $"Runtime project file was not found: {Path.GetFullPath projectPath}"
-    else
-      Ok(XDocument.Load projectPath)
-  with ex ->
-    regularError $"Could not read runtime project file '{Path.GetFullPath projectPath}': {ex.Message}"
-
-let private tryReadProperty (name: string) (document: XDocument) =
-  document.Descendants()
-  |> Seq.tryFind (fun element -> String.Equals(element.Name.LocalName, name, StringComparison.Ordinal))
-  |> Option.map _.Value
-  |> Option.map _.Trim()
-  |> Option.filter (String.IsNullOrWhiteSpace >> not)
-
 let private tryGetAssemblyTypes (assembly: Assembly) =
   try
     Ok(assembly.GetTypes())
@@ -68,16 +49,36 @@ let private tryGetAssemblyTypes (assembly: Assembly) =
       MigError.Regular $"Could not enumerate types from assembly '{assembly.FullName}': {formatAssemblyLoadError ex}"
     )
 
-let private tryFindModuleType (assembly: Assembly) (moduleName: string) =
-  tryGetAssemblyTypes assembly
-  |> Result.bind (fun types ->
-    match
-      types
-      |> Array.tryFind (fun candidate -> String.Equals(candidate.FullName, moduleName, StringComparison.Ordinal))
-    with
-    | Some moduleType -> Ok moduleType
-    | None ->
-      Error(MigError.Regular $"Compiled module '{moduleName}' was not found in assembly '{assembly.FullName}'."))
+let private hasGeneratedSchemaMember (moduleType: Type) =
+  let propertyInfo = moduleType.GetProperty("GeneratedSchema", staticBindingFlags)
+
+  if not (isNull propertyInfo) then
+    typeof<ResolvedGeneratedSchemaModule>.IsAssignableFrom propertyInfo.PropertyType
+  else
+    let fieldInfo = moduleType.GetField("GeneratedSchema", staticBindingFlags)
+
+    not (isNull fieldInfo)
+    && typeof<ResolvedGeneratedSchemaModule>.IsAssignableFrom fieldInfo.FieldType
+
+let private tryFindGeneratedSchemaModuleType (assembly: Assembly) =
+  result {
+    let! types = tryGetAssemblyTypes assembly
+
+    let candidates = types |> Array.filter hasGeneratedSchemaMember
+
+    match candidates with
+    | [| moduleType |] -> return moduleType
+    | [||] ->
+      return!
+        regularError
+          $"Compiled generated Db module with static GeneratedSchema was not found in assembly '{assembly.FullName}'."
+    | many ->
+      let moduleList = many |> Array.map _.FullName |> String.concat ", "
+
+      return!
+        regularError
+          $"Compiled assembly '{assembly.FullName}' contains multiple generated Db modules with static GeneratedSchema: {moduleList}."
+  }
 
 let private tryGetStaticMemberValue (moduleType: Type) (memberName: string) =
   let propertyInfo = moduleType.GetProperty(memberName, staticBindingFlags)
@@ -155,37 +156,26 @@ let private withAssemblyResolver (assemblyPath: string) (work: string -> Assembl
       finally
         loadContext.Unload()
 
-let private loadGeneratedModule (assemblyPath: string) (moduleName: string) =
+let private loadGeneratedModule (assemblyPath: string) =
   withAssemblyResolver assemblyPath (fun fullAssemblyPath loadContext ->
     try
       let assembly = loadContext.LoadFromAssemblyPath fullAssemblyPath
 
       result {
-        let! moduleType = tryFindModuleType assembly moduleName
-        return! tryReadRequiredStaticValue<ResolvedGeneratedSchemaModule> moduleType "GeneratedSchema"
+        let! moduleType = tryFindGeneratedSchemaModuleType assembly
+        let! generatedSchema = tryReadRequiredStaticValue<ResolvedGeneratedSchemaModule> moduleType "GeneratedSchema"
+
+        return moduleType.FullName, generatedSchema
       }
     with ex ->
       Error(MigError.Regular $"Could not load compiled assembly '{fullAssemblyPath}': {formatAssemblyLoadError ex}"))
 
 let resolveSchemaModuleName (assembly: ResolvedAssembly) : Result<string, MigError> =
-  result {
-    let! document = tryLoadProjectDocument assembly.project.runtimeProjectPath
-
-    let! rootNamespace =
-      document
-      |> tryReadProperty "RootNamespace"
-      |> ResultEx.requireSomeWith (fun () ->
-        MigError.Regular
-          $"Runtime project '{Path.GetFullPath assembly.project.runtimeProjectPath}' must define <RootNamespace> so generated module '<RootNamespace>.Db' can be resolved.")
-
-    return $"{rootNamespace}.Db"
-  }
+  loadGeneratedModule assembly.assemblyPath |> Result.map fst
 
 let resolveGeneratedSchema (assembly: ResolvedAssembly) : Result<ResolvedGeneratedSchema, MigError> =
   result {
-    let! moduleName = resolveSchemaModuleName assembly
-
-    let! generatedModule = loadGeneratedModule assembly.assemblyPath moduleName
+    let! moduleName, generatedModule = loadGeneratedModule assembly.assemblyPath
 
     return
       { assembly = assembly

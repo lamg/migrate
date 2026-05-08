@@ -1,6 +1,6 @@
 # mig command specification
 
-The current `mig` CLI is built around one runtime project, one `MigSchema` project, and one generated `Db.fs` module.
+The current `mig` CLI is built around one runtime project, one `DomainModeling` project, and one generated `Db.fs` module.
 `mig` does not apply in-place migration history. Instead, it works with schema-bound SQLite files named from the generated schema hash.
 
 ## Project Convention
@@ -8,16 +8,15 @@ The current `mig` CLI is built around one runtime project, one `MigSchema` proje
 Given a runtime project directory:
 
 - the runtime project is the single `.fsproj` in that directory
-- the schema project is `MigSchema/MigSchema.fsproj`
-- the schema source file is `MigSchema/MigSchema.fs`
-- generated code is written to `Db.fs` in the runtime project root
+- the domain modeling project is `DomainModeling/DomainModeling.fsproj`
+- the schema source file is `DomainModeling/MigSchema.fs`
+- generated code is written to `DomainModeling/Db.fs`
 
 Required conventions:
 
-- the runtime project must define `<RootNamespace>`
-- the schema project must define `<RootNamespace>`
-- the compiled schema module must therefore be `<SchemaRootNamespace>.MigSchema`
-- the generated runtime module is `<RuntimeRootNamespace>.Db`
+- `MigSchema.fs` must mark exactly one module with `GeneratedDbNamespaceAttribute`
+- the compiled schema module is the attributed module
+- the generated runtime module is `<GeneratedDbNamespace>.Db`
 
 ## Generated Module Contract
 
@@ -43,10 +42,10 @@ mig codegen [--dir|-d /path/to/project]
 Behavior:
 
 1. Discover the runtime project in the target directory.
-2. Discover `MigSchema/MigSchema.fsproj`.
-3. Resolve the compiled schema assembly from the schema project build output.
-4. Load `<SchemaRootNamespace>.MigSchema` and read its `Schema` value.
-5. Generate `Db.fs` into the runtime project root.
+2. Discover `DomainModeling/DomainModeling.fsproj`.
+3. Resolve the compiled domain modeling assembly from the project build output.
+4. Load the module marked with `GeneratedDbNamespaceAttribute` and read its schema definitions.
+5. Generate `DomainModeling/Db.fs`.
 
 Output includes:
 
@@ -158,7 +157,7 @@ Output includes:
 
 ## Command Relationships
 
-- `codegen` must run after the schema project is built.
+- `codegen` must run after the domain modeling project is built.
 - `init`, `plan`, `migrate`, `status`, and `reset` require the runtime project to be built after code generation so the compiled runtime assembly contains the generated module.
 - `migrate` archives the previous source database immediately after a successful copy.
 - `reset` is the workflow-level undo for the current target database plus the latest archived source.

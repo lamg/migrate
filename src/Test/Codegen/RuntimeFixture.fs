@@ -50,12 +50,6 @@ let Schema: SqlFile =
     indexes = []
     triggers = [] }
 
-let GeneratedSchema: ResolvedGeneratedSchemaModule =
-  { schema = Schema
-    schemaHash = "fedcba9876543210"
-    dbApp = "runtime-fixture"
-    defaultDbInstance = "main" }
-
 type Student = { Id: int64; Name: string; Age: int64 }
 
 type Student with

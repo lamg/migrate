@@ -23,29 +23,27 @@ let private writeFile (path: string) (text: string) =
 
 let private runtimeProjectPath tempDir = Path.Combine(tempDir, "Runtime.fsproj")
 
-let private schemaDirectory tempDir = Path.Combine(tempDir, "MigSchema")
+let private domainModelingDirectory tempDir = Path.Combine(tempDir, "DomainModeling")
 
-let private schemaProjectPath tempDir =
-  Path.Combine(schemaDirectory tempDir, "MigSchema.fsproj")
+let private domainModelingProjectPath tempDir =
+  Path.Combine(domainModelingDirectory tempDir, "DomainModeling.fsproj")
 
 let private schemaSourcePath tempDir =
-  Path.Combine(schemaDirectory tempDir, "MigSchema.fs")
+  Path.Combine(domainModelingDirectory tempDir, "MigSchema.fs")
 
-let private schemaAssemblyPath tempDir =
-  Path.Combine(schemaDirectory tempDir, "bin", "Debug", "net10.0", "MigSchema.dll")
+let private domainModelingAssemblyPath tempDir =
+  Path.Combine(domainModelingDirectory tempDir, "bin", "Debug", "net10.0", "DomainModeling.dll")
 
 let private writeRuntimeProject tempDir rootNamespace =
   writeFile
     (runtimeProjectPath tempDir)
     $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>{rootNamespace}</RootNamespace></PropertyGroup></Project>"
 
-let private writeSchemaProject tempDir rootNamespace =
-  writeFile
-    (schemaProjectPath tempDir)
-    $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>{rootNamespace}</RootNamespace></PropertyGroup></Project>"
+let private writeDomainModelingProject tempDir =
+  writeFile (domainModelingProjectPath tempDir) "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
 
-let private writeSchemaAssembly tempDir =
-  writeFile (schemaAssemblyPath tempDir) ""
+let private writeDomainModelingAssembly tempDir =
+  writeFile (domainModelingAssemblyPath tempDir) ""
 
 let private writeSchemaSource tempDir =
   writeFile (schemaSourcePath tempDir) "module SchemaRoot.MigSchema"
@@ -62,59 +60,45 @@ let ``resolveInputs uses project codegen conventions`` () =
 
   try
     writeRuntimeProject tempDir "RuntimeRoot"
-    writeSchemaProject tempDir "SchemaRoot"
+    writeDomainModelingProject tempDir
     writeSchemaSource tempDir
-    writeSchemaAssembly tempDir
+    writeDomainModelingAssembly tempDir
 
     match resolveInputs tempDir with
     | Ok inputs ->
       Assert.Equal(Path.GetFullPath(runtimeProjectPath tempDir), inputs.project.runtimeProjectPath)
-      Assert.Equal(Path.GetFullPath(schemaAssemblyPath tempDir), inputs.schemaAssembly.assemblyPath)
-      Assert.Equal("SchemaRoot.MigSchema", inputs.schemaModuleName)
-      Assert.Equal("RuntimeRoot.Db", inputs.generatedModuleName)
+      Assert.Equal(Path.GetFullPath(domainModelingAssemblyPath tempDir), inputs.domainModelingAssembly.assemblyPath)
       Assert.Equal(Path.GetFullPath(schemaSourcePath tempDir), inputs.schemaSourcePath)
-      Assert.Equal("RuntimeRoot", inputs.dbApp)
-      Assert.Equal(Path.Combine(tempDir, "MigSchema", "Db.fs"), inputs.outputPath)
+      Assert.Equal(Path.Combine(tempDir, "DomainModeling", "Db.fs"), inputs.outputPath)
     | Error error -> failwith $"Expected codegen inputs to resolve, got: {error}"
   finally
     Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``resolveInputs fails when runtime RootNamespace is missing`` () =
-  let tempDir = createTempDir "mig_codegen_inputs_missing_runtime_root"
+let ``resolveInputs does not require project RootNamespace metadata`` () =
+  let tempDir = createTempDir "mig_codegen_inputs_without_root_namespace"
 
   try
     writeFile (runtimeProjectPath tempDir) "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
-    writeSchemaProject tempDir "SchemaRoot"
+    writeDomainModelingProject tempDir
     writeSchemaSource tempDir
-    writeSchemaAssembly tempDir
+    writeDomainModelingAssembly tempDir
 
-    resolveInputs tempDir |> assertRegularErrorContains "runtime project"
+    match resolveInputs tempDir with
+    | Ok inputs ->
+      Assert.Equal(Path.GetFullPath(domainModelingAssemblyPath tempDir), inputs.domainModelingAssembly.assemblyPath)
+    | Error error -> failwith $"Expected codegen inputs to resolve, got: {error}"
   finally
     Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``resolveInputs fails when schema RootNamespace is missing`` () =
-  let tempDir = createTempDir "mig_codegen_inputs_missing_schema_root"
-
-  try
-    writeRuntimeProject tempDir "RuntimeRoot"
-    writeFile (schemaProjectPath tempDir) "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
-    writeSchemaSource tempDir
-    writeSchemaAssembly tempDir
-
-    resolveInputs tempDir |> assertRegularErrorContains "schema project"
-  finally
-    Directory.Delete(tempDir, true)
-
-[<Fact>]
-let ``resolveInputs fails when MigSchema source is missing`` () =
+let ``resolveInputs fails when DomainModeling MigSchema source is missing`` () =
   let tempDir = createTempDir "mig_codegen_inputs_missing_schema_source"
 
   try
     writeRuntimeProject tempDir "RuntimeRoot"
-    writeSchemaProject tempDir "SchemaRoot"
-    writeSchemaAssembly tempDir
+    writeDomainModelingProject tempDir
+    writeDomainModelingAssembly tempDir
 
     resolveInputs tempDir
     |> assertRegularErrorContains "Schema source file was not found"
