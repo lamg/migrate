@@ -19,7 +19,8 @@ let findOldSchema (reportProgress: ProgReport) (project: ResolvedProject) : Task
 let prepareNewDb (reportProgress: ProgReport) (project: ResolvedProject) : Task<Result<string, MigError>> =
   taskResult {
     if File.Exists project.targetDbPath then
-      return! Error(MigError.Regular $"Target database already exists: {Path.GetFullPath project.targetDbPath}")
+      do! reportProgress "File already exists"
+      return project.targetDbPath
     else
       do! reportProgress $"Creating target database: {project.targetDbPath}"
       let! (initResult: InitResult) = runInitWithSchema project.targetSchema.schema project.targetDbPath

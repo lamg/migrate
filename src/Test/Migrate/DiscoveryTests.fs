@@ -140,7 +140,7 @@ let ``prepareNewDb creates generated target database`` () =
       Assert.Equal(expectedTargetPath, dbPath)
       Assert.True(File.Exists dbPath)
 
-      use connection = new SqliteConnection($"Data Source={dbPath}")
+      use connection = new SqliteConnection $"Data Source={dbPath}"
       connection.Open()
 
       use command =
@@ -148,23 +148,5 @@ let ``prepareNewDb creates generated target database`` () =
 
       Assert.Equal(0L, command.ExecuteScalar() :?> int64)
     | Error error -> failwith $"Expected prepareNewDb to succeed, got: {error}"
-  finally
-    Directory.Delete(tempDir, true)
-
-[<Fact>]
-let ``prepareNewDb fails when target database already exists`` () =
-  let tempDir = createTempDir "mig_migrate_prepare_existing_target"
-
-  try
-    writeProjectLayout tempDir
-
-    let targetPath =
-      Path.Combine(tempDir, "generated-fixture-main-0123456789abcdef.sqlite")
-
-    writeFile targetPath ""
-
-    prepareNewDb report (makeProject tempDir)
-    |> fun task -> task.Result
-    |> assertRegularErrorContains "Target database already exists"
   finally
     Directory.Delete(tempDir, true)

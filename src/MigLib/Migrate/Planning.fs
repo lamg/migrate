@@ -177,7 +177,7 @@ let buildPlan (reportProgress: ProgReport) (project: ResolvedProject) : Task<Res
 
     let supportedDifferences, unsupportedDifferences =
       match sourceSchema with
-      | None -> [ "no source database found" ], []
+      | None -> [], []
       | Some oldSchema -> analyzeSchemaDifferences oldSchema targetSchema
 
     return

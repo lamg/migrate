@@ -81,7 +81,6 @@ let ``buildPlan can create target when no source database exists`` () =
       Assert.True migrationPlan.result.canMigrate
       Assert.True migrationPlan.sourceSchema.IsNone
       Assert.Equal(None, migrationPlan.result.sourceDbPath)
-      Assert.Contains("no source database found", migrationPlan.result.supportedDifferences)
       Assert.Empty migrationPlan.result.unsupportedDifferences
     | Error error -> failwith $"Expected planning to succeed, got: {error}"
   finally

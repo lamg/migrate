@@ -2,7 +2,7 @@ module internal MigLib.Migrate.Execution
 
 open System
 open System.Threading.Tasks
-
+open System.IO
 open MigLib.Types
 open MigLib.TaskResult
 
@@ -23,9 +23,21 @@ let migrate (reportProgress: ProgReport) (project: ResolvedProject) : Task<Resul
   taskResult {
     let! migrationPlan = buildPlan reportProgress project
 
-    if not migrationPlan.result.canMigrate then
+    match migrationPlan with
+    | { result = { supportedDifferences = []
+                   unsupportedDifferences = []
+                   targetDbPath = target } } when File.Exists target ->
+      do! reportProgress "No migration needed"
+
+      return
+        { db = dbTxn migrationPlan.result.targetDbPath
+          newDbPath = migrationPlan.result.targetDbPath
+          archivedOldDbPath = None
+          copiedTables = 0
+          copiedRows = 0 }
+    | { result = { canMigrate = false } } ->
       return! Error(MigError.Regular(formatUnsupportedDifferences migrationPlan.result.unsupportedDifferences))
-    else
+    | _ ->
       let! newDbPath = prepareNewDb reportProgress project
 
       let! (copyResult: CopyResult) =
