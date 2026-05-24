@@ -45,6 +45,7 @@
     <Compile Include="Resolution/Projects.fs" />
     <Compile Include="Codegen/FabulousAstHelpers.fs" />
     <Compile Include="Codegen/AstExprBuilders.fs" />
+    <Compile Include="Codegen/ViewDependencies.fs" />
     <Compile Include="Codegen/ViewIntrospection.fs" />
     <Compile Include="Codegen/TypeGenerator.fs" />
     <Compile Include="Codegen/SqlParamBindings.fs" />

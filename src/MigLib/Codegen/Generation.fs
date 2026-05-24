@@ -243,15 +243,14 @@ let private generateCode
   result {
     do! validateModuleName moduleName
 
-    let! viewsWithColumns =
-      schema.views
-      |> traverseResultM (fun view ->
-        result {
-          let! columns = ViewIntrospection.getViewColumns schema.tables view
-          return view, columns
-        })
+    let! orderedViews = ViewDependencies.orderViews schema.tables schema.views
 
-    let normalizedTables, regularTables = NormalizedSchema.classifyTables schema.tables
+    let orderedSchema = { schema with views = orderedViews }
+
+    let! viewsWithColumns = ViewIntrospection.getViewsColumns orderedSchema.tables orderedSchema.views
+
+    let normalizedTables, regularTables =
+      NormalizedSchema.classifyTables orderedSchema.tables
 
     let! regularTableCodes =
       regularTables
@@ -306,13 +305,13 @@ let private generateCode
         yield "open MigLib.Generated"
         yield ""
         yield "let GeneratedSchema: ResolvedGeneratedSchemaModule ="
-        yield $"  {{ schema = {renderSqlFile schema}"
+        yield $"  {{ schema = {renderSqlFile orderedSchema}"
         yield $"    schemaHash = {renderStringLiteral schemaHash}"
         yield $"    dbApp = {renderStringLiteral dbApp}"
         yield "    defaultDbInstance = \"main\" }"
         yield ""
         yield!
-          schema.measureTypes
+          orderedSchema.measureTypes
           |> List.collect (fun measureType -> [ TypeGenerator.generateMeasureType measureType; "" ])
         yield!
           enumLikeDus

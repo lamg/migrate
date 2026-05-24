@@ -14,6 +14,7 @@
     <Compile Include="Codegen/ExecutionFixture.fs" />
     <Compile Include="Codegen/RuntimeFixture.fs" />
     <Compile Include="Codegen/InputsTests.fs" />
+    <Compile Include="Codegen/ViewDependenciesTests.fs" />
     <Compile Include="Codegen/ExecutionTests.fs" />
     <Compile Include="Codegen/RuntimeTests.fs" />
     <Compile Include="Init/ExecutionTests.fs" />

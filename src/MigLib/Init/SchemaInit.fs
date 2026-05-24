@@ -9,6 +9,7 @@ open MigLib.Schema.Types
 open MigLib.Types
 open MigLib.TaskResult
 open MigLib.Sqlite
+open MigLib.Codegen
 
 let private quoteIdentifier (identifier: string) =
   let escaped = identifier.Replace("\"", "\"\"")
@@ -135,7 +136,12 @@ let private createSchemaObjects (connection: SqliteConnection) (tx: SqliteTransa
       let! _ = createIndexCmd.ExecuteNonQueryAsync()
       ()
 
-    for view in targetSchema.views do
+    let orderedViews =
+      match ViewDependencies.orderViews targetSchema.tables targetSchema.views with
+      | Ok views -> views
+      | Error error -> invalidOp error
+
+    for view in orderedViews do
       use createViewCmd = createCommand connection tx view.sql
       let! _ = createViewCmd.ExecuteNonQueryAsync()
       ()

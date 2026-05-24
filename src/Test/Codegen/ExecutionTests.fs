@@ -99,8 +99,17 @@ let ``runCodegen writes Db fs with metadata types and CRUD helpers`` () =
       Assert.Contains("codegen_fixture", generated)
       Assert.Contains("type CodegenFixture =", generated)
       Assert.Contains("type CodegenFixtureView =", generated)
+      Assert.Contains("type CodegenFixtureViewA =", generated)
       Assert.Contains("type NewPerson =", generated)
       Assert.Contains("type Person =", generated)
+
+      Assert.True(
+        generated.IndexOf("name = \"codegen_fixture_view\"") < generated.IndexOf("name = \"codegen_fixture_view_a\""),
+        "GeneratedSchema.views should render dependency views before dependent views."
+      )
+
+      Assert.Contains("name = \"codegen_fixture_view_a\"", generated)
+      Assert.Contains("dependencies = [ \"codegen_fixture_view\" ]", generated)
       Assert.Contains("| Person.Base(id, _) -> id", generated)
       Assert.Contains("| Person.WithEmail(id, _, _) -> id", generated)
       Assert.Contains("| Person.Base _ -> None", generated)

@@ -32,6 +32,9 @@ type PersonExt = Email of Person * email: string
 [<SelectOne>]
 type CodegenFixtureView = { id: int64; name: string }
 
+[<ViewSql "SELECT id, name FROM codegen_fixture_view WHERE name LIKE 'A%'">]
+type CodegenFixtureViewA = { id: int64; name: string }
+
 let fixtureSeed: CodegenFixture = { id = 0L; name = "seed"; age = 18L }
 
 let personSeed: Person = { id = "person-1"; name = "Pat" }

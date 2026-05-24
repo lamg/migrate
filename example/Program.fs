@@ -27,18 +27,18 @@ let studentOperations (db: DbTxnBuilder) : Task<Result<unit, MigError>> =
     let! existingStudents = Db.Student.SelectAll
     printStudents "Existing rows in the current database:" existingStudents
 
-    let! insertedId = Db.Student.InsertOrIgnore { Id = 0L; Name = "Carol"; Age = 25L }
+    let! insertedId = Db.Student.InsertOrIgnore(Db.NewStudent.Base("Carol", 25L))
 
     match insertedId with
     | Some id ->
       printfn $"Inserted Carol with generated id {id}"
 
-      do! Db.Student.Upsert { Id = id; Name = "Carol"; Age = 26L }
+      do! Db.Student.Update(Db.Student.Base(id, "Carol", 26L))
     | None -> printfn "Carol update: Carol already exists, ignoring"
 
     let! carol = Db.Student.SelectByName "Carol"
     let! fuzzyMatch = Db.Student.SelectNameLike "ar"
-    let! ensuredStudent = Db.Student.SelectByNameOrInsert { Id = 0L; Name = "Dora"; Age = 19L }
+    let! ensuredStudent = Db.Student.SelectByNameOrInsert(Db.NewStudent.Base("Dora", 19L))
     let! allStudents = Db.Student.SelectAll
 
     printStudents "Rows returned by generated Student.SelectByName \"Carol\":" carol
