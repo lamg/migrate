@@ -4,6 +4,7 @@ open System
 open System.Threading.Tasks
 
 open MigLib.Schema.Types
+open MigLib.Schema.Sql
 open MigLib.Types
 open MigLib.TaskResult
 
@@ -11,14 +12,6 @@ type MigrationPlan =
   { sourceSchema: SqlFile option
     targetSchema: SqlFile
     result: PlanResult }
-
-let private describeSqlType sqlType =
-  match sqlType with
-  | SqlInteger -> "INTEGER"
-  | SqlText -> "TEXT"
-  | SqlReal -> "REAL"
-  | SqlTimestamp -> "TIMESTAMP"
-  | SqlString -> "STRING"
 
 let private joinOrNone values =
   match values with
@@ -77,8 +70,8 @@ let private compareColumn (tableName: string) (sourceColumnByName: Map<string, C
       else
         Ok [ $"renamed column: {tableName}.{sourceColumnName}->{targetColumn.name}" ]
     else
-      let sourceType = describeSqlType sourceColumn.columnType
-      let targetType = describeSqlType targetColumn.columnType
+      let sourceType = sqlTypeDisplayName sourceColumn.columnType
+      let targetType = sqlTypeDisplayName targetColumn.columnType
       Error [ $"Column '{tableName}.{targetColumn.name}' changes type from {sourceType} to {targetType}." ]
 
 let private compareColumns (sourceTable: CreateTable) (targetTable: CreateTable) =

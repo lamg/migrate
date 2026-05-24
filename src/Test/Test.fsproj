@@ -6,6 +6,7 @@
   <ItemGroup>
     <Compile Include="CompiledSchemaSourceFixture.fs" />
     <Compile Include="SchemaReflectionFixture.fs" />
+    <Compile Include="SchemaSqlTests.fs" />
     <Compile Include="Resolution/GeneratedSchemaFixture.fs" />
     <Compile Include="Resolution/ProjectsTests.fs" />
     <Compile Include="Resolution/AssembliesTests.fs" />

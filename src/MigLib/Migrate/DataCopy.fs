@@ -6,16 +6,13 @@ open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 
 open MigLib.Schema.Types
+open MigLib.Schema.Sql
 open MigLib.Types
 open MigLib.TaskResult
 open MigLib.Sqlite
 
 type CopyResult =
   { copiedTables: int; copiedRows: int64 }
-
-let private quoteIdentifier (identifier: string) =
-  let escaped = identifier.Replace("\"", "\"\"")
-  $"\"{escaped}\""
 
 let private sourceTableName (table: CreateTable) =
   defaultArg table.previousName table.name

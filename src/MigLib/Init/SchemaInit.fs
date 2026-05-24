@@ -6,30 +6,11 @@ open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 
 open MigLib.Schema.Types
+open MigLib.Schema.Sql
 open MigLib.Types
 open MigLib.TaskResult
 open MigLib.Sqlite
 open MigLib.Codegen
-
-let private quoteIdentifier (identifier: string) =
-  let escaped = identifier.Replace("\"", "\"\"")
-  $"\"{escaped}\""
-
-let private sqlTypeToSql =
-  function
-  | SqlInteger -> "INTEGER"
-  | SqlText -> "TEXT"
-  | SqlReal -> "REAL"
-  | SqlTimestamp -> "TEXT"
-  | SqlString -> "TEXT"
-
-let private fkActionSql =
-  function
-  | Cascade -> "CASCADE"
-  | Restrict -> "RESTRICT"
-  | NoAction -> "NO ACTION"
-  | SetNull -> "SET NULL"
-  | SetDefault -> "SET DEFAULT"
 
 let private exprToSql =
   function
@@ -112,9 +93,9 @@ let private createTableSql (table: CreateTable) =
         column.constraints |> List.choose renderColumnConstraint |> String.concat " "
 
       if String.IsNullOrWhiteSpace constraints then
-        $"{quoteIdentifier column.name} {sqlTypeToSql column.columnType}"
+        $"{quoteIdentifier column.name} {sqlTypeStorageName column.columnType}"
       else
-        $"{quoteIdentifier column.name} {sqlTypeToSql column.columnType} {constraints}")
+        $"{quoteIdentifier column.name} {sqlTypeStorageName column.columnType} {constraints}")
 
   let tableConstraints = table.constraints |> List.choose renderTableConstraint
   let body = columnDefs @ tableConstraints |> String.concat ",\n  "

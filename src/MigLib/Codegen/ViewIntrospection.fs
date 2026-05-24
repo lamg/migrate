@@ -3,15 +3,8 @@ module internal MigLib.Codegen.ViewIntrospection
 open System
 open Microsoft.Data.Sqlite
 open MigLib.Schema.Types
+open MigLib.Schema.Sql
 open MigLib.TaskResult
-
-let private columnTypeName =
-  function
-  | SqlInteger -> "INTEGER"
-  | SqlText -> "TEXT"
-  | SqlReal -> "REAL"
-  | SqlTimestamp -> "TIMESTAMP"
-  | SqlString -> "TEXT"
 
 let private columnConstraints (column: ColumnDef) =
   column.constraints
@@ -26,16 +19,16 @@ let private createTableSql (table: CreateTable) =
   let columns =
     table.columns
     |> List.map (fun column ->
-      let typeName = columnTypeName column.columnType
+      let typeName = sqlTypeStorageName column.columnType
       let constraints = columnConstraints column
 
       if String.IsNullOrWhiteSpace constraints then
-        $"{column.name} {typeName}"
+        $"{quoteIdentifier column.name} {typeName}"
       else
-        $"{column.name} {typeName} {constraints}")
+        $"{quoteIdentifier column.name} {typeName} {constraints}")
     |> String.concat ", "
 
-  $"CREATE TABLE {table.name} ({columns})"
+  $"CREATE TABLE {quoteIdentifier table.name} ({columns})"
 
 let private createTables (conn: SqliteConnection) (tables: CreateTable list) =
   for table in tables do
@@ -53,17 +46,10 @@ let private createViews (conn: SqliteConnection) (views: CreateView list) =
         return! Error $"Failed to create view {view.name}: {ex.Message}"
   }
 
-let private readSqlType (colType: string) =
-  match colType.ToUpperInvariant() with
-  | t when t.Contains "INT" -> SqlInteger
-  | t when t.Contains "TEXT" || t.Contains "CHAR" || t.Contains "CLOB" -> SqlText
-  | t when t.Contains "REAL" || t.Contains "FLOA" || t.Contains "DOUB" -> SqlReal
-  | t when t.Contains "TIME" || t.Contains "DATE" -> SqlTimestamp
-  | _ -> SqlText
-
 let private readViewColumns (conn: SqliteConnection) (view: CreateView) =
   result {
-    use pragmaCmd = new SqliteCommand($"PRAGMA table_info({view.name})", conn)
+    use pragmaCmd =
+      new SqliteCommand($"PRAGMA table_info({quoteIdentifier view.name})", conn)
 
     let! reader =
       try
@@ -77,7 +63,7 @@ let private readViewColumns (conn: SqliteConnection) (view: CreateView) =
 
     while reader.Read() do
       let colName = reader.GetString 1
-      let sqlType = reader.GetString 2 |> readSqlType
+      let sqlType = reader.GetString 2 |> parseDeclaredSqlType
 
       let declaredColumn =
         view.declaredColumns

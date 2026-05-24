@@ -6,6 +6,7 @@ open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 
 open MigLib.Schema.Types
+open MigLib.Schema.Sql
 open MigLib.Types
 
 type private TableInfoRow =
@@ -23,30 +24,6 @@ type private ForeignKeyRow =
     toColumn: string option
     onUpdate: string
     onDelete: string }
-
-let private quoteIdentifier (identifier: string) =
-  let escaped = identifier.Replace("\"", "\"\"")
-  $"\"{escaped}\""
-
-let private parseSqlType (declaredType: string) =
-  let normalized = declaredType.Trim().ToUpperInvariant()
-
-  if normalized.Contains "INT" then
-    SqlInteger
-  elif
-    normalized.Contains "REAL"
-    || normalized.Contains "FLOA"
-    || normalized.Contains "DOUB"
-  then
-    SqlReal
-  elif
-    normalized.Contains "TEXT"
-    || normalized.Contains "CHAR"
-    || normalized.Contains "CLOB"
-  then
-    SqlText
-  else
-    SqlString
 
 let private trimOuterParens (value: string) =
   let trimmed = value.Trim()
@@ -225,7 +202,7 @@ let private buildTableDefinition
 
       { name = row.name
         previousName = None
-        columnType = parseSqlType row.declaredType
+        columnType = parseDeclaredSqlType row.declaredType
         constraints = constraints |> Seq.toList
         enumLikeDu = None
         unitOfMeasure = None })
