@@ -40,7 +40,7 @@ let Schema: SqlFile =
                 enumLikeDu = None
                 unitOfMeasure = None } ]
           constraints = []
-          queryByAnnotations = [ { columns = [ "name" ] } ]
+          queryByAnnotations = [ { columns = [ "name" ]; orderBy = None } ]
           queryLikeAnnotations = [ { columns = [ "name" ] } ]
           queryByOrCreateAnnotations = [ { columns = [ "name" ] } ]
           selectOneAnnotations = [ SelectOneAnnotation ]

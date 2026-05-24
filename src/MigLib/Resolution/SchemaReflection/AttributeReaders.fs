@@ -116,6 +116,35 @@ let resolveColumnName
 
     Error(MigError.Regular $"Column '{rawColumnName}' was not found in type '{typeName}'. Available names: {available}")
 
+let resolveOrderBy
+  (resolver: Map<string, string>)
+  (typeName: string)
+  (rawOrderBy: string)
+  : Result<string option, MigError> =
+  if String.IsNullOrWhiteSpace rawOrderBy then
+    Ok None
+  else
+    rawOrderBy.Split(',', StringSplitOptions.RemoveEmptyEntries ||| StringSplitOptions.TrimEntries)
+    |> Array.toList
+    |> foldResults
+      (fun parts clause ->
+        result {
+          let tokens =
+            clause.Split(' ', StringSplitOptions.RemoveEmptyEntries ||| StringSplitOptions.TrimEntries)
+            |> Array.toList
+
+          match tokens with
+          | [] -> return parts
+          | rawColumn :: suffix ->
+            let! column = resolveColumnName resolver typeName rawColumn
+            let resolvedClause = String.concat " " (column :: suffix)
+            return parts @ [ resolvedClause ]
+        })
+      []
+    |> Result.map (function
+      | [] -> None
+      | clauses -> Some(String.concat ", " clauses))
+
 let addColumnConstraint
   (columnName: string)
   (constraintToAdd: ColumnConstraint)
@@ -457,7 +486,9 @@ let readQueryAnnotations
                   })
                 []
 
-            return acc @ [ ({ columns = columns }: QueryByAnnotation) ]
+            let! orderBy = resolveOrderBy resolver recordType.Name attr.OrderBy
+
+            return acc @ [ ({ columns = columns; orderBy = orderBy }: QueryByAnnotation) ]
           })
         []
 

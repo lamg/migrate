@@ -183,6 +183,51 @@ let generateUpdate (normalized: NormalizedTable) =
         "Task<Result<unit, SqliteException>>"
     )
 
+let private upsertNewItemClause (baseTable: CreateTable) (caseName: string) (columns: ColumnDef list) =
+  let pattern = generateFieldPattern columns
+
+  let newColumns =
+    columns |> List.filter (fun column -> not (isAutoIncrementPrimaryKey column))
+
+  let newArgs = newColumns |> List.map getColumnVarName |> String.concat ", "
+
+  $"| {TypeGenerator.toPascalCase baseTable.name}.{caseName}({pattern}) -> New{TypeGenerator.toPascalCase baseTable.name}.{caseName}({newArgs})"
+
+let private upsertNewItemExpression (normalized: NormalizedTable) =
+  let baseColumns = normalized.baseTable.columns
+
+  let extensionClauses =
+    normalized.extensions
+    |> List.map (fun extension ->
+      let caseName = $"With{TypeGenerator.toPascalCase extension.aspectName}"
+      let extensionColumns = getExtensionNonKeyColumns extension
+      upsertNewItemClause normalized.baseTable caseName (baseColumns @ extensionColumns))
+
+  [ "(match item with"
+    upsertNewItemClause normalized.baseTable "Base" baseColumns ]
+  @ extensionClauses
+  @ [ ")" ]
+  |> String.concat " "
+
+let generateUpsert (normalized: NormalizedTable) =
+  let pkCols = getPrimaryKeyColumns normalized.baseTable
+
+  match pkCols with
+  | [] -> None
+  | pks ->
+    let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
+
+    let selectByIdArgs =
+      pks
+      |> List.map (fun pk -> $"item.{TypeGenerator.toPascalCase pk.name}")
+      |> String.concat " "
+
+    let body =
+      rawExpr
+        $"""{upsertNewItemExpression normalized} |> fun newItem -> upsertByExisting (fun () -> {typeName}.SelectById {selectByIdArgs} tx) (fun () -> {typeName}.Update item tx) (fun () -> {typeName}.Insert newItem tx)"""
+
+    Some(staticMember "Upsert" [ typedParenParam "item" typeName; txParam ] body "Task<Result<unit, SqliteException>>")
+
 let generateDelete (normalized: NormalizedTable) =
   let pkCols = getPrimaryKeyColumns normalized.baseTable
 

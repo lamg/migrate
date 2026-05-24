@@ -112,7 +112,9 @@ let private renderViewColumn (column: ViewColumn) =
   $"{{ name = {renderStringLiteral column.name}; columnType = {renderSqlType column.columnType}; enumLikeDu = {renderedEnumLikeDu}; unitOfMeasure = {renderedUnitOfMeasure} }}"
 
 let private renderQueryByAnnotation (annotation: QueryByAnnotation) =
-  $"{{ columns = {renderList renderStringLiteral annotation.columns} }}"
+  let renderedOrderBy = renderOption renderStringLiteral annotation.orderBy
+
+  $"{{ columns = {renderList renderStringLiteral annotation.columns}; orderBy = {renderedOrderBy} }}"
 
 let private renderQueryLikeAnnotation (annotation: QueryLikeAnnotation) =
   $"{{ columns = {renderList renderStringLiteral annotation.columns} }}"

@@ -8,7 +8,7 @@ type Marker = class end
 [<AutoIncPK "id">]
 [<Unique "name">]
 [<Default("age", "18")>]
-[<SelectBy "name">]
+[<SelectBy("name", OrderBy = "age DESC")>]
 [<SelectLike "name">]
 [<SelectByOrInsert "name">]
 [<SelectOne>]
@@ -23,6 +23,7 @@ type CodegenFixture = { id: int64; name: string; age: int64 }
 [<SelectOne>]
 [<InsertOrIgnore>]
 [<DeleteAll>]
+[<Upsert>]
 type Person = { id: string; name: string }
 
 type PersonExt = Email of Person * email: string

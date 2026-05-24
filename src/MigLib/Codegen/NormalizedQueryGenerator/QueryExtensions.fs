@@ -7,6 +7,7 @@ open MigLib.Codegen
 open MigLib.Codegen.AstExprBuilders
 open MigLib.Codegen.NormalizedSchema
 open MigLib.Codegen.NormalizedQueryGeneratorCommon
+open MigLib.Codegen.SqlFragments
 open MigLib.Codegen.SqlParamBindings
 
 let private commandLambda (bindings: string list) =
@@ -73,6 +74,7 @@ let generateNormalizedQueryBy (normalized: NormalizedTable) (annotation: QueryBy
       $"SELECT {allSelects} FROM {normalized.baseTable.name} AS b WHERE {whereClause}"
     else
       $"SELECT {allSelects}\n        FROM {normalized.baseTable.name} AS b\n        {joins}\n        WHERE {whereClause}"
+      |> appendOrderBy annotation.orderBy
 
   let bindings =
     annotation.columns

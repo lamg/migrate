@@ -6,6 +6,7 @@ open type Fabulous.AST.Ast
 open MigLib.Codegen
 open MigLib.Codegen.AstExprBuilders
 open MigLib.Codegen.QueryGeneratorCommon
+open MigLib.Codegen.SqlFragments
 open MigLib.Codegen.SqlParamBindings
 
 let generateViewGetAll (viewName: string) (columns: ViewColumn list) =
@@ -116,7 +117,8 @@ let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotatio
     [ typedTupledOrSingleParam parameters; txParam ]
     $"Task<Result<{typeName} list, SqliteException>>"
     "queryList"
-    $"SELECT {columnNames} FROM {viewName} WHERE {whereClause}"
+    ($"SELECT {columnNames} FROM {viewName} WHERE {whereClause}"
+     |> appendOrderBy annotation.orderBy)
     $"(fun cmd ->\n        {asyncParamBindings})"
     fieldMappings
 

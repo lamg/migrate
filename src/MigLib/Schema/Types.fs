@@ -63,7 +63,9 @@ type ViewColumn =
     enumLikeDu: EnumLikeDu option
     unitOfMeasure: string option }
 
-type QueryByAnnotation = { columns: string list }
+type QueryByAnnotation =
+  { columns: string list
+    orderBy: string option }
 
 type QueryLikeAnnotation = { columns: string list }
 

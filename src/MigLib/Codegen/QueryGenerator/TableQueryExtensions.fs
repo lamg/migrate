@@ -6,6 +6,7 @@ open type Fabulous.AST.Ast
 open MigLib.Codegen
 open MigLib.Codegen.AstExprBuilders
 open MigLib.Codegen.QueryGeneratorCommon
+open MigLib.Codegen.SqlFragments
 open MigLib.Codegen.SqlParamBindings
 
 let validateQueryByAnnotation (table: CreateTable) (annotation: QueryByAnnotation) : Result<unit, string> =
@@ -84,7 +85,8 @@ let generateQueryBy (table: CreateTable) (annotation: QueryByAnnotation) =
     [ typedTupledOrSingleParam parameters; txParam ]
     $"Task<Result<{typeName} list, SqliteException>>"
     "queryList"
-    $"SELECT {columnNames} FROM {table.name} WHERE {whereClause}"
+    ($"SELECT {columnNames} FROM {table.name} WHERE {whereClause}"
+     |> appendOrderBy annotation.orderBy)
     configureExpr
     fieldMappings
 

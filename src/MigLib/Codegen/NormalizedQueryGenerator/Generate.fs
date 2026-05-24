@@ -12,12 +12,6 @@ open MigLib.Codegen.NormalizedQueryGeneratorQueryExtensions
 let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, string> =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
 
-  let upsertValidationResult =
-    if normalized.baseTable.upsertAnnotations.IsEmpty then
-      Ok()
-    else
-      Error $"Upsert annotation is not supported on normalized table '{normalized.baseTable.name}'."
-
   let queryByValidationResults =
     normalized.baseTable.queryByAnnotations
     |> List.map (validateNormalizedQueryByAnnotation normalized)
@@ -31,8 +25,7 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
     |> List.map (validateNormalizedQueryByOrCreateAnnotation normalized)
 
   let firstError =
-    [ upsertValidationResult ]
-    @ queryByValidationResults
+    queryByValidationResults
     @ queryLikeValidationResults
     @ queryByOrCreateValidationResults
     |> List.tryFind (function
@@ -55,6 +48,12 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
     let getOneMethod = generateGetOne normalized
     let updateMethod = generateUpdate normalized
     let deleteMethod = generateDelete normalized
+
+    let upsertMethod =
+      if normalized.baseTable.upsertAnnotations.IsEmpty then
+        None
+      else
+        generateUpsert normalized
 
     let deleteAllMethod =
       if normalized.baseTable.deleteAllAnnotations.IsEmpty then
@@ -81,6 +80,7 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
         getByIdMethod
         Some getOneMethod
         updateMethod
+        upsertMethod
         deleteMethod
         deleteAllMethod ]
       @ (queryByMethods |> List.map Some)
