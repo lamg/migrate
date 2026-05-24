@@ -34,10 +34,10 @@ let restore = "restore"
 let buildDomainModeling = "build-domain-modeling"
 
 [<Literal>]
-let codegen = "codegen"
+let generate = "generate"
 
 [<Literal>]
-let buildExample = "build-example"
+let build = "build"
 
 [<Literal>]
 let init = "init"
@@ -81,16 +81,16 @@ Target.create restore (fun _ ->
 
 Target.create buildDomainModeling (fun _ -> runDotNetCommand "build" $"\"{domainModelingProjectPath}\" --no-restore")
 
-Target.create codegen (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPath}\" -- codegen -d \"{rootDir}\"")
+Target.create generate (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPath}\" -- codegen -d \"{rootDir}\"")
 
-Target.create buildExample (fun _ -> runDotNetCommand "build" $"\"{exampleProjectPath}\" --no-restore")
+Target.create build (fun _ -> runDotNetCommand "build" $"\"{exampleProjectPath}\" --no-restore")
 
 Target.create init (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPath}\" -- init -d \"{rootDir}\"")
 
 Target.create run (fun _ -> runDotNetCommand "run" $"--project \"{exampleProjectPath}\" --no-build")
 
-clean ==> restore ==> buildDomainModeling ==> codegen ==> buildExample ==> run
+clean ==> restore ==> buildDomainModeling ==> generate ==> build ==> run
 
-clean ==> restore ==> buildDomainModeling ==> codegen ==> init
+clean ==> restore ==> buildDomainModeling ==> generate ==> init
 
 Target.runOrDefault target

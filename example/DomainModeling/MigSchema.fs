@@ -12,5 +12,7 @@ open MigLib.Dsl.Attributes
 [<SelectOne>]
 [<InsertOrIgnore>]
 [<DeleteAll>]
-[<Upsert>]
 type Student = { id: int64; name: string; age: int64 }
+
+type StudentOpt =
+| WithAddress of Student * address:string

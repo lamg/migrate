@@ -144,18 +144,35 @@ let private generateProperty (typeName: string) (field: FieldInfo) (normalized: 
     else
       $"{field.FSharpType} option"
 
+  let fieldVariableName =
+    field.Name.ToLower().[0..0]
+    + (if field.Name.Length > 1 then field.Name[1..] else "")
+
   let createMatchClause caseName (columns: ColumnDef list) =
     let hasField =
       columns
       |> List.exists (fun col -> TypeGenerator.toPascalCase col.name = field.Name)
 
-    let pattern = LongIdentPat($"{typeName}.{caseName}", NamedPat("data"))
+    let fieldPatternPart (col: ColumnDef) =
+      if TypeGenerator.toPascalCase col.name = field.Name then
+        fieldVariableName
+      else
+        "_"
+
+    let fieldPattern =
+      columns
+      |> List.map fieldPatternPart
+      |> function
+        | [ name ] -> NamedPat name
+        | names -> names |> List.map NamedPat |> TuplePat |> ParenPat
+
+    let pattern = LongIdentPat($"{typeName}.{caseName}", fieldPattern)
 
     if hasField then
       if field.InAllCases then
-        MatchClauseExpr(pattern, ConstantExpr($"data.{field.Name}"))
+        MatchClauseExpr(pattern, ConstantExpr fieldVariableName)
       else
-        MatchClauseExpr(pattern, AppExpr("Some", [ $"data.{field.Name}" ]))
+        MatchClauseExpr(pattern, AppExpr("Some", [ fieldVariableName ]))
     else
       MatchClauseExpr(LongIdentPat($"{typeName}.{caseName}", "_"), ConstantExpr("None"))
 
