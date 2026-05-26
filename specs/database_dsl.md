@@ -614,7 +614,7 @@ Query attributes (`SelectBy`, `SelectLike`, etc.) work on views the same way as 
 
 ### Seed data
 
-Module-level `let` bindings of record types or lists of record types are translated as `INSERT OR REPLACE` statements. The values are inserted in dependency order respecting foreign keys.
+Module-level `let` bindings of record types or lists of record types are translated as seed insert statements. Fresh initialization applies them with strict `INSERT INTO` semantics. Migration applies missing seed rows after copying source data, ignoring conflicts so existing source rows win over seed defaults. The values are inserted in dependency order respecting foreign keys.
 
 ```fsharp
 [<AutoIncPK "id">]
@@ -635,11 +635,11 @@ let defaultStudent = { id = 1L; name = "System"; age = 0L }
 translates to
 
 ```sql
-INSERT OR REPLACE INTO role(id, name) VALUES (1, 'admin');
-INSERT OR REPLACE INTO role(id, name) VALUES (2, 'teacher');
-INSERT OR REPLACE INTO role(id, name) VALUES (3, 'student');
+INSERT INTO role(id, name) VALUES (1, 'admin');
+INSERT INTO role(id, name) VALUES (2, 'teacher');
+INSERT INTO role(id, name) VALUES (3, 'student');
 
-INSERT OR REPLACE INTO student(id, name, age) VALUES (1, 'System', 0);
+INSERT INTO student(id, name, age) VALUES (1, 'System', 0);
 ```
 
 Nested seed values also support composite foreign keys. If a field references a type with a composite primary key, the seed expands that nested value into all generated FK columns in PK order.

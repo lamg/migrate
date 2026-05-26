@@ -17,12 +17,26 @@ let findOldSchema (reportProgress: ProgReport) (project: ResolvedProject) : Task
   }
 
 let prepareNewDb (reportProgress: ProgReport) (project: ResolvedProject) : Task<Result<string, MigError>> =
-  taskResult {
+  task {
     if File.Exists project.targetDbPath then
       do! reportProgress "File already exists"
-      return project.targetDbPath
+      return Ok project.targetDbPath
     else
       do! reportProgress $"Creating target database: {project.targetDbPath}"
-      let! (initResult: InitResult) = runInitWithSchema project.targetSchema.schema project.targetDbPath
-      return initResult.newDbPath
+
+      match project.sourceDbPath with
+      | Some _ ->
+        return! createDatabaseWithSchema project.targetSchema.schema project.targetDbPath
+      | None ->
+        let! createResult = createDatabaseWithSchema project.targetSchema.schema project.targetDbPath
+
+        match createResult with
+        | Ok path ->
+          use conn = MigLib.Sqlite.openConnection path
+          let! seedResult = MigLib.Init.SchemaInit.seedDatabase conn project.targetSchema.schema
+
+          match seedResult with
+          | Ok _ -> return Ok path
+          | Error e -> return Error e
+        | Error e -> return Error e
   }

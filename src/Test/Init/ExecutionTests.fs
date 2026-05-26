@@ -57,8 +57,19 @@ let private assertRegularErrorContains expectedText result =
   | Error error -> failwith $"Expected MigError.Regular, got: {error}"
   | Ok value -> failwith $"Expected error, got: {value}"
 
+let private project dbPath schema =
+  { targetDbPath = dbPath
+    targetSchema =
+      { schema = schema
+        schemaHash = "0123456789abcdef"
+        dbApp = "app"
+        defaultDbInstance = "main" }
+    sourceDbPath = None
+    sourceDbSchema = None
+    archiveDir = Path.Combine(Path.GetDirectoryName dbPath, "archive") }
+
 [<Fact>]
-let ``runInitWithSchema creates and seeds database`` () =
+let ``init creates and seeds database`` () =
   let tempDir = createTempDir "mig_commands_init_schema"
 
   try
@@ -70,7 +81,7 @@ let ``runInitWithSchema creates and seeds database`` () =
             columns = [ "id"; "name" ]
             values = [ [ Integer 1; String "Ada" ]; [ Integer 2; String "Grace" ] ] } ]
 
-    match runInitWithSchema schema dbPath |> fun task -> task.Result with
+    match init (project dbPath schema) |> fun task -> task.Result with
     | Ok result ->
       Assert.Equal(dbPath, result.newDbPath)
       Assert.Equal(2L, result.seededRows)
@@ -85,7 +96,7 @@ let ``runInitWithSchema creates and seeds database`` () =
     Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``runInitWithSchema fails when database already exists`` () =
+let ``createDatabaseWithSchema fails when database already exists`` () =
   let tempDir = createTempDir "mig_commands_init_existing"
 
   try
@@ -93,14 +104,14 @@ let ``runInitWithSchema fails when database already exists`` () =
     File.WriteAllText(dbPath, "")
     let schema = studentSchema []
 
-    runInitWithSchema schema dbPath
+    createDatabaseWithSchema schema dbPath
     |> fun task -> task.Result
     |> assertRegularErrorContains "Database already exists"
   finally
     Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``runInitWithSchema validates seed column counts`` () =
+let ``init validates seed column counts`` () =
   let tempDir = createTempDir "mig_commands_init_bad_seed"
 
   try
@@ -112,7 +123,7 @@ let ``runInitWithSchema validates seed column counts`` () =
             columns = [ "id"; "name" ]
             values = [ [ Integer 1 ] ] } ]
 
-    runInitWithSchema schema dbPath
+    init (project dbPath schema)
     |> fun task -> task.Result
     |> assertRegularErrorContains "has 1 value(s) but 2 column(s)"
   finally

@@ -147,7 +147,21 @@ let private validateSeedInserts (targetSchema: SqlFile) =
           Some
             $"Seed insert for table '{insert.table}' has {rowValues.Length} value(s) but {insert.columns.Length} column(s)."))
 
-let private applySeedInserts (connection: SqliteConnection) (tx: SqliteTransaction) (targetSchema: SqlFile) =
+type private SeedConflictHandling =
+  | Strict
+  | IgnoreConflicts
+
+let private seedInsertPrefix =
+  function
+  | Strict -> "INSERT INTO"
+  | IgnoreConflicts -> "INSERT OR IGNORE INTO"
+
+let private applySeedInserts
+  conflictHandling
+  (connection: SqliteConnection)
+  (tx: SqliteTransaction)
+  (targetSchema: SqlFile)
+  =
   task {
     let mutable seededRows = 0L
 
@@ -159,7 +173,7 @@ let private applySeedInserts (connection: SqliteConnection) (tx: SqliteTransacti
         insert.columns |> List.mapi (fun i _ -> $"@p{i}") |> String.concat ", "
 
       let insertSql =
-        $"INSERT OR IGNORE INTO {quoteIdentifier insert.table} ({escapedColumns}) VALUES ({parameterNames})"
+        $"{seedInsertPrefix conflictHandling} {quoteIdentifier insert.table} ({escapedColumns}) VALUES ({parameterNames})"
 
       for rowValues in insert.values do
         use insertCmd = createCommand connection tx insertSql
@@ -167,8 +181,8 @@ let private applySeedInserts (connection: SqliteConnection) (tx: SqliteTransacti
         rowValues
         |> List.iteri (fun i value -> insertCmd.Parameters.AddWithValue($"@p{i}", exprToDbValue value) |> ignore)
 
-        let! _ = insertCmd.ExecuteNonQueryAsync()
-        seededRows <- seededRows + 1L
+        let! rows = insertCmd.ExecuteNonQueryAsync()
+        seededRows <- seededRows + int64 rows
 
     return seededRows
   }
@@ -191,7 +205,7 @@ let initializeDatabaseFromSchemaOnly
     | ex -> return Error(MigError.Other ex)
   }
 
-let seedDatabase (conn: SqliteConnection) (targetSchema: SqlFile): Task<Result<int64, MigError>> =
+let private seedDatabaseWith conflictHandling (conn: SqliteConnection) (targetSchema: SqlFile) : Task<Result<int64, MigError>> =
   task {
     try
       use tx = conn.BeginTransaction()
@@ -200,7 +214,7 @@ let seedDatabase (conn: SqliteConnection) (targetSchema: SqlFile): Task<Result<i
         tx.Rollback()
         return Error(MigError.Regular message)
       | None ->
-        let! seededRows = applySeedInserts conn tx targetSchema
+        let! seededRows = applySeedInserts conflictHandling conn tx targetSchema
 
         use fkOnCmd = createCommand conn tx "PRAGMA foreign_keys = ON;"
         let! _ = fkOnCmd.ExecuteNonQueryAsync()
@@ -211,3 +225,9 @@ let seedDatabase (conn: SqliteConnection) (targetSchema: SqlFile): Task<Result<i
     | :? SqliteException as ex -> return Error(MigError.Sqlite ex)
     | ex -> return Error(MigError.Other ex)
   }
+
+let seedDatabase (conn: SqliteConnection) (targetSchema: SqlFile) : Task<Result<int64, MigError>> =
+  seedDatabaseWith Strict conn targetSchema
+
+let seedDatabaseIgnoringConflicts (conn: SqliteConnection) (targetSchema: SqlFile) : Task<Result<int64, MigError>> =
+  seedDatabaseWith IgnoreConflicts conn targetSchema

@@ -10,6 +10,8 @@ open MigLib.Migrate.Archive
 open MigLib.Migrate.DataCopy
 open MigLib.Migrate.Discovery
 open MigLib.Migrate.Planning
+open MigLib.Init.SchemaInit
+open MigLib.Sqlite
 
 let private formatUnsupportedDifferences (differences: string list) =
   let details =
@@ -18,6 +20,19 @@ let private formatUnsupportedDifferences (differences: string list) =
     |> String.concat Environment.NewLine
 
   $"Migration plan has unsupported differences:{Environment.NewLine}{details}"
+
+let private applyMissingSeedsAfterCopy reportProgress newDbPath targetSchema : Task<Result<int64, MigError>> =
+  task {
+    do! reportProgress "Applying missing seed rows after data copy"
+    use connection = openConnection newDbPath
+    let! seedResult = seedDatabaseIgnoringConflicts connection targetSchema
+
+    match seedResult with
+    | Error error -> return Error error
+    | Ok seededRows ->
+      do! reportProgress $"Applied {seededRows} seed row(s) after data copy."
+      return Ok seededRows
+  }
 
 let migrate (reportProgress: ProgReport) (project: ResolvedProject) : Task<Result<MigrateResult, MigError>> =
   taskResult {
@@ -45,6 +60,11 @@ let migrate (reportProgress: ProgReport) (project: ResolvedProject) : Task<Resul
         | Some sourceSchema, Some sourceDbPath ->
           copyData reportProgress sourceDbPath newDbPath sourceSchema migrationPlan.targetSchema
         | _ -> Task.FromResult(Ok { copiedTables = 0; copiedRows = 0L })
+
+      let! (_: int64) =
+        match migrationPlan.result.sourceDbPath with
+        | Some _ -> applyMissingSeedsAfterCopy reportProgress newDbPath migrationPlan.targetSchema
+        | None -> Task.FromResult(Ok 0L)
 
       let! archivedOldDbPath =
         match migrationPlan.result.sourceDbPath with

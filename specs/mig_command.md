@@ -109,8 +109,9 @@ Behavior:
 2. Refuse to run when unsupported differences are present.
 3. Create the new target database.
 4. Copy compatible data from the inferred source database when one exists.
-5. Mark the source database readonly and move it into `archive/` next to the database directory.
-6. Return a ready-to-use target database path.
+5. Apply missing seed rows with conflict-ignore semantics when a source database existed, so copied source rows win over seed defaults.
+6. Mark the source database readonly and move it into `archive/` next to the database directory.
+7. Return a ready-to-use target database path.
 
 Output includes:
 

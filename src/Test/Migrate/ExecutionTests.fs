@@ -7,6 +7,7 @@ open Microsoft.Data.Sqlite
 
 open MigLib.Migrate.Execution
 open MigLib.Resolution.Projects
+open MigLib.Schema.Types
 open MigLib.Types
 open Xunit
 
@@ -88,6 +89,53 @@ let private assertRegularErrorContains expectedText result =
   | Error error -> failwith $"Expected MigError.Regular, got: {error}"
   | Ok value -> failwith $"Expected error, got: {value}"
 
+let private generatedFixtureTableWithName =
+  { name = "generated_fixture"
+    previousName = None
+    dropColumns = []
+    columns =
+      [ { name = "id"
+          previousName = None
+          columnType = SqlInteger
+          constraints =
+            [ NotNull
+              PrimaryKey
+                { constraintName = None
+                  columns = []
+                  isAutoincrement = false } ]
+          enumLikeDu = None
+          unitOfMeasure = None }
+        { name = "name"
+          previousName = None
+          columnType = SqlText
+          constraints = [ NotNull ]
+          enumLikeDu = None
+          unitOfMeasure = None } ]
+    constraints = []
+    queryByAnnotations = []
+    queryLikeAnnotations = []
+    queryByOrCreateAnnotations = []
+    selectOneAnnotations = []
+    insertOrIgnoreAnnotations = []
+    deleteAllAnnotations = []
+    upsertAnnotations = [] }
+
+let private projectWithSeededGeneratedFixture tempDir =
+  let project = makeProject tempDir
+
+  let targetSql =
+    { project.targetSchema.schema with
+        tables = [ generatedFixtureTableWithName ]
+        inserts =
+          [ { table = "generated_fixture"
+              columns = [ "id"; "name" ]
+              values =
+                [ [ Integer 1; String "seed-conflict" ]
+                  [ Integer 3; String "seed-default" ] ] } ] }
+
+  { project with
+      targetSchema = { project.targetSchema with schema = targetSql } }
+
 [<Fact>]
 let ``migrate creates target database when no source exists`` () =
   let tempDir = createTempDir "mig_execution_no_source"
@@ -144,6 +192,38 @@ let ``migrate copies compatible source rows`` () =
 
       use archiveConnection = openConnection (archivedSourceDbPath tempDir)
       Assert.Equal(1L, scalar<int64> archiveConnection "SELECT COUNT(*) FROM _mig_readonly WHERE id = 1")
+    | Error error -> failwith $"Expected migrate to succeed, got: {error}"
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``migrate copies source rows before applying missing seeds`` () =
+  let tempDir = createTempDir "mig_execution_copy_before_seed"
+
+  try
+    writeProjectLayout tempDir
+    use sourceConnection = openConnection (sourceDbPath tempDir)
+    executeSql sourceConnection "CREATE TABLE generated_fixture(id INTEGER NOT NULL, name TEXT NOT NULL);"
+    executeSql sourceConnection "INSERT INTO generated_fixture(id, name) VALUES (1, 'source'), (2, 'source-only');"
+    sourceConnection.Close()
+
+    let messages = ResizeArray<string>()
+
+    let report message =
+      messages.Add message
+      Task.FromResult()
+
+    match migrate report (projectWithSeededGeneratedFixture tempDir) |> fun task -> task.Result with
+    | Ok result ->
+      Assert.Equal(1, result.copiedTables)
+      Assert.Equal(2L, result.copiedRows)
+      Assert.Contains(messages, fun message -> message.Contains "Applying missing seed rows after data copy")
+
+      use targetConnection = openConnection result.newDbPath
+      Assert.Equal(3L, scalar<int64> targetConnection "SELECT COUNT(*) FROM generated_fixture")
+      Assert.Equal("source", scalar<string> targetConnection "SELECT name FROM generated_fixture WHERE id = 1")
+      Assert.Equal("source-only", scalar<string> targetConnection "SELECT name FROM generated_fixture WHERE id = 2")
+      Assert.Equal("seed-default", scalar<string> targetConnection "SELECT name FROM generated_fixture WHERE id = 3")
     | Error error -> failwith $"Expected migrate to succeed, got: {error}"
   finally
     Directory.Delete(tempDir, true)
