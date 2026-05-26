@@ -25,11 +25,15 @@ let runInitWithSchema (targetSchema: SqlFile) (newDbPath: string) : Task<Result<
 
         match initResult with
         | Error error -> return Error error
-        | Ok seededRows ->
-          return
-            Ok
-              { newDbPath = Path.GetFullPath newDbPath
-                seededRows = seededRows }
+        | Ok () ->
+          let! seedResult = seedDatabase newConnection targetSchema
+          match seedResult with
+          | Ok seededRows ->
+            return
+              Ok
+                { newDbPath = Path.GetFullPath newDbPath
+                  seededRows = seededRows }
+          | Error e -> return Error e
     with
     | :? Microsoft.Data.Sqlite.SqliteException as ex -> return Error(MigError.Sqlite ex)
     | ex -> return Error(MigError.Other ex)

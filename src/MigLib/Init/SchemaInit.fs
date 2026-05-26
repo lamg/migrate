@@ -159,7 +159,7 @@ let private applySeedInserts (connection: SqliteConnection) (tx: SqliteTransacti
         insert.columns |> List.mapi (fun i _ -> $"@p{i}") |> String.concat ", "
 
       let insertSql =
-        $"INSERT INTO {quoteIdentifier insert.table} ({escapedColumns}) VALUES ({parameterNames})"
+        $"INSERT OR IGNORE INTO {quoteIdentifier insert.table} ({escapedColumns}) VALUES ({parameterNames})"
 
       for rowValues in insert.values do
         use insertCmd = createCommand connection tx insertSql
@@ -176,7 +176,7 @@ let private applySeedInserts (connection: SqliteConnection) (tx: SqliteTransacti
 let initializeDatabaseFromSchemaOnly
   (newConnection: SqliteConnection)
   (targetSchema: SqlFile)
-  : Task<Result<int64, MigError>> =
+  : Task<Result<unit, MigError>> =
   task {
     try
       use tx = newConnection.BeginTransaction()
@@ -184,15 +184,25 @@ let initializeDatabaseFromSchemaOnly
       let! _ = fkOffCmd.ExecuteNonQueryAsync()
 
       do! createSchemaObjects newConnection tx targetSchema
+      do tx.Commit()
+      return Ok ()
+    with
+    | :? SqliteException as ex -> return Error(MigError.Sqlite ex)
+    | ex -> return Error(MigError.Other ex)
+  }
 
+let seedDatabase (conn: SqliteConnection) (targetSchema: SqlFile): Task<Result<int64, MigError>> =
+  task {
+    try
+      use tx = conn.BeginTransaction()
       match validateSeedInserts targetSchema with
       | Some message ->
         tx.Rollback()
         return Error(MigError.Regular message)
       | None ->
-        let! seededRows = applySeedInserts newConnection tx targetSchema
+        let! seededRows = applySeedInserts conn tx targetSchema
 
-        use fkOnCmd = createCommand newConnection tx "PRAGMA foreign_keys = ON;"
+        use fkOnCmd = createCommand conn tx "PRAGMA foreign_keys = ON;"
         let! _ = fkOnCmd.ExecuteNonQueryAsync()
 
         tx.Commit()
