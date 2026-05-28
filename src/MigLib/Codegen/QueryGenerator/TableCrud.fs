@@ -62,8 +62,10 @@ let generateInsert (table: CreateTable) =
     lambdaExpr
       "newId"
       (taskExpr
-        [ OtherExpr($"Recording.recordInsert tx \"{table.name}\" {rowDataPairs}")
-          OtherExpr(returnExprRaw "Ok newId") ])
+        [
+          OtherExpr($"Recording.recordInsert tx \"{table.name}\" {rowDataPairs}")
+          OtherExpr(returnExprRaw "Ok newId")
+        ])
 
   staticMember
     "Insert"
@@ -113,18 +115,24 @@ let generateInsertOrIgnore (table: CreateTable) =
     lambdaExpr
       "newId"
       (taskExpr
-        [ OtherExpr(
+        [
+          OtherExpr(
             MatchExpr(
               "newId",
-              [ MatchClauseExpr("None", returnExprRaw "Ok None")
+              [
+                MatchClauseExpr("None", returnExprRaw "Ok None")
                 MatchClauseExpr(
                   "Some newId",
                   rawStatementsExpr
-                    [ $"Recording.recordInsert tx \"{table.name}\" {rowDataPairs}"
-                      "return Ok (Some newId)" ]
-                ) ]
+                    [
+                      $"Recording.recordInsert tx \"{table.name}\" {rowDataPairs}"
+                      "return Ok (Some newId)"
+                    ]
+                )
+              ]
             )
-          ) ])
+          )
+        ])
 
   staticMember
     "InsertOrIgnore"
@@ -226,18 +234,28 @@ let generateUpdate (table: CreateTable) =
       table.columns |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
 
     let body =
-      taskExpr
-        [ LetOrUseBangExpr(NamedPat("updateResult"), executeWriteUnitExpr updateSql paramBindings)
+      CompExprBodyExpr(
+        [
+          LetOrUseExpr(
+            Function("recordUpdate", UnitPat(), rawExpr $"Recording.recordUpdate tx \"{table.name}\" {rowDataExpr}")
+          )
           OtherExpr(
-            MatchExpr(
-              "updateResult",
-              [ MatchClauseExpr("Error ex", returnExprRaw "Error ex")
-                MatchClauseExpr(
-                  "Ok ()",
-                  rawStatementsExpr [ $"Recording.recordUpdate tx \"{table.name}\" {rowDataExpr}"; "return Ok()" ]
-                ) ]
-            )
-          ) ]
+            taskExpr
+              [
+                LetOrUseBangExpr(NamedPat("updateResult"), executeWriteUnitExpr updateSql paramBindings)
+                OtherExpr(
+                  MatchExpr(
+                    "updateResult",
+                    [
+                      MatchClauseExpr("Error ex", returnExprRaw "Error ex")
+                      MatchClauseExpr("Ok ()", rawStatementsExpr [ "recordUpdate ()"; "return Ok()" ])
+                    ]
+                  )
+                )
+              ]
+          )
+        ]
+      )
 
     Some(staticMember "Update" [ typedParenParam "item" typeName; txParam ] body "Task<Result<unit, SqliteException>>")
 
@@ -264,17 +282,21 @@ let generateDelete (table: CreateTable) =
 
     let body =
       taskExpr
-        [ LetOrUseBangExpr(NamedPat("deleteResult"), executeWriteUnitExpr deleteSql paramBindings)
+        [
+          LetOrUseBangExpr(NamedPat("deleteResult"), executeWriteUnitExpr deleteSql paramBindings)
           OtherExpr(
             MatchExpr(
               "deleteResult",
-              [ MatchClauseExpr("Error ex", returnExprRaw "Error ex")
+              [
+                MatchClauseExpr("Error ex", returnExprRaw "Error ex")
                 MatchClauseExpr(
                   "Ok ()",
                   rawStatementsExpr [ $"Recording.recordDelete tx \"{table.name}\" {rowDataExpr}"; "return Ok()" ]
-                ) ]
+                )
+              ]
             )
-          ) ]
+          )
+        ]
 
     Some(staticMember "Delete" (parameters @ [ txParam ]) body "Task<Result<unit, SqliteException>>")
 
@@ -302,9 +324,11 @@ let generateUpsert (table: CreateTable) =
     let body =
       AppExpr(
         "upsertByExisting",
-        [ lambdaRawExpr "()" $"{typeName}.SelectById {selectByIdArgs} tx"
+        [
+          lambdaRawExpr "()" $"{typeName}.SelectById {selectByIdArgs} tx"
           lambdaRawExpr "()" $"{typeName}.Update item tx"
-          lambdaRawExpr "()" $"{typeName}.Insert item tx" ]
+          lambdaRawExpr "()" $"{typeName}.Insert item tx"
+        ]
       )
 
     Some(staticMember "Upsert" [ typedParenParam "item" typeName; txParam ] body "Task<Result<unit, SqliteException>>")
