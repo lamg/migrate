@@ -88,7 +88,6 @@ let executeWrite
     try
       use cmd = new SqliteCommand(sql, tx.Connection, tx)
       configure cmd
-      Recording.ensureWriteAllowed tx
       let! rows = cmd.ExecuteNonQueryAsync()
       return! finish rows
     with :? SqliteException as ex ->

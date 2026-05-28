@@ -24,7 +24,6 @@ let private executeWriteUnitExpr (sql: string) (bindings: string list) =
 let generateInsert (table: CreateTable) =
   let typeName = capitalizeName table.name
   let pkCols = getPrimaryKey table
-  let autoPkColName = getAutoIncrementPrimaryKeyColumnName table
 
   let insertCols =
     table.columns
@@ -50,22 +49,7 @@ let generateInsert (table: CreateTable) =
   let paramBindings =
     insertCols |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
 
-  let rowDataPairs =
-    (insertCols |> List.map (rowDataPairExprForItem "item"))
-    @ (match autoPkColName with
-       | Some colName -> [ $"\"{colName}\", box newId" ]
-       | None -> [])
-    |> String.concat "; "
-    |> fun pairs -> $"[{pairs}]"
-
-  let onSuccess =
-    lambdaExpr
-      "newId"
-      (taskExpr
-        [
-          OtherExpr($"Recording.recordInsert tx \"{table.name}\" {rowDataPairs}")
-          OtherExpr(returnExprRaw "Ok newId")
-        ])
+  let onSuccess = lambdaRawExpr "newId" "Task.FromResult(Ok newId)"
 
   staticMember
     "Insert"
@@ -76,7 +60,6 @@ let generateInsert (table: CreateTable) =
 let generateInsertOrIgnore (table: CreateTable) =
   let typeName = capitalizeName table.name
   let pkCols = getPrimaryKey table
-  let autoPkColName = getAutoIncrementPrimaryKeyColumnName table
 
   let insertCols =
     table.columns
@@ -103,36 +86,8 @@ let generateInsertOrIgnore (table: CreateTable) =
   let paramBindings =
     insertCols |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
 
-  let rowDataPairs =
-    (insertCols |> List.map (rowDataPairExprForItem "item"))
-    @ (match autoPkColName with
-       | Some colName -> [ $"\"{colName}\", box newId" ]
-       | None -> [])
-    |> String.concat "; "
-    |> fun pairs -> $"[{pairs}]"
-
   let onSuccess =
-    lambdaExpr
-      "newId"
-      (taskExpr
-        [
-          OtherExpr(
-            MatchExpr(
-              "newId",
-              [
-                MatchClauseExpr("None", returnExprRaw "Ok None")
-                MatchClauseExpr(
-                  "Some newId",
-                  rawStatementsExpr
-                    [
-                      $"Recording.recordInsert tx \"{table.name}\" {rowDataPairs}"
-                      "return Ok (Some newId)"
-                    ]
-                )
-              ]
-            )
-          )
-        ])
+    lambdaExpr "newId" (rawExpr "Task.FromResult(match newId with | None -> Ok None | Some newId -> Ok(Some newId))")
 
   staticMember
     "InsertOrIgnore"
@@ -210,7 +165,6 @@ let generateGetOne (table: CreateTable) =
 let generateUpdate (table: CreateTable) =
   let typeName = capitalizeName table.name
   let pkCols = getPrimaryKey table
-  let rowDataExpr = rowDataListExprForItem "item" table.columns
 
   match pkCols with
   | [] -> None
@@ -233,35 +187,16 @@ let generateUpdate (table: CreateTable) =
     let paramBindings =
       table.columns |> List.map (fun col -> paramBindingExprForItem "cmd" "item" col)
 
-    let body =
-      CompExprBodyExpr(
-        [
-          LetOrUseExpr(
-            Function("recordUpdate", UnitPat(), rawExpr $"Recording.recordUpdate tx \"{table.name}\" {rowDataExpr}")
-          )
-          OtherExpr(
-            taskExpr
-              [
-                LetOrUseBangExpr(NamedPat("updateResult"), executeWriteUnitExpr updateSql paramBindings)
-                OtherExpr(
-                  MatchExpr(
-                    "updateResult",
-                    [
-                      MatchClauseExpr("Error ex", returnExprRaw "Error ex")
-                      MatchClauseExpr("Ok ()", rawStatementsExpr [ "recordUpdate ()"; "return Ok()" ])
-                    ]
-                  )
-                )
-              ]
-          )
-        ]
-      )
-
-    Some(staticMember "Update" [ typedParenParam "item" typeName; txParam ] body "Task<Result<unit, SqliteException>>")
+    Some(
+      staticMember
+        "Update"
+        [ typedParenParam "item" typeName; txParam ]
+        (executeWriteUnitExpr updateSql paramBindings)
+        "Task<Result<unit, SqliteException>>"
+    )
 
 let generateDelete (table: CreateTable) =
   let pkCols = getPrimaryKey table
-  let rowDataExpr = rowDataListExprForParams pkCols
 
   match pkCols with
   | [] -> None
@@ -280,25 +215,13 @@ let generateDelete (table: CreateTable) =
     let paramBindings =
       pks |> List.map (fun pk -> paramBindingExprForColumnVar "cmd" pk pk.name)
 
-    let body =
-      taskExpr
-        [
-          LetOrUseBangExpr(NamedPat("deleteResult"), executeWriteUnitExpr deleteSql paramBindings)
-          OtherExpr(
-            MatchExpr(
-              "deleteResult",
-              [
-                MatchClauseExpr("Error ex", returnExprRaw "Error ex")
-                MatchClauseExpr(
-                  "Ok ()",
-                  rawStatementsExpr [ $"Recording.recordDelete tx \"{table.name}\" {rowDataExpr}"; "return Ok()" ]
-                )
-              ]
-            )
-          )
-        ]
-
-    Some(staticMember "Delete" (parameters @ [ txParam ]) body "Task<Result<unit, SqliteException>>")
+    Some(
+      staticMember
+        "Delete"
+        (parameters @ [ txParam ])
+        (executeWriteUnitExpr deleteSql paramBindings)
+        "Task<Result<unit, SqliteException>>"
+    )
 
 let generateDeleteAll (table: CreateTable) =
   Some(

@@ -39,9 +39,3 @@ let executeInsert = Codegen.Helpers.executeInsert
 let executeInsertOrIgnore = Codegen.Helpers.executeInsertOrIgnore
 let sequenceUnitResults = Codegen.Helpers.sequenceUnitResults
 let upsertByExisting = Codegen.Helpers.upsertByExisting
-
-module Recording =
-  let ensureWriteAllowed = Runtime.Recording.ensureWriteAllowed
-  let recordInsert = Runtime.Recording.recordInsert
-  let recordUpdate = Runtime.Recording.recordUpdate
-  let recordDelete = Runtime.Recording.recordDelete

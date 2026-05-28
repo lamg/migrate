@@ -53,46 +53,6 @@ let private capitalize = TypeGenerator.toPascalCase
 
 let capitalizeName = capitalize
 
-let getAutoIncrementPrimaryKeyColumnName (table: CreateTable) : string option =
-  let tableLevelAutoPk =
-    table.constraints
-    |> List.tryPick (function
-      | PrimaryKey pk when pk.isAutoincrement && pk.columns.Length = 1 -> Some pk.columns.Head
-      | _ -> None)
-
-  match tableLevelAutoPk with
-  | Some name -> Some name
-  | None ->
-    table.columns
-    |> List.tryPick (fun column ->
-      column.constraints
-      |> List.tryPick (function
-        | PrimaryKey pk when pk.isAutoincrement -> Some column.name
-        | _ -> None))
-
-let rowDataPairExprForItem (itemExpr: string) (column: ColumnDef) : string =
-  let fieldName = capitalize column.name
-  let itemFieldExpr = $"{itemExpr}.{fieldName}"
-
-  if TypeGenerator.isColumnNullable column then
-    let storedValueExpr = TypeGenerator.toDbValueExpr column "v"
-    $"\"{column.name}\", match {itemFieldExpr} with Some v -> box {storedValueExpr} | None -> null"
-  else
-    let storedValueExpr = TypeGenerator.toDbValueExpr column itemFieldExpr
-    $"\"{column.name}\", box {storedValueExpr}"
-
-let rowDataListExprForItem (itemExpr: string) (columns: ColumnDef list) : string =
-  columns
-  |> List.map (rowDataPairExprForItem itemExpr)
-  |> String.concat "; "
-  |> fun pairs -> $"[{pairs}]"
-
-let rowDataListExprForParams (columns: ColumnDef list) : string =
-  columns
-  |> List.map (fun column -> $"\"{column.name}\", box {TypeGenerator.toDbValueExpr column column.name}")
-  |> String.concat "; "
-  |> fun pairs -> $"[{pairs}]"
-
 let findColumn (table: CreateTable) (colName: string) : ColumnDef option =
   table.columns
   |> List.tryFind (fun col -> col.name.ToLowerInvariant() = colName.ToLowerInvariant())
@@ -141,10 +101,12 @@ let renderSelectMember
   let body =
     Ast.AppExpr(
       queryHelper,
-      [ Ast.ConstantExpr(Ast.String sql)
+      [
+        Ast.ConstantExpr(Ast.String sql)
         rawExpr configureExpr
         readerLambda
-        rawExpr "tx" ]
+        rawExpr "tx"
+      ]
     )
 
   staticMember memberName parameters body returnType

@@ -93,44 +93,18 @@ let internal runTransactionInternal
     | Ok resolvedDbPath ->
       use connection = Core.openSqliteConnection connectionConfig resolvedDbPath
       use transaction = connection.BeginTransaction()
-      let! readinessResult = Recording.ensureNewDatabaseReadyForTransactions transaction
 
-      match readinessResult with
-      | Error ex ->
+      try
+        let! result = body transaction
+
+        match result with
+        | Ok value ->
+          transaction.Commit()
+          return Ok value
+        | Error _ ->
+          transaction.Rollback()
+          return result
+      with :? SqliteException as ex ->
         transaction.Rollback()
         return Error(mapDbError ex)
-      | Ok() ->
-        let! mode = Recording.detectMigrationMode transaction
-
-        let context =
-          { Core.TxnContext.tx = transaction
-            Core.TxnContext.mode = mode
-            Core.TxnContext.writes = ResizeArray() }
-
-        let previousContext = Core.txnContext.Value
-        Core.txnContext.Value <- Some context
-
-        try
-          try
-            let! result = body transaction
-
-            match result with
-            | Ok value ->
-              let! flushResult = Recording.flushRecordedWrites context
-
-              match flushResult with
-              | Ok() ->
-                transaction.Commit()
-                return Ok value
-              | Error ex ->
-                transaction.Rollback()
-                return Error(mapDbError ex)
-            | Error _ ->
-              transaction.Rollback()
-              return result
-          with :? SqliteException as ex ->
-            transaction.Rollback()
-            return Error(mapDbError ex)
-        finally
-          Core.txnContext.Value <- previousContext
   }

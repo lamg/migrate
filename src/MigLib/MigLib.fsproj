@@ -27,7 +27,6 @@
     <Compile Include="Schema/Sql.fs" />
     <Compile Include="Dsl/Attributes.fs" />
     <Compile Include="Runtime/Core.fs" />
-    <Compile Include="Runtime/Recording.fs" />
     <Compile Include="Runtime/TxnStep.fs" />
     <Compile Include="Types.fs" />
 

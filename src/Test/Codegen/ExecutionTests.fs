@@ -46,19 +46,25 @@ let private makeInputs tempDir =
     "[<MigLib.Dsl.Attributes.GeneratedDbNamespace(\"TestGeneratedDb\")>]\nmodule TestCodegenSchema.MigSchema"
 
   let project =
-    { runtimeProjectPath = runtimeProjectPath
+    {
+      runtimeProjectPath = runtimeProjectPath
       runtimeProjectDirectory = tempDir
       runtimeProjectName = "Runtime"
       domainModelingProjectPath = domainModelingProjectPath
-      domainModelingDirectory = domainModelingDirectory }
+      domainModelingDirectory = domainModelingDirectory
+    }
 
-  { project = project
+  {
+    project = project
     domainModelingAssembly =
-      { project = project
+      {
+        project = project
         assemblyName = "Test"
-        assemblyPath = typeof<TestCodegenSchema.MigSchema.Marker>.Assembly.Location }
+        assemblyPath = typeof<TestCodegenSchema.MigSchema.Marker>.Assembly.Location
+      }
     schemaSourcePath = schemaSourcePath
-    outputPath = outputPath }
+    outputPath = outputPath
+  }
 
 let private assertRegularErrorContains expectedText result =
   match result with
@@ -132,7 +138,7 @@ let ``runCodegen writes Db fs with metadata types and CRUD helpers`` () =
       Assert.Contains("static member SelectNameLike", generated)
       Assert.Contains("static member SelectByNameOrInsert", generated)
       Assert.Contains("static member Upsert", generated)
-      Assert.Contains("Recording.recordInsert", generated)
+      Assert.DoesNotContain("Recording.", generated)
     | Error error -> failwith $"Expected codegen to run, got: {error}"
   finally
     Directory.Delete(tempDir, true)
@@ -148,7 +154,9 @@ let ``runCodegen fails when generated Db namespace attribute is missing`` () =
       { inputs with
           domainModelingAssembly =
             { inputs.domainModelingAssembly with
-                assemblyPath = typeof<CodegenResult>.Assembly.Location } }
+                assemblyPath = typeof<CodegenResult>.Assembly.Location
+            }
+      }
 
     runCodegen inputs
     |> assertRegularErrorContains "does not contain a module marked with GeneratedDbNamespaceAttribute"

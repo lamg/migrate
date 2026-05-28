@@ -8,37 +8,52 @@ open MigLib.Generated
 type Marker = class end
 
 let Schema: SqlFile =
-  { measureTypes = []
+  {
+    measureTypes = []
     inserts = []
     views = []
     tables =
-      [ { name = "student"
+      [
+        {
+          name = "student"
           previousName = None
           dropColumns = []
           columns =
-            [ { name = "id"
+            [
+              {
+                name = "id"
                 previousName = None
                 columnType = SqlType.SqlInteger
                 constraints =
-                  [ ColumnConstraint.NotNull
+                  [
+                    ColumnConstraint.NotNull
                     ColumnConstraint.PrimaryKey
-                      { constraintName = None
+                      {
+                        constraintName = None
                         columns = []
-                        isAutoincrement = true } ]
+                        isAutoincrement = true
+                      }
+                  ]
                 enumLikeDu = None
-                unitOfMeasure = None }
-              { name = "name"
+                unitOfMeasure = None
+              }
+              {
+                name = "name"
                 previousName = None
                 columnType = SqlType.SqlText
                 constraints = [ ColumnConstraint.NotNull; ColumnConstraint.Unique [] ]
                 enumLikeDu = None
-                unitOfMeasure = None }
-              { name = "age"
+                unitOfMeasure = None
+              }
+              {
+                name = "age"
                 previousName = None
                 columnType = SqlType.SqlInteger
                 constraints = [ ColumnConstraint.NotNull; ColumnConstraint.Default(Expr.Integer 18) ]
                 enumLikeDu = None
-                unitOfMeasure = None } ]
+                unitOfMeasure = None
+              }
+            ]
           constraints = []
           queryByAnnotations = [ { columns = [ "name" ]; orderBy = None } ]
           queryLikeAnnotations = [ { columns = [ "name" ] } ]
@@ -46,9 +61,12 @@ let Schema: SqlFile =
           selectOneAnnotations = [ SelectOneAnnotation ]
           insertOrIgnoreAnnotations = [ InsertOrIgnoreAnnotation ]
           deleteAllAnnotations = [ DeleteAllAnnotation ]
-          upsertAnnotations = [ UpsertAnnotation ] } ]
+          upsertAnnotations = [ UpsertAnnotation ]
+        }
+      ]
     indexes = []
-    triggers = [] }
+    triggers = []
+  }
 
 type Student = { Id: int64; Name: string; Age: int64 }
 
@@ -60,11 +78,7 @@ type Student with
         cmd.Parameters.AddWithValue("@name", item.Name) |> ignore
         cmd.Parameters.AddWithValue("@age", item.Age) |> ignore)
       tx
-      (fun newId ->
-        task {
-          Recording.recordInsert tx "student" [ "name", box item.Name; "age", box item.Age; "id", box newId ]
-          return Ok newId
-        })
+      (fun newId -> Task.FromResult(Ok newId))
 
   static member InsertOrIgnore (item: Student) (tx: SqliteTransaction) : Task<Result<int64 option, SqliteException>> =
     executeInsertOrIgnore
@@ -74,22 +88,22 @@ type Student with
         cmd.Parameters.AddWithValue("@age", item.Age) |> ignore)
       tx
       (fun newId ->
-        task {
+        Task.FromResult(
           match newId with
-          | None -> return Ok None
-          | Some newId ->
-            Recording.recordInsert tx "student" [ "name", box item.Name; "age", box item.Age; "id", box newId ]
-            return Ok(Some newId)
-        })
+          | None -> Ok None
+          | Some newId -> Ok(Some newId)
+        ))
 
   static member SelectById (id: int64) (tx: SqliteTransaction) : Task<Result<Student option, SqliteException>> =
     querySingle
       "SELECT id, name, age FROM student WHERE id = @id"
       (fun cmd -> cmd.Parameters.AddWithValue("@id", id) |> ignore)
       (fun reader ->
-        { Id = reader.GetInt64 0
+        {
+          Id = reader.GetInt64 0
           Name = reader.GetString 1
-          Age = reader.GetInt64 2 })
+          Age = reader.GetInt64 2
+        })
       tx
 
   static member SelectAll(tx: SqliteTransaction) : Task<Result<Student list, SqliteException>> =
@@ -97,9 +111,11 @@ type Student with
       "SELECT id, name, age FROM student"
       (fun _ -> ())
       (fun reader ->
-        { Id = reader.GetInt64 0
+        {
+          Id = reader.GetInt64 0
           Name = reader.GetString 1
-          Age = reader.GetInt64 2 })
+          Age = reader.GetInt64 2
+        })
       tx
 
   static member SelectOne(tx: SqliteTransaction) : Task<Result<Student option, SqliteException>> =
@@ -107,43 +123,27 @@ type Student with
       "SELECT id, name, age FROM student LIMIT 1"
       (fun _ -> ())
       (fun reader ->
-        { Id = reader.GetInt64 0
+        {
+          Id = reader.GetInt64 0
           Name = reader.GetString 1
-          Age = reader.GetInt64 2 })
+          Age = reader.GetInt64 2
+        })
       tx
 
   static member Update (item: Student) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
-    task {
-      let! updateResult =
-        executeWriteUnit
-          "UPDATE student SET name = @name, age = @age WHERE id = @id"
-          (fun cmd ->
-            cmd.Parameters.AddWithValue("@id", item.Id) |> ignore
-            cmd.Parameters.AddWithValue("@name", item.Name) |> ignore
-            cmd.Parameters.AddWithValue("@age", item.Age) |> ignore)
-          tx
-
-      match updateResult with
-      | Error ex -> return Error ex
-      | Ok() ->
-        Recording.recordUpdate tx "student" [ "id", box item.Id; "name", box item.Name; "age", box item.Age ]
-        return Ok()
-    }
+    executeWriteUnit
+      "UPDATE student SET name = @name, age = @age WHERE id = @id"
+      (fun cmd ->
+        cmd.Parameters.AddWithValue("@id", item.Id) |> ignore
+        cmd.Parameters.AddWithValue("@name", item.Name) |> ignore
+        cmd.Parameters.AddWithValue("@age", item.Age) |> ignore)
+      tx
 
   static member Delete (id: int64) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
-    task {
-      let! deleteResult =
-        executeWriteUnit
-          "DELETE FROM student WHERE id = @id"
-          (fun cmd -> cmd.Parameters.AddWithValue("@id", id) |> ignore)
-          tx
-
-      match deleteResult with
-      | Error ex -> return Error ex
-      | Ok() ->
-        Recording.recordDelete tx "student" [ "id", box id ]
-        return Ok()
-    }
+    executeWriteUnit
+      "DELETE FROM student WHERE id = @id"
+      (fun cmd -> cmd.Parameters.AddWithValue("@id", id) |> ignore)
+      tx
 
   static member DeleteAll(tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
     executeWriteUnit "DELETE FROM student" (fun _ -> ()) tx
@@ -153,9 +153,11 @@ type Student with
       "SELECT id, name, age FROM student WHERE name = @name"
       (fun cmd -> cmd.Parameters.AddWithValue("@name", name) |> ignore)
       (fun reader ->
-        { Id = reader.GetInt64 0
+        {
+          Id = reader.GetInt64 0
           Name = reader.GetString 1
-          Age = reader.GetInt64 2 })
+          Age = reader.GetInt64 2
+        })
       tx
 
   static member SelectNameLike (name: string) (tx: SqliteTransaction) : Task<Result<Student list, SqliteException>> =
@@ -163,9 +165,11 @@ type Student with
       "SELECT id, name, age FROM student WHERE name LIKE '%' || @name || '%'"
       (fun cmd -> cmd.Parameters.AddWithValue("@name", name) |> ignore)
       (fun reader ->
-        { Id = reader.GetInt64 0
+        {
+          Id = reader.GetInt64 0
           Name = reader.GetString 1
-          Age = reader.GetInt64 2 })
+          Age = reader.GetInt64 2
+        })
       tx
 
   static member SelectByNameOrInsert
