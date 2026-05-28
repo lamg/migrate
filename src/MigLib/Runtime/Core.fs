@@ -31,7 +31,8 @@ let resolveDatabasePath (configuredPath: string) : Result<string, string> =
   else
     Ok(Path.GetFullPath configuredPath)
 
-let openSqliteConnection (dbPath: string) = MigLib.Sqlite.openConnection dbPath
+let openSqliteConnection connectionConfig (dbPath: string) =
+  MigLib.Sqlite.openConnectionWithConfig connectionConfig dbPath
 
 let serializeRowData (rowData: (string * obj) list) : string =
   let toJsonNode (value: obj) : JsonNode =

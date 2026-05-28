@@ -82,6 +82,7 @@ let internal forEach (items: 'a seq) (body: 'a -> TxnStep<unit>) : TxnStep<unit>
 /// runs <paramref name="body"/>, and commits on success or rolls back on
 /// failure.
 let internal runTransactionInternal
+  (connectionConfig: Sqlite.ConnectionConfig)
   (dbPath: string)
   (mapDbError: SqliteException -> 'e)
   (body: SqliteTransaction -> Task<Result<'a, 'e>>)
@@ -90,7 +91,7 @@ let internal runTransactionInternal
     match Core.resolveDatabasePath dbPath with
     | Error message -> return Error(mapDbError (SqliteException(message, 0)))
     | Ok resolvedDbPath ->
-      use connection = Core.openSqliteConnection resolvedDbPath
+      use connection = Core.openSqliteConnection connectionConfig resolvedDbPath
       use transaction = connection.BeginTransaction()
       let! readinessResult = Recording.ensureNewDatabaseReadyForTransactions transaction
 

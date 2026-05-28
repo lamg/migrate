@@ -35,17 +35,23 @@ type PlanResult =
     supportedDifferences: string list
     unsupportedDifferences: string list }
 
-let private runTxnStepAsMigError dbPath (step: TxnStep<'a>) : Task<Result<'a, MigError>> =
-  runTransactionInternal dbPath MigError.Sqlite (fun tx ->
+type SqliteJournalMode = MigLib.SqliteJournalMode
+
+let private runTxnStepAsMigError dbPath connectionConfig (step: TxnStep<'a>) : Task<Result<'a, MigError>> =
+  runTransactionInternal connectionConfig dbPath MigError.Sqlite (fun tx ->
     task {
       let! result = step tx
       return result |> Result.mapError MigError.Sqlite
     })
 
 /// Provides transaction execution services for a fixed database path.
-type DbRuntime(dbPath: string) =
+type DbRuntime internal (dbPath: string, connectionConfig: MigLib.Sqlite.ConnectionConfig) =
+  new(dbPath: string) = DbRuntime(dbPath, MigLib.Sqlite.defaultConnectionConfig)
+
   /// Gets the database path used by this runtime.
   member _.DbPath = dbPath
+
+  member internal _.ConnectionConfig = connectionConfig
 
   /// Runs <paramref name="body"/> inside a transaction against this runtime's
   /// database path.
@@ -53,7 +59,7 @@ type DbRuntime(dbPath: string) =
     (mapDbError: SqliteException -> 'e)
     (body: SqliteTransaction -> Task<Result<'a, 'e>>)
     : Task<Result<'a, 'e>> =
-    runTransactionInternal dbPath mapDbError body
+    runTransactionInternal connectionConfig dbPath mapDbError body
 
 /// Exposes a <see cref="DbRuntime"/> for a value that owns database access.
 type IHasDbRuntime =
@@ -64,15 +70,21 @@ type IHasDbRuntime =
 /// database path.
 /// Supports binding <see cref="TxnStep{T}"/>, <see cref="Task{TResult}"/>, and
 /// <c>Task&lt;Result&lt;_, _&gt;&gt;</c> values.
-type DbTxnBuilder(dbPath: string) =
+type DbTxnBuilder internal (dbPath: string, connectionConfig: MigLib.Sqlite.ConnectionConfig) =
+  new(dbPath: string) = DbTxnBuilder(dbPath, MigLib.Sqlite.defaultConnectionConfig)
+
   /// Gets the database path used by this builder.
   member _.DbPath = dbPath
 
   /// Gets the reusable runtime bound to this builder's database path.
-  member _.DbRuntime = DbRuntime dbPath
+  member _.DbRuntime = DbRuntime(dbPath, connectionConfig)
+
+  member internal _.ConnectionConfig = connectionConfig
+
+  member internal _.WithConnectionConfig connectionConfig = DbTxnBuilder(dbPath, connectionConfig)
 
   /// Runs a composed transaction step against this builder's database path.
-  member _.Run(f: TxnStep<'a>) : Task<Result<'a, MigError>> = runTxnStepAsMigError dbPath f
+  member _.Run(f: TxnStep<'a>) : Task<Result<'a, MigError>> = runTxnStepAsMigError dbPath connectionConfig f
 
   member _.Zero() : TxnStep<unit> = zero ()
   member _.Return(x: 'a) : TxnStep<'a> = result x
@@ -107,6 +119,29 @@ let dbTxn dbPath = DbTxnBuilder dbPath
 
 /// Creates a reusable database runtime bound to <paramref name="dbPath"/>.
 let dbRuntime dbPath = DbRuntime dbPath
+
+/// Returns a new transaction builder that applies the selected SQLite journal
+/// mode when opening transaction connections.
+let withJournalMode journalMode (db: DbTxnBuilder) =
+  db.WithConnectionConfig
+    { db.ConnectionConfig with
+        journalMode = journalMode }
+
+let private validateBusyTimeout (timeout: TimeSpan) =
+  if timeout < TimeSpan.Zero then
+    raise (ArgumentOutOfRangeException(nameof timeout, timeout, "Busy timeout cannot be negative."))
+
+  if timeout.TotalSeconds > float Int32.MaxValue then
+    raise (ArgumentOutOfRangeException(nameof timeout, timeout, "Busy timeout is too large."))
+
+/// Returns a new transaction builder with the SQLite busy timeout applied to
+/// transaction connections.
+let withBusyTimeout timeout (db: DbTxnBuilder) =
+  validateBusyTimeout timeout
+
+  db.WithConnectionConfig
+    { db.ConnectionConfig with
+        busyTimeout = Some timeout }
 
 /// Shared transaction computation expression builder for composing reusable
 /// <see cref="TxnStep{T}"/> values before binding them to a concrete database

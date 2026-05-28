@@ -2,6 +2,7 @@ module Test.Codegen.RuntimeTests
 
 open System
 open System.IO
+open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 open MigLib.Types
 open Xunit
@@ -27,6 +28,26 @@ let private createStudentTable dbPath =
     )
 
   cmd.ExecuteNonQuery() |> ignore
+
+let private unwrapResult result =
+  match result with
+  | Ok value -> value
+  | Error error -> failwith $"Expected operation to succeed, got: {error}"
+
+let private runRuntime (db: DbTxnBuilder) body =
+  db.DbRuntime.RunInTransaction MigError.Sqlite body
+  |> fun task -> task.Result
+  |> unwrapResult
+
+let private connectionTimeout (tx: SqliteTransaction) =
+  Task.FromResult(Ok tx.Connection.DefaultTimeout)
+
+let private journalMode (tx: SqliteTransaction) =
+  task {
+    use cmd = new SqliteCommand("PRAGMA journal_mode;", tx.Connection, tx)
+    let! value = cmd.ExecuteScalarAsync()
+    return Ok(string value)
+  }
 
 [<Fact>]
 let ``generated CRUD helper style works against sqlite`` () =
@@ -77,3 +98,58 @@ let ``generated CRUD helper style works against sqlite`` () =
       Assert.Equal("Alice", remaining.Head.Name)
   finally
     Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``db connection config applies timeout through runtime and leaves original builder unchanged`` () =
+  let tempDir = createTempDir "mig_codegen_runtime_config"
+  let dbPath = Path.Combine(tempDir, "runtime.sqlite")
+
+  try
+    let original = dbTxn dbPath
+
+    let configured =
+      original
+      |> withBusyTimeout (TimeSpan.FromMilliseconds 1500.0)
+
+    let originalTimeout = runRuntime original connectionTimeout
+    let configuredTimeout = runRuntime configured connectionTimeout
+
+    Assert.Equal(2, configuredTimeout)
+    Assert.NotEqual(2, originalTimeout)
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``db connection config applies and preserves journal mode through runtime`` () =
+  let tempDir = createTempDir "mig_codegen_runtime_journal"
+  let dbPath = Path.Combine(tempDir, "runtime.sqlite")
+
+  try
+    let walMode =
+      dbTxn dbPath
+      |> withJournalMode SqliteJournalMode.Wal
+      |> fun db -> runRuntime db journalMode
+
+    let preservedMode =
+      dbTxn dbPath
+      |> withJournalMode SqliteJournalMode.Preserve
+      |> fun db -> runRuntime db journalMode
+
+    let deleteMode =
+      dbTxn dbPath
+      |> withJournalMode SqliteJournalMode.Delete
+      |> fun db -> runRuntime db journalMode
+
+    Assert.Equal("wal", walMode)
+    Assert.Equal("wal", preservedMode)
+    Assert.Equal("delete", deleteMode)
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``db connection config rejects negative busy timeout`` () =
+  Assert.Throws<ArgumentOutOfRangeException>(fun () ->
+    dbTxn "unused.sqlite"
+    |> withBusyTimeout (TimeSpan.FromSeconds -1.0)
+    |> ignore)
+  |> ignore
