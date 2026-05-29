@@ -61,35 +61,47 @@ let ``generated CRUD helper style works against sqlite`` () =
       dbTxn dbPath {
         do! TestCodegenRuntime.Db.Student.DeleteAll
 
-        let! insertedId = TestCodegenRuntime.Db.Student.Insert { Id = 0L; Name = "Alice"; Age = 21L }
-        let! insertedAgain = TestCodegenRuntime.Db.Student.InsertOrIgnore { Id = 0L; Name = "Alice"; Age = 99L }
+        let! insertedId =
+          TestCodegenRuntime.Db.Student.Insert { Id = 0L; Name = "Alice"; Age = 21L }
+
+        let! insertedAgain =
+          TestCodegenRuntime.Db.Student.InsertOrIgnore { Id = 0L; Name = "Alice"; Age = 99L }
+
         let! byId = TestCodegenRuntime.Db.Student.SelectById insertedId
         let! byName = TestCodegenRuntime.Db.Student.SelectByName "Alice"
         let! byLike = TestCodegenRuntime.Db.Student.SelectNameLike "lic"
+        let! adults = TestCodegenRuntime.Db.Student.SelectAdults 21L
         let! first = TestCodegenRuntime.Db.Student.SelectOne
-        let! reused = TestCodegenRuntime.Db.Student.SelectByNameOrInsert { Id = 0L; Name = "Alice"; Age = 21L }
-        let! created = TestCodegenRuntime.Db.Student.SelectByNameOrInsert { Id = 0L; Name = "Bob"; Age = 25L }
+
+        let! reused =
+          TestCodegenRuntime.Db.Student.SelectByNameOrInsert { Id = 0L; Name = "Alice"; Age = 21L }
+
+        let! created =
+          TestCodegenRuntime.Db.Student.SelectByNameOrInsert { Id = 0L; Name = "Bob"; Age = 25L }
 
         do!
           TestCodegenRuntime.Db.Student.Upsert
-            { Id = insertedId
+            {
+              Id = insertedId
               Name = "Alice"
-              Age = 22L }
+              Age = 22L
+            }
 
         let! afterUpsert = TestCodegenRuntime.Db.Student.SelectById insertedId
         do! TestCodegenRuntime.Db.Student.Delete created.Id
         let! remaining = TestCodegenRuntime.Db.Student.SelectAll
-        return insertedId, insertedAgain, byId, byName, byLike, first, reused, created, afterUpsert, remaining
+        return insertedId, insertedAgain, byId, byName, byLike, adults, first, reused, created, afterUpsert, remaining
       }
       |> fun task -> task.Result
 
     match result with
     | Error ex -> failwith $"Expected generated CRUD flow to succeed, got: {ex}"
-    | Ok(insertedId, insertedAgain, byId, byName, byLike, first, reused, created, afterUpsert, remaining) ->
+    | Ok(insertedId, insertedAgain, byId, byName, byLike, adults, first, reused, created, afterUpsert, remaining) ->
       Assert.Equal(None, insertedAgain)
       Assert.Equal(Some insertedId, byId |> Option.map _.Id)
       Assert.Equal<int>(1, byName.Length)
       Assert.Equal<int>(1, byLike.Length)
+      Assert.Equal<string list>([ "Alice" ], adults |> List.map _.Name)
       Assert.Equal(Some insertedId, first |> Option.map _.Id)
       Assert.Equal(insertedId, reused.Id)
       Assert.Equal("Bob", created.Name)
@@ -107,9 +119,7 @@ let ``db connection config applies timeout through runtime and leaves original b
   try
     let original = dbTxn dbPath
 
-    let configured =
-      original
-      |> withBusyTimeout (TimeSpan.FromMilliseconds 1500.0)
+    let configured = original |> withBusyTimeout (TimeSpan.FromMilliseconds 1500.0)
 
     let originalTimeout = runRuntime original connectionTimeout
     let configuredTimeout = runRuntime configured connectionTimeout
@@ -149,7 +159,5 @@ let ``db connection config applies and preserves journal mode through runtime`` 
 [<Fact>]
 let ``db connection config rejects negative busy timeout`` () =
   Assert.Throws<ArgumentOutOfRangeException>(fun () ->
-    dbTxn "unused.sqlite"
-    |> withBusyTimeout (TimeSpan.FromSeconds -1.0)
-    |> ignore)
+    dbTxn "unused.sqlite" |> withBusyTimeout (TimeSpan.FromSeconds -1.0) |> ignore)
   |> ignore

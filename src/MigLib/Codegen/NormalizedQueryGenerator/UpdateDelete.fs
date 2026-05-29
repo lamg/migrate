@@ -25,7 +25,10 @@ let private sequenceUnitResultsExpr (steps: WidgetBuilder<Expr> list) =
   AppExpr("sequenceUnitResults", [ ListExpr(steps) ])
 
 let private catchSqliteTaskExpr (bodyExpr: WidgetBuilder<Expr>) =
-  taskExpr [ OtherExpr(TryWithExpr(bodyExpr, MatchClauseExpr(":? SqliteException as ex", returnExprRaw "Error ex"))) ]
+  taskExpr
+    [
+      OtherExpr(TryWithExpr(bodyExpr, MatchClauseExpr(":? SqliteException as ex", returnExprRaw "Error ex")))
+    ]
 
 let private generateUpdateBaseSql (baseTable: CreateTable) : string =
   let pkColumns = getPrimaryKeyColumns baseTable
@@ -94,10 +97,12 @@ let private baseUpdateClause (baseTable: CreateTable) (extensions: ExtensionTabl
   MatchClauseExpr(
     $"{typeName}.Base({generateFieldPattern baseTable.columns})",
     CompExprBodyExpr(
-      [ LetOrUseExpr(Function("deleteExtensions", UnitPat(), deleteExtensionsExpr))
+      [
+        LetOrUseExpr(Function("deleteExtensions", UnitPat(), deleteExtensionsExpr))
         OtherExpr(
           returnFromExpr (sequenceUnitResultsExpr [ updateStepExpr; unitThunk (AppExpr("deleteExtensions", unitExpr)) ])
-        ) ]
+        )
+      ]
     )
   )
 
@@ -150,15 +155,19 @@ let private extensionUpdateClause
   MatchClauseExpr(
     $"{typeName}.With{caseName}({generateFieldPattern allColumns})",
     CompExprBodyExpr(
-      [ LetOrUseExpr(Function("deleteOtherExtensions", UnitPat(), deleteOtherExtensionsExpr))
+      [
+        LetOrUseExpr(Function("deleteOtherExtensions", UnitPat(), deleteOtherExtensionsExpr))
         OtherExpr(
           returnFromExpr (
             sequenceUnitResultsExpr
-              [ updateStepExpr
+              [
+                updateStepExpr
                 insertStepExpr
-                unitThunk (AppExpr("deleteOtherExtensions", unitExpr)) ]
+                unitThunk (AppExpr("deleteOtherExtensions", unitExpr))
+              ]
           )
-        ) ]
+        )
+      ]
     )
   )
 
@@ -203,8 +212,10 @@ let private upsertNewItemExpression (normalized: NormalizedTable) =
       let extensionColumns = getExtensionNonKeyColumns extension
       upsertNewItemClause normalized.baseTable caseName (baseColumns @ extensionColumns))
 
-  [ "(match item with"
-    upsertNewItemClause normalized.baseTable "Base" baseColumns ]
+  [
+    "(match item with"
+    upsertNewItemClause normalized.baseTable "Base" baseColumns
+  ]
   @ extensionClauses
   @ [ ")" ]
   |> String.concat " "

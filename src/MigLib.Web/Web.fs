@@ -24,25 +24,29 @@ type WebError<'appError> =
   | AppError of 'appError
 
 type CookieSpec =
-  { Domain: string option
+  {
+    Domain: string option
     Expires: DateTimeOffset option
     HttpOnly: bool
     IsEssential: bool
     MaxAge: TimeSpan option
     Path: string option
     SameSite: SameSiteMode option
-    Secure: bool }
+    Secure: bool
+  }
 
 module CookieSpec =
   let empty: CookieSpec =
-    { Domain = None
+    {
+      Domain = None
       Expires = None
       HttpOnly = false
       IsEssential = false
       MaxAge = None
       Path = None
       SameSite = None
-      Secure = false }
+      Secure = false
+    }
 
   let toAspNetCore (spec: CookieSpec) =
     let cookieOptions = CookieOptions()
@@ -73,8 +77,10 @@ module CookieSpec =
     cookieOptions
 
 type JsonPayload =
-  { Serialize: JsonSerializerOptions -> string
-    Options: JsonSerializerOptions option }
+  {
+    Serialize: JsonSerializerOptions -> string
+    Options: JsonSerializerOptions option
+  }
 
 module JsonContent =
   [<Literal>]
@@ -151,17 +157,21 @@ type ResponseEffect<'custom> =
   | Custom of 'custom
 
 type WebCtx<'env, 'custom> =
-  { env: 'env
+  {
+    env: 'env
     tx: SqliteTransaction
     httpContext: HttpContext option
-    responsePlan: ResizeArray<ResponseEffect<'custom>> }
+    responsePlan: ResizeArray<ResponseEffect<'custom>>
+  }
 
 type WebOp<'env, 'appError, 'custom, 'a> = WebCtx<'env, 'custom> -> Task<Result<'a, WebError<'appError>>>
 
 type WebRuntime<'env, 'appError, 'custom> =
-  { Env: 'env
+  {
+    Env: 'env
     JsonOptions: JsonSerializerOptions
-    ApplyCustomEffect: HttpContext -> 'custom -> Task<Result<unit, WebError<'appError>>> }
+    ApplyCustomEffect: HttpContext -> 'custom -> Task<Result<unit, WebError<'appError>>>
+  }
 
 module private WebOp =
   let zero () : WebOp<'env, 'appError, 'custom, unit> = fun _ -> Task.FromResult(Ok())
@@ -498,8 +508,10 @@ module Respond =
   let json<'env, 'appError, 'custom, 'a> (value: 'a) : WebOp<'env, 'appError, 'custom, unit> =
     Response.append (
       WriteJson
-        { Serialize = fun options -> JsonSerializer.Serialize(value, options)
-          Options = None }
+        {
+          Serialize = fun options -> JsonSerializer.Serialize(value, options)
+          Options = None
+        }
       : ResponseEffect<'custom>
     )
 
@@ -511,8 +523,10 @@ module Respond =
     : WebOp<'env, 'appError, 'custom, unit> =
     Response.append (
       WriteJson
-        { Serialize = fun _ -> JsonSerializer.Serialize(value, options)
-          Options = Some options }
+        {
+          Serialize = fun _ -> JsonSerializer.Serialize(value, options)
+          Options = Some options
+        }
       : ResponseEffect<'custom>
     )
 
@@ -522,8 +536,10 @@ module Respond =
     : WebOp<'env, 'appError, 'custom, unit> =
     Response.append (
       WriteJson
-        { Serialize = fun _ -> JsonSerializer.Serialize(value, jsonTypeInfo)
-          Options = None }
+        {
+          Serialize = fun _ -> JsonSerializer.Serialize(value, jsonTypeInfo)
+          Options = None
+        }
       : ResponseEffect<'custom>
     )
 
@@ -546,16 +562,19 @@ module WebRuntime =
     (env: 'env)
     (applyCustomEffect: HttpContext -> 'custom -> Task<Result<unit, WebError<'appError>>>)
     : WebRuntime<'env, 'appError, 'custom> =
-    { Env = env
+    {
+      Env = env
       JsonOptions = JsonSerializerOptions JsonSerializerDefaults.Web
-      ApplyCustomEffect = applyCustomEffect }
+      ApplyCustomEffect = applyCustomEffect
+    }
 
   let withJsonOptions
     (jsonOptions: JsonSerializerOptions)
     (runtime: WebRuntime<'env, 'appError, 'custom>)
     : WebRuntime<'env, 'appError, 'custom> =
     { runtime with
-        JsonOptions = jsonOptions }
+        JsonOptions = jsonOptions
+    }
 
   let createSimple (env: 'env) : WebRuntime<'env, 'appError, unit> =
     create env (fun _ () -> Task.FromResult(Ok()))
@@ -644,10 +663,12 @@ let run
     let! result =
       runtime.Env.DbRuntime.RunInTransaction DbError (fun tx ->
         operation
-          { env = runtime.Env
+          {
+            env = runtime.Env
             tx = tx
             httpContext = httpContext
-            responsePlan = responsePlan })
+            responsePlan = responsePlan
+          })
 
     match result with
     | Error error -> return Error error

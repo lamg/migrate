@@ -163,7 +163,9 @@ let private loadGeneratedModule (assemblyPath: string) =
 
       result {
         let! moduleType = tryFindGeneratedSchemaModuleType assembly
-        let! generatedSchema = tryReadRequiredStaticValue<ResolvedGeneratedSchemaModule> moduleType "GeneratedSchema"
+
+        let! generatedSchema =
+          tryReadRequiredStaticValue<ResolvedGeneratedSchemaModule> moduleType "GeneratedSchema"
 
         return moduleType.FullName, generatedSchema
       }
@@ -178,7 +180,9 @@ let resolveGeneratedSchema (assembly: ResolvedAssembly) : Result<ResolvedGenerat
     let! moduleName, generatedModule = loadGeneratedModule assembly.assemblyPath
 
     return
-      { assembly = assembly
+      {
+        assembly = assembly
         moduleName = moduleName
-        generatedModule = generatedModule }
+        generatedModule = generatedModule
+      }
   }

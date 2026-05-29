@@ -73,12 +73,16 @@ let buildTable
             | Some(sqlType, enumLikeDu) ->
               Ok(
                 cols
-                @ [ { name = toSnakeCase field.Name
-                      previousName = previousColumnName
-                      columnType = sqlType
-                      constraints = [ NotNull ]
-                      enumLikeDu = enumLikeDu
-                      unitOfMeasure = None } ],
+                @ [
+                  {
+                    name = toSnakeCase field.Name
+                    previousName = previousColumnName
+                    columnType = sqlType
+                    constraints = [ NotNull ]
+                    enumLikeDu = enumLikeDu
+                    unitOfMeasure = None
+                  }
+                ],
                 constraints
               )
             | None when isRecordType field.PropertyType ->
@@ -101,34 +105,41 @@ let buildTable
                   let fkColumns =
                     (fkColumnNames, referencedPk)
                     ||> List.map2 (fun fkColumnName referencedPk ->
-                      { name = fkColumnName
+                      {
+                        name = fkColumnName
                         previousName = previousColumnName
                         columnType = referencedPk.sqlType
                         constraints = [ NotNull ]
                         enumLikeDu = None
-                        unitOfMeasure = None })
+                        unitOfMeasure = None
+                      })
 
                   match fkColumns, referencedPk with
                   | [ fkColumn ], [ referencedPkColumn ] ->
                     let foreignKey =
-                      { columns = []
+                      {
+                        columns = []
                         refTable = toSnakeCase field.PropertyType.Name
                         refColumns = [ referencedPkColumn.columnName ]
                         onDelete = onDelete
-                        onUpdate = None }
+                        onUpdate = None
+                      }
 
                     let fkColumnWithConstraint =
                       { fkColumn with
-                          constraints = fkColumn.constraints @ [ ForeignKey foreignKey ] }
+                          constraints = fkColumn.constraints @ [ ForeignKey foreignKey ]
+                      }
 
                     Ok(cols @ [ fkColumnWithConstraint ], constraints)
                   | _ ->
                     let foreignKey =
-                      { columns = fkColumnNames
+                      {
+                        columns = fkColumnNames
                         refTable = toSnakeCase field.PropertyType.Name
                         refColumns = referencedPk |> List.map _.columnName
                         onDelete = onDelete
-                        onUpdate = None }
+                        onUpdate = None
+                      }
 
                     Ok(cols @ fkColumns, constraints @ [ ForeignKey foreignKey ])
             | None ->
@@ -149,9 +160,11 @@ let buildTable
             addColumnConstraint
               pkInfo.columnName
               (PrimaryKey
-                { constraintName = None
+                {
+                  constraintName = None
                   columns = []
-                  isAutoincrement = true })
+                  isAutoincrement = true
+                })
               baseColumns
 
           return columnsWithPrimaryKey, []
@@ -159,10 +172,14 @@ let buildTable
       | pks ->
         Ok(
           baseColumns,
-          [ PrimaryKey
-              { constraintName = None
+          [
+            PrimaryKey
+              {
+                constraintName = None
                 columns = pks |> List.map _.columnName
-                isAutoincrement = false } ]
+                isAutoincrement = false
+              }
+          ]
         )
 
     let! constrainedColumns, attributeTableConstraints =
@@ -175,16 +192,19 @@ let buildTable
     let! indexes = readIndexDefinitions tableName recordType resolver
     let! dropColumns = readDropColumns recordType
 
-    let! queryByAnnotations,
-         queryLikeAnnotations,
-         queryByOrCreateAnnotations,
-         selectOneAnnotations,
-         insertOrIgnoreAnnotations,
-         deleteAllAnnotations,
-         upsertAnnotations = readQueryAnnotations recordType resolver
+    let! (queryByAnnotations,
+          queryLikeAnnotations,
+          queryWhereAnnotations,
+          queryByOrCreateAnnotations,
+          selectOneAnnotations,
+          insertOrIgnoreAnnotations,
+          deleteAllAnnotations,
+          upsertAnnotations) =
+      readQueryAnnotations recordType resolver
 
     return
-      { name = tableName
+      {
+        name = tableName
         previousName = previousTableName
         dropColumns = dropColumns
         columns = constrainedColumns
@@ -195,10 +215,12 @@ let buildTable
           @ explicitForeignKeyConstraints
         queryByAnnotations = queryByAnnotations
         queryLikeAnnotations = queryLikeAnnotations
+        queryWhereAnnotations = queryWhereAnnotations
         queryByOrCreateAnnotations = queryByOrCreateAnnotations
         selectOneAnnotations = selectOneAnnotations
         insertOrIgnoreAnnotations = insertOrIgnoreAnnotations
         deleteAllAnnotations = deleteAllAnnotations
-        upsertAnnotations = upsertAnnotations },
+        upsertAnnotations = upsertAnnotations
+      },
       indexes
   }

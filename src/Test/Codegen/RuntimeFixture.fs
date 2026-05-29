@@ -57,6 +57,15 @@ let Schema: SqlFile =
           constraints = []
           queryByAnnotations = [ { columns = [ "name" ]; orderBy = None } ]
           queryLikeAnnotations = [ { columns = [ "name" ] } ]
+          queryWhereAnnotations =
+            [
+              {
+                name = "Adults"
+                whereSql = "age >= @age"
+                columns = [ "age" ]
+                orderBy = Some "name ASC"
+              }
+            ]
           queryByOrCreateAnnotations = [ { columns = [ "name" ] } ]
           selectOneAnnotations = [ SelectOneAnnotation ]
           insertOrIgnoreAnnotations = [ InsertOrIgnoreAnnotation ]
@@ -164,6 +173,18 @@ type Student with
     queryList
       "SELECT id, name, age FROM student WHERE name LIKE '%' || @name || '%'"
       (fun cmd -> cmd.Parameters.AddWithValue("@name", name) |> ignore)
+      (fun reader ->
+        {
+          Id = reader.GetInt64 0
+          Name = reader.GetString 1
+          Age = reader.GetInt64 2
+        })
+      tx
+
+  static member SelectAdults (age: int64) (tx: SqliteTransaction) : Task<Result<Student list, SqliteException>> =
+    queryList
+      "SELECT id, name, age FROM student WHERE age >= @age ORDER BY name ASC"
+      (fun cmd -> cmd.Parameters.AddWithValue("@age", age) |> ignore)
       (fun reader ->
         {
           Id = reader.GetInt64 0

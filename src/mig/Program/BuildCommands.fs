@@ -12,7 +12,8 @@ module internal ProgramBuildCommands =
       result {
         let! currentDirectory = resolveCliDirectory (args.TryGetResult CodegenArgs.Dir)
 
-        let! codegenResult = MigProject.Mig.codegen currentDirectory |> Result.mapError formatMigError
+        let! codegenResult =
+          MigProject.Mig.codegen currentDirectory |> Result.mapError formatMigError
 
         printfn "Codegen complete."
         printfn $"Output path: {codegenResult.outputPath}"
@@ -32,7 +33,8 @@ module internal ProgramBuildCommands =
   let init (args: ParseResults<InitArgs>) =
     let result =
       result {
-        let! project = resolveCliProject (args.TryGetResult InitArgs.Dir) (args.TryGetResult InitArgs.Instance)
+        let! project =
+          resolveCliProject (args.TryGetResult InitArgs.Dir) (args.TryGetResult InitArgs.Instance)
 
         let! initResult =
           MigProject.Mig.init project

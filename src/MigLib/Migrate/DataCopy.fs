@@ -110,8 +110,10 @@ let copyData
 
       return
         Ok
-          { copiedTables = copiedTables
-            copiedRows = copiedRows }
+          {
+            copiedTables = copiedTables
+            copiedRows = copiedRows
+          }
     with
     | :? SqliteException as ex -> return Error(MigError.Sqlite ex)
     | ex -> return Error(MigError.Other ex)

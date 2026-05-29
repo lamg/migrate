@@ -62,9 +62,11 @@ let private resolveProjectAssembly projectKind buildHint projectPath project =
     let! existingAssemblyPath = requireAssemblyFile projectKind buildHint assemblyPath
 
     return
-      { project = project
+      {
+        project = project
         assemblyName = assemblyName
-        assemblyPath = existingAssemblyPath }
+        assemblyPath = existingAssemblyPath
+      }
   }
 
 let resolveAssembly (projectPath: string) =

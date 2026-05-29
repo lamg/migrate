@@ -12,6 +12,7 @@ type ColumnDef = Schema.Types.ColumnDef
 type ViewColumn = Schema.Types.ViewColumn
 type QueryByAnnotation = Schema.Types.QueryByAnnotation
 type QueryLikeAnnotation = Schema.Types.QueryLikeAnnotation
+type QueryWhereAnnotation = Schema.Types.QueryWhereAnnotation
 type QueryByOrCreateAnnotation = Schema.Types.QueryByOrCreateAnnotation
 type SelectOneAnnotation = Schema.Types.SelectOneAnnotation
 type InsertOrIgnoreAnnotation = Schema.Types.InsertOrIgnoreAnnotation

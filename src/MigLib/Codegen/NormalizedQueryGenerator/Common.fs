@@ -299,6 +299,28 @@ let validateNormalizedQueryLikeAnnotation
     Error
       $"QueryLike annotation on normalized table '{normalized.baseTable.name}' supports exactly one column. Received: {receivedCols}"
 
+let validateNormalizedQueryWhereAnnotation
+  (normalized: NormalizedTable)
+  (annotation: QueryWhereAnnotation)
+  : Result<unit, string> =
+  let allColumns = getAllNormalizedColumns normalized
+
+  let columnNames =
+    allColumns
+    |> List.map (fun (_, col) -> col.name.ToLowerInvariant())
+    |> Set.ofList
+
+  annotation.columns
+  |> List.tryFind (fun col -> not (columnNames.Contains(col.ToLowerInvariant())))
+  |> function
+    | Some invalidCol ->
+      let availableCols =
+        allColumns |> List.map (fun (_, col) -> col.name) |> String.concat ", "
+
+      Error
+        $"QueryWhere annotation references non-existent column '{invalidCol}' in normalized table '{normalized.baseTable.name}'. Available columns: {availableCols}"
+    | None -> Ok()
+
 let findNormalizedColumn (normalized: NormalizedTable) (colName: string) : (string * ColumnDef) option =
   getAllNormalizedColumns normalized
   |> List.tryFind (fun (_, col) -> col.name.ToLowerInvariant() = colName.ToLowerInvariant())

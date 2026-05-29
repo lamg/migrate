@@ -166,7 +166,9 @@ let private loadSchema inputs =
       let assembly = loadContext.LoadFromAssemblyPath fullAssemblyPath
 
       result {
-        let! schemaModuleName, generatedDbNamespace = tryResolveAttributedSchemaModule assembly
+        let! schemaModuleName, generatedDbNamespace =
+          tryResolveAttributedSchemaModule assembly
+
         let! moduleType = tryFindModuleType assembly schemaModuleName
 
         let! schema =
@@ -187,7 +189,9 @@ let private loadSchema inputs =
 
 let runCodegen (inputs: CodegenInputs) : Result<CodegenResult, MigError> =
   result {
-    let! schema, generatedDbNamespace = loadSchema inputs |> Result.mapError MigError.Regular
+    let! schema, generatedDbNamespace =
+      loadSchema inputs |> Result.mapError MigError.Regular
+
     let generatedModuleName = $"{generatedDbNamespace}.Db"
 
     let! stats =
@@ -195,9 +199,11 @@ let runCodegen (inputs: CodegenInputs) : Result<CodegenResult, MigError> =
       |> Result.mapError MigError.Regular
 
     return
-      { outputPath = Path.GetFullPath inputs.outputPath
+      {
+        outputPath = Path.GetFullPath inputs.outputPath
         generatedModuleName = generatedModuleName
-        generatedFiles = stats.generatedFiles }
+        generatedFiles = stats.generatedFiles
+      }
   }
 
 let codegen (projectDir: string) : Result<CodegenResult, MigError> =

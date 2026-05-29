@@ -17,15 +17,18 @@ module internal Sqlite =
   let ensureInitialized () = sqliteInitialized.Force()
 
   type ConnectionConfig =
-    { journalMode: SqliteJournalMode
-      busyTimeout: TimeSpan option }
+    {
+      journalMode: SqliteJournalMode
+      busyTimeout: TimeSpan option
+    }
 
   let defaultConnectionConfig =
-    { journalMode = Preserve
-      busyTimeout = None }
+    {
+      journalMode = Preserve
+      busyTimeout = None
+    }
 
-  let private timeoutSeconds (timeout: TimeSpan) =
-    int (Math.Ceiling timeout.TotalSeconds)
+  let private timeoutSeconds (timeout: TimeSpan) = int (Math.Ceiling timeout.TotalSeconds)
 
   let connectionString (config: ConnectionConfig) (dbPath: string) =
     let builder = SqliteConnectionStringBuilder()
@@ -65,6 +68,7 @@ module internal Sqlite =
 
     connection
 
-  let openConnection (dbPath: string) = openConnectionWithConfig defaultConnectionConfig dbPath
+  let openConnection (dbPath: string) =
+    openConnectionWithConfig defaultConnectionConfig dbPath
 
   let createCommand (connection: SqliteConnection) (tx: SqliteTransaction) sql = new SqliteCommand(sql, connection, tx)

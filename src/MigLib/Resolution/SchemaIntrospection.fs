@@ -10,20 +10,24 @@ open MigLib.Schema.Sql
 open MigLib.Types
 
 type private TableInfoRow =
-  { name: string
+  {
+    name: string
     declaredType: string
     isNotNull: bool
     defaultSql: string option
-    primaryKeyOrder: int }
+    primaryKeyOrder: int
+  }
 
 type private ForeignKeyRow =
-  { id: int
+  {
+    id: int
     seq: int
     refTable: string
     fromColumn: string
     toColumn: string option
     onUpdate: string
-    onDelete: string }
+    onDelete: string
+  }
 
 let private trimOuterParens (value: string) =
   let trimmed = value.Trim()
@@ -91,11 +95,13 @@ let private readTableInfoRows (connection: SqliteConnection) (tableName: string)
 
       if hasRow then
         rows.Add
-          { name = reader.GetString 1
+          {
+            name = reader.GetString 1
             declaredType = if reader.IsDBNull 2 then "" else reader.GetString 2
             isNotNull = reader.GetInt32 3 = 1
             defaultSql = if reader.IsDBNull 4 then None else Some(reader.GetString 4)
-            primaryKeyOrder = reader.GetInt32 5 }
+            primaryKeyOrder = reader.GetInt32 5
+          }
       else
         keepReading <- false
 
@@ -116,13 +122,15 @@ let private readForeignKeyRows (connection: SqliteConnection) (tableName: string
 
       if hasRow then
         rows.Add
-          { id = reader.GetInt32 0
+          {
+            id = reader.GetInt32 0
             seq = reader.GetInt32 1
             refTable = reader.GetString 2
             fromColumn = reader.GetString 3
             toColumn = if reader.IsDBNull 4 then None else Some(reader.GetString 4)
             onUpdate = if reader.IsDBNull 5 then "" else reader.GetString 5
-            onDelete = if reader.IsDBNull 6 then "" else reader.GetString 6 }
+            onDelete = if reader.IsDBNull 6 then "" else reader.GetString 6
+          }
       else
         keepReading <- false
 
@@ -134,7 +142,8 @@ let private addColumnConstraint (columnName: string) (constraintDef: ColumnConst
   |> List.map (fun column ->
     if column.name.Equals(columnName, StringComparison.OrdinalIgnoreCase) then
       { column with
-          constraints = column.constraints @ [ constraintDef ] }
+          constraints = column.constraints @ [ constraintDef ]
+      }
     else
       column)
 
@@ -148,11 +157,13 @@ let private buildForeignKeyConstraint (rows: ForeignKeyRow list) (columns: strin
     |> List.filter (String.IsNullOrWhiteSpace >> not)
 
   ForeignKey
-    { columns = columns
+    {
+      columns = columns
       refTable = head.refTable
       refColumns = refColumns
       onDelete = parseFkAction head.onDelete
-      onUpdate = parseFkAction head.onUpdate }
+      onUpdate = parseFkAction head.onUpdate
+    }
 
 let private buildTableDefinition
   (tableName: string)
@@ -186,9 +197,11 @@ let private buildTableDefinition
       | Some pk when pk.Equals(row.name, StringComparison.OrdinalIgnoreCase) ->
         constraints.Add(
           PrimaryKey
-            { constraintName = None
+            {
+              constraintName = None
               columns = []
-              isAutoincrement = hasAutoincrement }
+              isAutoincrement = hasAutoincrement
+            }
         )
       | _ -> ()
 
@@ -200,12 +213,14 @@ let private buildTableDefinition
         constraints.Add(Default(parseDefaultExpr defaultSql))
       | _ -> ()
 
-      { name = row.name
+      {
+        name = row.name
         previousName = None
         columnType = parseDeclaredSqlType row.declaredType
         constraints = constraints |> Seq.toList
         enumLikeDu = None
-        unitOfMeasure = None })
+        unitOfMeasure = None
+      })
 
   let fkGroups = foreignKeyRows |> List.groupBy _.id
 
@@ -232,25 +247,30 @@ let private buildTableDefinition
   let tableConstraints =
     if primaryKeys.Length > 1 then
       PrimaryKey
-        { constraintName = None
+        {
+          constraintName = None
           columns = primaryKeys
-          isAutoincrement = false }
+          isAutoincrement = false
+        }
       :: tableConstraints
     else
       tableConstraints
 
-  { name = tableName
+  {
+    name = tableName
     previousName = None
     dropColumns = []
     columns = columns
     constraints = tableConstraints
     queryByAnnotations = []
     queryLikeAnnotations = []
+    queryWhereAnnotations = []
     queryByOrCreateAnnotations = []
     selectOneAnnotations = []
     insertOrIgnoreAnnotations = []
     deleteAllAnnotations = []
-    upsertAnnotations = [] }
+    upsertAnnotations = []
+  }
 
 let loadSchemaFromDatabase (connection: SqliteConnection) : Task<Result<SqlFile, MigError>> =
   task {
@@ -265,12 +285,14 @@ let loadSchemaFromDatabase (connection: SqliteConnection) : Task<Result<SqlFile,
 
       return
         Ok
-          { measureTypes = []
+          {
+            measureTypes = []
             inserts = []
             views = []
             tables = tables |> Seq.toList
             indexes = []
-            triggers = [] }
+            triggers = []
+          }
     with
     | :? SqliteException as ex -> return Error(MigError.Sqlite ex)
     | ex -> return Error(MigError.Other ex)

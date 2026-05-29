@@ -7,10 +7,12 @@ open MigLib.Schema.Types
 open MigLib.Runtime.TxnStep
 
 type ResolvedGeneratedSchemaModule =
-  { schema: SqlFile
+  {
+    schema: SqlFile
     schemaHash: string
     dbApp: string
-    defaultDbInstance: string }
+    defaultDbInstance: string
+  }
 
 [<RequireQualifiedAccess>]
 type MigError =
@@ -24,16 +26,20 @@ type InitResult =
   { newDbPath: string; seededRows: int64 }
 
 type CodegenResult =
-  { outputPath: string
+  {
+    outputPath: string
     generatedModuleName: string
-    generatedFiles: string list }
+    generatedFiles: string list
+  }
 
 type PlanResult =
-  { sourceDbPath: string option
+  {
+    sourceDbPath: string option
     targetDbPath: string
     canMigrate: bool
     supportedDifferences: string list
-    unsupportedDifferences: string list }
+    unsupportedDifferences: string list
+  }
 
 type SqliteJournalMode = MigLib.SqliteJournalMode
 
@@ -84,7 +90,8 @@ type DbTxnBuilder internal (dbPath: string, connectionConfig: MigLib.Sqlite.Conn
   member internal _.WithConnectionConfig connectionConfig = DbTxnBuilder(dbPath, connectionConfig)
 
   /// Runs a composed transaction step against this builder's database path.
-  member _.Run(f: TxnStep<'a>) : Task<Result<'a, MigError>> = runTxnStepAsMigError dbPath connectionConfig f
+  member _.Run(f: TxnStep<'a>) : Task<Result<'a, MigError>> =
+    runTxnStepAsMigError dbPath connectionConfig f
 
   member _.Zero() : TxnStep<unit> = zero ()
   member _.Return(x: 'a) : TxnStep<'a> = result x
@@ -125,7 +132,8 @@ let dbRuntime dbPath = DbRuntime dbPath
 let withJournalMode journalMode (db: DbTxnBuilder) =
   db.WithConnectionConfig
     { db.ConnectionConfig with
-        journalMode = journalMode }
+        journalMode = journalMode
+    }
 
 let private validateBusyTimeout (timeout: TimeSpan) =
   if timeout < TimeSpan.Zero then
@@ -141,7 +149,8 @@ let withBusyTimeout timeout (db: DbTxnBuilder) =
 
   db.WithConnectionConfig
     { db.ConnectionConfig with
-        busyTimeout = Some timeout }
+        busyTimeout = Some timeout
+    }
 
 /// Shared transaction computation expression builder for composing reusable
 /// <see cref="TxnStep{T}"/> values before binding them to a concrete database
@@ -149,26 +158,34 @@ let withBusyTimeout timeout (db: DbTxnBuilder) =
 let txn = TxnBuilder()
 
 type MigrateResult =
-  { db: DbTxnBuilder
+  {
+    db: DbTxnBuilder
     newDbPath: string
     archivedOldDbPath: string option
     copiedTables: int
-    copiedRows: int64 }
+    copiedRows: int64
+  }
 
 type StatusResult =
-  { currentDbPath: string option
+  {
+    currentDbPath: string option
     archivedDbPaths: string list
-    needsMigration: bool }
+    needsMigration: bool
+  }
 
 type ResetResult =
-  { restoredDbPath: string option
-    removedCurrentDbPath: string option }
+  {
+    restoredDbPath: string option
+    removedCurrentDbPath: string option
+  }
 
 type ProgReport = string -> Task<unit>
 
 type ResolvedProject =
-  { targetDbPath: string
+  {
+    targetDbPath: string
     targetSchema: ResolvedGeneratedSchemaModule
     sourceDbPath: string option
     sourceDbSchema: SqlFile option
-    archiveDir: string }
+    archiveDir: string
+  }

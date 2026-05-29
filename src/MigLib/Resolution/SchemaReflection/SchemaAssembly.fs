@@ -123,7 +123,8 @@ let buildSchemaFromTypes (types: Type list) : Result<SqlFile, MigError> =
         { emptyFile with
             tables = allTables
             indexes = reflectedIndexes
-            views = views }
+            views = views
+        }
     }
 
 let buildSchemaFromAssembly (assembly: Assembly) : Result<SqlFile, MigError> =

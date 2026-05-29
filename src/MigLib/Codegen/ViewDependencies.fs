@@ -114,7 +114,8 @@ let enrichDependencies (tables: CreateTable list) (views: CreateView list) =
       |> List.distinctBy (fun dependency -> dependency.ToLowerInvariant())
 
     { view with
-        dependencies = dependencies })
+        dependencies = dependencies
+    })
 
 let sortViews (views: CreateView list) : Result<CreateView list, string> =
   let viewNames =

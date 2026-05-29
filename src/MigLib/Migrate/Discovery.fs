@@ -25,15 +25,17 @@ let prepareNewDb (reportProgress: ProgReport) (project: ResolvedProject) : Task<
       do! reportProgress $"Creating target database: {project.targetDbPath}"
 
       match project.sourceDbPath with
-      | Some _ ->
-        return! createDatabaseWithSchema project.targetSchema.schema project.targetDbPath
+      | Some _ -> return! createDatabaseWithSchema project.targetSchema.schema project.targetDbPath
       | None ->
-        let! createResult = createDatabaseWithSchema project.targetSchema.schema project.targetDbPath
+        let! createResult =
+          createDatabaseWithSchema project.targetSchema.schema project.targetDbPath
 
         match createResult with
         | Ok path ->
           use conn = MigLib.Sqlite.openConnection path
-          let! seedResult = MigLib.Init.SchemaInit.seedDatabase conn project.targetSchema.schema
+
+          let! seedResult =
+            MigLib.Init.SchemaInit.seedDatabase conn project.targetSchema.schema
 
           match seedResult with
           | Ok _ -> return Ok path

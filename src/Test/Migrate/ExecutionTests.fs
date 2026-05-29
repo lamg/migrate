@@ -90,35 +90,48 @@ let private assertRegularErrorContains expectedText result =
   | Ok value -> failwith $"Expected error, got: {value}"
 
 let private generatedFixtureTableWithName =
-  { name = "generated_fixture"
+  {
+    name = "generated_fixture"
     previousName = None
     dropColumns = []
     columns =
-      [ { name = "id"
+      [
+        {
+          name = "id"
           previousName = None
           columnType = SqlInteger
           constraints =
-            [ NotNull
+            [
+              NotNull
               PrimaryKey
-                { constraintName = None
+                {
+                  constraintName = None
                   columns = []
-                  isAutoincrement = false } ]
+                  isAutoincrement = false
+                }
+            ]
           enumLikeDu = None
-          unitOfMeasure = None }
-        { name = "name"
+          unitOfMeasure = None
+        }
+        {
+          name = "name"
           previousName = None
           columnType = SqlText
           constraints = [ NotNull ]
           enumLikeDu = None
-          unitOfMeasure = None } ]
+          unitOfMeasure = None
+        }
+      ]
     constraints = []
     queryByAnnotations = []
     queryLikeAnnotations = []
+    queryWhereAnnotations = []
     queryByOrCreateAnnotations = []
     selectOneAnnotations = []
     insertOrIgnoreAnnotations = []
     deleteAllAnnotations = []
-    upsertAnnotations = [] }
+    upsertAnnotations = []
+  }
 
 let private projectWithSeededGeneratedFixture tempDir =
   let project = makeProject tempDir
@@ -127,14 +140,21 @@ let private projectWithSeededGeneratedFixture tempDir =
     { project.targetSchema.schema with
         tables = [ generatedFixtureTableWithName ]
         inserts =
-          [ { table = "generated_fixture"
+          [
+            {
+              table = "generated_fixture"
               columns = [ "id"; "name" ]
-              values =
-                [ [ Integer 1; String "seed-conflict" ]
-                  [ Integer 3; String "seed-default" ] ] } ] }
+              values = [ [ Integer 1; String "seed-conflict" ]; [ Integer 3; String "seed-default" ] ]
+            }
+          ]
+    }
 
   { project with
-      targetSchema = { project.targetSchema with schema = targetSql } }
+      targetSchema =
+        { project.targetSchema with
+            schema = targetSql
+        }
+  }
 
 [<Fact>]
 let ``migrate creates target database when no source exists`` () =
@@ -213,7 +233,10 @@ let ``migrate copies source rows before applying missing seeds`` () =
       messages.Add message
       Task.FromResult()
 
-    match migrate report (projectWithSeededGeneratedFixture tempDir) |> fun task -> task.Result with
+    match
+      migrate report (projectWithSeededGeneratedFixture tempDir)
+      |> fun task -> task.Result
+    with
     | Ok result ->
       Assert.Equal(1, result.copiedTables)
       Assert.Equal(2L, result.copiedRows)

@@ -3,13 +3,17 @@ module internal MigLib.Codegen.NormalizedSchema
 open MigLib.Schema.Types
 
 type ExtensionTable =
-  { table: CreateTable
+  {
+    table: CreateTable
     aspectName: string
-    fkColumns: string list }
+    fkColumns: string list
+  }
 
 type NormalizedTable =
-  { baseTable: CreateTable
-    extensions: ExtensionTable list }
+  {
+    baseTable: CreateTable
+    extensions: ExtensionTable list
+  }
 
 type NormalizedSchemaError =
   | NullableColumnsDetected of table: string * columns: string list
@@ -56,11 +60,13 @@ let private getForeignKeyInfo (table: CreateTable) : ForeignKey list =
         match c with
         | ForeignKey fk ->
           Some
-            { columns = [ col.name ]
+            {
+              columns = [ col.name ]
               refTable = fk.refTable
               refColumns = fk.refColumns
               onDelete = fk.onDelete
-              onUpdate = fk.onUpdate }
+              onUpdate = fk.onUpdate
+            }
         | _ -> None))
 
   let tableFks =
@@ -103,9 +109,11 @@ let private tryMatchExtensionTable (baseTable: CreateTable) (potentialExtension:
       | None -> None
       | Some(fkCols, fk) when fk.refTable = baseTable.name ->
         Some
-          { table = potentialExtension
+          {
+            table = potentialExtension
             aspectName = aspectName
-            fkColumns = fkCols }
+            fkColumns = fkCols
+          }
       | Some _ -> None
 
 let findExtensionTables (baseTable: CreateTable) (allTables: CreateTable list) : ExtensionTable list =
@@ -125,8 +133,10 @@ let detectNormalizedTables (tables: CreateTable list) : NormalizedTable list =
       | [] -> None
       | _ ->
         Some
-          { baseTable = table
-            extensions = extensions })
+          {
+            baseTable = table
+            extensions = extensions
+          })
 
 let classifyTables (tables: CreateTable list) : NormalizedTable list * CreateTable list =
   let normalized = detectNormalizedTables tables
@@ -223,9 +233,11 @@ let private validateExtensionTable
           else
             Ok(
               Some
-                { table = potentialExtension
+                {
+                  table = potentialExtension
                   aspectName = aspectName
-                  fkColumns = fkCols }
+                  fkColumns = fkCols
+                }
             )
 
 let validateExtensionTables
@@ -270,8 +282,10 @@ let validateNormalizedTables (tables: CreateTable list) : Result<NormalizedTable
           | _ ->
             Ok(
               Some
-                { baseTable = table
-                  extensions = extensions }
+                {
+                  baseTable = table
+                  extensions = extensions
+                }
             ))
 
   let allErrors =

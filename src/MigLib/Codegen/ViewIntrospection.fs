@@ -75,10 +75,12 @@ let private readViewColumns (conn: SqliteConnection) (view: CreateView) =
         | None -> sqlType
 
       columns.Add
-        { name = colName
+        {
+          name = colName
           columnType = resolvedColumnType
           enumLikeDu = declaredColumn |> Option.bind _.enumLikeDu
-          unitOfMeasure = declaredColumn |> Option.bind _.unitOfMeasure }
+          unitOfMeasure = declaredColumn |> Option.bind _.unitOfMeasure
+        }
 
     let introspectedColumns = columns |> Seq.toList
 

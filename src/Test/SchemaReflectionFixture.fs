@@ -17,16 +17,20 @@ type Account = { id: int64; name: string }
 
 [<AutoIncPK "id">]
 type Invoice =
-  { id: int64
+  {
+    id: int64
     account: Account
-    total: float }
+    total: float
+  }
 
 [<AutoIncPK "id">]
 [<SelectBy "status">]
 type StudentWithStatus =
-  { id: int64
+  {
+    id: int64
     name: string
-    status: Status }
+    status: Status
+  }
 
 [<ViewSql "SELECT id, status FROM student_with_status">]
 [<SelectBy "status">]
@@ -34,37 +38,47 @@ type StudentStatusView = { id: int64; status: Status }
 
 [<AutoIncPK "id">]
 type File =
-  { id: int64
+  {
+    id: int64
     contentLength: int64<Byte>
-    slug: string }
+    slug: string
+  }
 
 [<PK "id">]
 type SeededStudent = { id: int64; name: string }
 
 [<PK("tenantId", "externalId")>]
 type SeededTenantUser =
-  { tenantId: string
+  {
+    tenantId: string
     externalId: string
-    name: string }
+    name: string
+  }
 
 [<AutoIncPK "id">]
 type SeededTenantSession =
-  { id: int64
+  {
+    id: int64
     user: SeededTenantUser
-    token: string }
+    token: string
+  }
 
 let alice = { id = 1L; name = "Alice" }
 
 let bob = { id = 2L; name = "Bob" }
 
 let tenantAlice =
-  { tenantId = "tenant-a"
+  {
+    tenantId = "tenant-a"
     externalId = "user-1"
-    name = "Tenant Alice" }
+    name = "Tenant Alice"
+  }
 
 let tenantAliceSession =
-  { id = 10L
+  {
+    id = 10L
     user = tenantAlice
-    token = "session-1" }
+    token = "session-1"
+  }
 
 let ignoredSeedMarker = "not-a-seed"

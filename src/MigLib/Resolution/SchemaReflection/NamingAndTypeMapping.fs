@@ -76,8 +76,10 @@ let tryGetEnumLikeDu (t: Type) : EnumLikeDu option =
       None
     else
       Some
-        { typeName = t.Name
-          cases = unionCases |> List.map _.Name }
+        {
+          typeName = t.Name
+          cases = unionCases |> List.map _.Name
+        }
 
 let mapSupportedScalarType (t: Type) : (SqlType * EnumLikeDu option) option =
   if t = typeof<int64> then

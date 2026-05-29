@@ -20,7 +20,14 @@ let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<stri
       view.queryLikeAnnotations
       |> List.map (validateViewQueryLikeAnnotation view.name columns)
 
-    let validationResults = queryByValidationResults @ queryLikeValidationResults
+    let queryWhereValidationResults =
+      view.queryWhereAnnotations
+      |> List.map (validateViewQueryWhereAnnotation view.name columns)
+
+    let validationResults =
+      queryByValidationResults
+      @ queryLikeValidationResults
+      @ queryWhereValidationResults
 
     let firstError =
       validationResults
@@ -45,7 +52,15 @@ let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<stri
       let queryLikeMethods =
         view.queryLikeAnnotations |> List.map (generateViewQueryLike view.name columns)
 
-      let allMethods = getAllMethod :: getOneMethod @ queryByMethods @ queryLikeMethods
+      let queryWhereMethods =
+        view.queryWhereAnnotations
+        |> List.map (generateViewQueryWhere view.name columns)
+
+      let allMethods =
+        getAllMethod :: getOneMethod
+        @ queryByMethods
+        @ queryLikeMethods
+        @ queryWhereMethods
 
       Ok(generateAugmentationCode typeName allMethods)
   | _ :: _, _, _, _ ->

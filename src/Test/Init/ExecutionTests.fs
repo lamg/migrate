@@ -16,40 +16,57 @@ let private createTempDir name =
   path
 
 let private studentSchema inserts =
-  { measureTypes = []
+  {
+    measureTypes = []
     inserts = inserts
     views = []
     tables =
-      [ { name = "student"
+      [
+        {
+          name = "student"
           previousName = None
           dropColumns = []
           columns =
-            [ { name = "id"
+            [
+              {
+                name = "id"
                 previousName = None
                 columnType = SqlInteger
                 constraints =
-                  [ PrimaryKey
-                      { constraintName = None
+                  [
+                    PrimaryKey
+                      {
+                        constraintName = None
                         columns = []
-                        isAutoincrement = false } ]
+                        isAutoincrement = false
+                      }
+                  ]
                 enumLikeDu = None
-                unitOfMeasure = None }
-              { name = "name"
+                unitOfMeasure = None
+              }
+              {
+                name = "name"
                 previousName = None
                 columnType = SqlText
                 constraints = [ NotNull ]
                 enumLikeDu = None
-                unitOfMeasure = None } ]
+                unitOfMeasure = None
+              }
+            ]
           constraints = []
           queryByAnnotations = []
           queryLikeAnnotations = []
+          queryWhereAnnotations = []
           queryByOrCreateAnnotations = []
           selectOneAnnotations = []
           insertOrIgnoreAnnotations = []
           deleteAllAnnotations = []
-          upsertAnnotations = [] } ]
+          upsertAnnotations = []
+        }
+      ]
     indexes = []
-    triggers = [] }
+    triggers = []
+  }
 
 let private assertRegularErrorContains expectedText result =
   match result with
@@ -58,15 +75,19 @@ let private assertRegularErrorContains expectedText result =
   | Ok value -> failwith $"Expected error, got: {value}"
 
 let private project dbPath schema =
-  { targetDbPath = dbPath
+  {
+    targetDbPath = dbPath
     targetSchema =
-      { schema = schema
+      {
+        schema = schema
         schemaHash = "0123456789abcdef"
         dbApp = "app"
-        defaultDbInstance = "main" }
+        defaultDbInstance = "main"
+      }
     sourceDbPath = None
     sourceDbSchema = None
-    archiveDir = Path.Combine(Path.GetDirectoryName dbPath, "archive") }
+    archiveDir = Path.Combine(Path.GetDirectoryName dbPath, "archive")
+  }
 
 [<Fact>]
 let ``init creates and seeds database`` () =
@@ -77,9 +98,13 @@ let ``init creates and seeds database`` () =
 
     let schema =
       studentSchema
-        [ { table = "student"
+        [
+          {
+            table = "student"
             columns = [ "id"; "name" ]
-            values = [ [ Integer 1; String "Ada" ]; [ Integer 2; String "Grace" ] ] } ]
+            values = [ [ Integer 1; String "Ada" ]; [ Integer 2; String "Grace" ] ]
+          }
+        ]
 
     match init (project dbPath schema) |> fun task -> task.Result with
     | Ok result ->
@@ -119,9 +144,13 @@ let ``init validates seed column counts`` () =
 
     let schema =
       studentSchema
-        [ { table = "student"
+        [
+          {
+            table = "student"
             columns = [ "id"; "name" ]
-            values = [ [ Integer 1 ] ] } ]
+            values = [ [ Integer 1 ] ]
+          }
+        ]
 
     init (project dbPath schema)
     |> fun task -> task.Result

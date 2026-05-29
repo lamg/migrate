@@ -3,10 +3,14 @@ namespace MigLib.Resolution.SchemaReflection
 open MigLib.Schema.Types
 
 type internal PrimaryKeyInfo =
-  { columnName: string
+  {
+    columnName: string
     sqlType: SqlType
-    isAutoIncrement: bool }
+    isAutoIncrement: bool
+  }
 
 type internal ViewJoin =
-  { leftTable: string
-    rightTable: string }
+  {
+    leftTable: string
+    rightTable: string
+  }

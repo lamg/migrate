@@ -26,11 +26,13 @@ let private makeProject tempDir projectName =
   let projectPath = Path.Combine(tempDir, $"{projectName}.fsproj")
   let domainModelingDirectory = Path.Combine(tempDir, "DomainModeling")
 
-  { runtimeProjectPath = projectPath
+  {
+    runtimeProjectPath = projectPath
     runtimeProjectDirectory = tempDir
     runtimeProjectName = projectName
     domainModelingProjectPath = Path.Combine(domainModelingDirectory, "DomainModeling.fsproj")
-    domainModelingDirectory = domainModelingDirectory }
+    domainModelingDirectory = domainModelingDirectory
+  }
 
 let private runtimeDllPath tempDir targetFramework assemblyName =
   Path.Combine(tempDir, "bin", "Debug", targetFramework, $"{assemblyName}.dll")

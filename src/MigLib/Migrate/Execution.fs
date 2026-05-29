@@ -39,17 +39,23 @@ let migrate (reportProgress: ProgReport) (project: ResolvedProject) : Task<Resul
     let! migrationPlan = buildPlan reportProgress project
 
     match migrationPlan with
-    | { result = { supportedDifferences = []
+    | {
+        result = {
+                   supportedDifferences = []
                    unsupportedDifferences = []
-                   targetDbPath = target } } when File.Exists target ->
+                   targetDbPath = target
+                 }
+      } when File.Exists target ->
       do! reportProgress "No migration needed"
 
       return
-        { db = dbTxn migrationPlan.result.targetDbPath
+        {
+          db = dbTxn migrationPlan.result.targetDbPath
           newDbPath = migrationPlan.result.targetDbPath
           archivedOldDbPath = None
           copiedTables = 0
-          copiedRows = 0 }
+          copiedRows = 0
+        }
     | { result = { canMigrate = false } } ->
       return! Error(MigError.Regular(formatUnsupportedDifferences migrationPlan.result.unsupportedDifferences))
     | _ ->
@@ -76,9 +82,11 @@ let migrate (reportProgress: ProgReport) (project: ResolvedProject) : Task<Resul
         | None -> Task.FromResult(Ok None)
 
       return
-        { db = dbTxn newDbPath
+        {
+          db = dbTxn newDbPath
           newDbPath = newDbPath
           archivedOldDbPath = archivedOldDbPath
           copiedTables = copyResult.copiedTables
-          copiedRows = copyResult.copiedRows }
+          copiedRows = copyResult.copiedRows
+        }
   }

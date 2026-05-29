@@ -307,6 +307,7 @@ An `Insert` method is always generated for every type. Additional query methods 
 [<SelectBy ("name", "age", OrderBy = "name DESC")>]
 [<SelectBy ("name", OrderBy = "name DESC, age ASC")>]
 [<SelectLike "name">]
+[<SelectWhere ("Adults", "age >= @age", "age", OrderBy = "name ASC")>]
 [<SelectOneBy ("name", "age")>]
 [<SelectOneBy ("name", "age", OrderBy = "name DESC")>]
 [<SelectByOrInsert ("name", "age")>]
@@ -316,6 +317,8 @@ type Student = {id: int64; name: string; age: int64}
 ```
 
 The `SelectBy`, `SelectOneBy`, and `SelectAll` attributes accept an optional `OrderBy` named parameter. The value is a comma-separated list of columns, each optionally followed by `ASC` (default) or `DESC`.
+
+`SelectWhere` accepts a generated method suffix, a raw SQL `WHERE` predicate, and zero or more parameter columns. Parameter placeholders in the raw SQL must use the resolved column names, such as `@age`, and supplied parameter columns determine the generated method parameters. `SelectWhere` also accepts the optional `OrderBy` named parameter.
 
 ```fsharp
 type Student with
@@ -343,6 +346,9 @@ type Student with
 
   static member SelectNameLike (name: string) (txn: SqliteTransaction): Task<Result<Student list, SqliteException>> =
     // SELECT * FROM student WHERE name LIKE '%' || @name || '%'
+
+  static member SelectAdults (age: int64) (txn: SqliteTransaction): Task<Result<Student list, SqliteException>> =
+    // SELECT * FROM student WHERE age >= @age ORDER BY name ASC
 
   static member SelectOneByNameAge (name: string, age: int64) (txn: SqliteTransaction): Task<Result<Student option, SqliteException>> =
     // SELECT * FROM student WHERE name = @name AND age = @age LIMIT 1

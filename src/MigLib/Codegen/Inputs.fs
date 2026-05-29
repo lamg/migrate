@@ -10,10 +10,12 @@ open MigLib.Resolution.Types
 open MigLib.TaskResult
 
 type CodegenInputs =
-  { project: ResolvedProjectLayout
+  {
+    project: ResolvedProjectLayout
     domainModelingAssembly: ResolvedAssembly
     schemaSourcePath: string
-    outputPath: string }
+    outputPath: string
+  }
 
 let private regularError message = Error(MigError.Regular message)
 
@@ -33,8 +35,10 @@ let resolveInputs (projectDir: string) : Result<CodegenInputs, MigError> =
     let! schemaSourcePath = resolveSchemaSourcePath resolvedProject
 
     return
-      { project = resolvedProject
+      {
+        project = resolvedProject
         domainModelingAssembly = domainModelingAssembly
         schemaSourcePath = schemaSourcePath
-        outputPath = Path.Combine(resolvedProject.domainModelingDirectory, "Db.fs") }
+        outputPath = Path.Combine(resolvedProject.domainModelingDirectory, "Db.fs")
+      }
   }

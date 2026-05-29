@@ -28,14 +28,18 @@ let private makeAssembly tempDir assemblyPath =
 
   writeFile runtimeProjectPath "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
 
-  { project =
-      { runtimeProjectPath = runtimeProjectPath
+  {
+    project =
+      {
+        runtimeProjectPath = runtimeProjectPath
         runtimeProjectDirectory = tempDir
         runtimeProjectName = "Runtime"
         domainModelingProjectPath = Path.Combine(domainModelingDirectory, "DomainModeling.fsproj")
-        domainModelingDirectory = domainModelingDirectory }
+        domainModelingDirectory = domainModelingDirectory
+      }
     assemblyName = "Test"
-    assemblyPath = assemblyPath }
+    assemblyPath = assemblyPath
+  }
 
 let private assertRegularErrorContains expectedText result =
   match result with

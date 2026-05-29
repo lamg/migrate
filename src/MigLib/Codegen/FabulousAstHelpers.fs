@@ -4,7 +4,8 @@ open Fantomas.Core
 
 let private formatConfig =
   { FormatConfig.Default with
-      IndentSize = 2 }
+      IndentSize = 2
+  }
 
 let formatCode (code: string) : string =
   let result =

@@ -33,10 +33,13 @@ let init (project: ResolvedProject) : Task<Result<InitResult, MigError>> =
     if File.Exists project.targetDbPath then
       return
         Ok
-        { newDbPath = project.targetDbPath
-          seededRows = 0L }
+          {
+            newDbPath = project.targetDbPath
+            seededRows = 0L
+          }
     else
-      let! createResult = createDatabaseWithSchema project.targetSchema.schema project.targetDbPath
+      let! createResult =
+        createDatabaseWithSchema project.targetSchema.schema project.targetDbPath
 
       match createResult with
       | Error error -> return Error error
@@ -47,6 +50,8 @@ let init (project: ResolvedProject) : Task<Result<InitResult, MigError>> =
         return
           seedResult
           |> Result.map (fun seededRows ->
-            { newDbPath = dbPath
-              seededRows = seededRows })
+            {
+              newDbPath = dbPath
+              seededRows = seededRows
+            })
   }

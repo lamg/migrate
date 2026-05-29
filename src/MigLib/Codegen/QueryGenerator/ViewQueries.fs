@@ -81,6 +81,25 @@ let validateViewQueryLikeAnnotation
     let receivedCols = annotation.columns |> String.concat ", "
     Error $"QueryLike annotation on view '{viewName}' supports exactly one column. Received: {receivedCols}"
 
+let validateViewQueryWhereAnnotation
+  (viewName: string)
+  (columns: ViewColumn list)
+  (annotation: QueryWhereAnnotation)
+  : Result<unit, string> =
+  let columnNames =
+    columns |> List.map (fun column -> column.name.ToLowerInvariant()) |> Set.ofList
+
+  annotation.columns
+  |> List.tryFind (fun col -> not (columnNames.Contains(col.ToLowerInvariant())))
+  |> function
+    | Some invalidCol ->
+      let availableCols =
+        columns |> List.map (fun column -> column.name) |> String.concat ", "
+
+      Error
+        $"QueryWhere annotation references non-existent column '{invalidCol}' in view '{viewName}'. Available columns: {availableCols}"
+    | None -> Ok()
+
 let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotation: QueryByAnnotation) =
   let typeName = capitalizeName viewName
 
@@ -142,4 +161,47 @@ let generateViewQueryLike (viewName: string) (columns: ViewColumn list) (annotat
     "queryList"
     $"SELECT {columnNames} FROM {viewName} WHERE {whereClause}"
     $"(fun cmd ->\n        {asyncParamBindingExpr})"
+    fieldMappings
+
+let generateViewQueryWhere (viewName: string) (columns: ViewColumn list) (annotation: QueryWhereAnnotation) =
+  let typeName = capitalizeName viewName
+  let methodName = $"Select{capitalizeName annotation.name}"
+
+  let parameters =
+    annotation.columns
+    |> List.map (fun col ->
+      let columnDef = findViewColumn columns col |> Option.get
+      let fsharpType = TypeGenerator.mapViewColumnType columnDef
+      col, fsharpType)
+
+  let columnNames, fieldMappings =
+    buildRecordProjection (fun (column: ViewColumn) -> column.name) TypeGenerator.readViewColumnExpr columns
+
+  let asyncParamBindings =
+    annotation.columns
+    |> List.map (fun col ->
+      let columnDef = findViewColumn columns col |> Option.get
+      addViewBinding "cmd" columnDef col)
+
+  let configureExpr =
+    match asyncParamBindings with
+    | [] -> "(fun _ -> ())"
+    | bindings ->
+      bindings
+      |> joinBindings "        "
+      |> fun bindings -> $"(fun cmd ->\n        {bindings})"
+
+  let methodParameters =
+    match parameters with
+    | [] -> [ txParam ]
+    | _ -> [ typedTupledOrSingleParam parameters; txParam ]
+
+  renderSelectMember
+    methodName
+    methodParameters
+    $"Task<Result<{typeName} list, SqliteException>>"
+    "queryList"
+    ($"SELECT {columnNames} FROM {viewName} WHERE {annotation.whereSql}"
+     |> appendOrderBy annotation.orderBy)
+    configureExpr
     fieldMappings

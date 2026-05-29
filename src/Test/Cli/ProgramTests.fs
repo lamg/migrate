@@ -116,22 +116,26 @@ let ``cli root help shows command-backed surface`` () =
   assertCliHelpOutput
     [ "--help" ]
     "USAGE: mig [--help] [--version] [<subcommand> [<options>]]"
-    [ "init <options>"
+    [
+      "init <options>"
       "codegen <options>"
       "migrate <options>"
       "plan <options>"
       "reset <options>"
-      "status <options>" ]
+      "status <options>"
+    ]
 
 [<Fact>]
 let ``cli subcommand help shows command-backed options`` () =
   let cases =
-    [ ([ "init"; "--help" ], "USAGE: mig init [--help] [--dir <path>] [--instance <name>]")
+    [
+      ([ "init"; "--help" ], "USAGE: mig init [--help] [--dir <path>] [--instance <name>]")
       ([ "migrate"; "--help" ], "USAGE: mig migrate [--help] [--dir <path>] [--instance <name>]")
       ([ "plan"; "--help" ], "USAGE: mig plan [--help] [--dir <path>] [--instance <name>]")
       ([ "reset"; "--help" ], "USAGE: mig reset [--help] [--dir <path>] [--instance <name>]")
       ([ "status"; "--help" ], "USAGE: mig status [--help] [--dir <path>] [--instance <name>]")
-      ([ "codegen"; "--help" ], "USAGE: mig codegen [--help] [--dir <path>]") ]
+      ([ "codegen"; "--help" ], "USAGE: mig codegen [--help] [--dir <path>]")
+    ]
 
   for args, expectedUsage in cases do
     assertCliHelpOutput args expectedUsage [ "--dir, -d <path>" ]

@@ -40,10 +40,13 @@ let resolveProjectFromGeneratedSchema
     let instance =
       resolveDatabaseInstance targetSchema.defaultDbInstance (dbInstance |> Option.defaultValue "")
 
-    let! dbFile = DatabasePaths.buildSchemaBoundDbFileName targetSchema.dbApp instance targetSchema.schemaHash
+    let! dbFile =
+      DatabasePaths.buildSchemaBoundDbFileName targetSchema.dbApp instance targetSchema.schemaHash
+
     let targetDbPath = Path.Combine(fullDbDir, dbFile)
 
-    let! sourceDbPath = DatabasePaths.resolveSourceDbPath fullDbDir targetSchema.dbApp instance targetSchema.schemaHash
+    let! sourceDbPath =
+      DatabasePaths.resolveSourceDbPath fullDbDir targetSchema.dbApp instance targetSchema.schemaHash
 
     let! sourceDbSchema =
       match sourceDbPath with
@@ -51,11 +54,13 @@ let resolveProjectFromGeneratedSchema
       | None -> Task.FromResult(Ok None)
 
     return
-      { sourceDbSchema = sourceDbSchema
+      {
+        sourceDbSchema = sourceDbSchema
         sourceDbPath = sourceDbPath
         archiveDir = Path.Combine(fullDbDir, "archive")
         targetSchema = targetSchema
-        targetDbPath = targetDbPath }
+        targetDbPath = targetDbPath
+      }
   }
 
 let resolveProjectLayout (runtimeProjectPath: string) : Result<ResolvedProjectLayout, MigError> =
@@ -77,11 +82,13 @@ let resolveProjectLayout (runtimeProjectPath: string) : Result<ResolvedProjectLa
         regularError $"DomainModeling project file was not found: {domainModelingProjectPath}"
       else
         Ok
-          { runtimeProjectPath = fullProjectPath
+          {
+            runtimeProjectPath = fullProjectPath
             runtimeProjectDirectory = runtimeProjectDirectory
             runtimeProjectName = Path.GetFileNameWithoutExtension fullProjectPath
             domainModelingProjectPath = domainModelingProjectPath
-            domainModelingDirectory = domainModelingDirectory }
+            domainModelingDirectory = domainModelingDirectory
+          }
 
 let discoverProjectLayout (projectDir: string) : Result<ResolvedProjectLayout, MigError> =
   if String.IsNullOrWhiteSpace projectDir then
@@ -117,7 +124,9 @@ let resolveProject
       GeneratedSchema.resolveGeneratedSchema runtimeAssembly
       |> Result.map _.generatedModule
 
-    let! (project: ResolvedProject) = resolveProjectFromGeneratedSchema dbDir (Some dbInstance) targetSchema
+    let! (project: ResolvedProject) =
+      resolveProjectFromGeneratedSchema dbDir (Some dbInstance) targetSchema
+
     return project
   }
 
@@ -129,6 +138,9 @@ let discoverProject
   taskResult {
     let! layout = discoverProjectLayout projectDir
     let instance = dbInstance |> Option.defaultValue ""
-    let! (project: ResolvedProject) = resolveProject layout.runtimeProjectPath instance dbDir
+
+    let! (project: ResolvedProject) =
+      resolveProject layout.runtimeProjectPath instance dbDir
+
     return project
   }

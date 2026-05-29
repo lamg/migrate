@@ -199,16 +199,21 @@ let initializeDatabaseFromSchemaOnly
 
       do! createSchemaObjects newConnection tx targetSchema
       do tx.Commit()
-      return Ok ()
+      return Ok()
     with
     | :? SqliteException as ex -> return Error(MigError.Sqlite ex)
     | ex -> return Error(MigError.Other ex)
   }
 
-let private seedDatabaseWith conflictHandling (conn: SqliteConnection) (targetSchema: SqlFile) : Task<Result<int64, MigError>> =
+let private seedDatabaseWith
+  conflictHandling
+  (conn: SqliteConnection)
+  (targetSchema: SqlFile)
+  : Task<Result<int64, MigError>> =
   task {
     try
       use tx = conn.BeginTransaction()
+
       match validateSeedInserts targetSchema with
       | Some message ->
         tx.Rollback()

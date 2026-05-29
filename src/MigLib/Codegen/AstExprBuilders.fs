@@ -53,7 +53,8 @@ let private formatConfig =
   { FormatConfig.Default with
       IndentSize = 2
       MaxLineLength = 200
-      SpaceBeforeMember = true }
+      SpaceBeforeMember = true
+  }
 
 let generateAugmentationCode typeName (members: WidgetBuilder<MemberDefn> seq) =
   let oak =

@@ -70,6 +70,14 @@ type SelectLikeAttribute(column: string) =
   member _.Column = column
 
 [<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type SelectWhereAttribute(name: string, whereSql: string, [<ParamArray>] columns: string array) =
+  inherit Attribute()
+  member _.Name = name
+  member _.WhereSql = whereSql
+  member _.Columns = columns
+  member val OrderBy: string = null with get, set
+
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
 type SelectByOrInsertAttribute([<ParamArray>] columns: string array) =
   inherit Attribute()
   member _.Columns = columns

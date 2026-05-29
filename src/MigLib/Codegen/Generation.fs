@@ -12,10 +12,12 @@ open MigLib.Schema.Types
 open MigLib.TaskResult
 
 type CodegenStats =
-  { normalizedTables: int
+  {
+    normalizedTables: int
     regularTables: int
     views: int
-    generatedFiles: string list }
+    generatedFiles: string list
+  }
 
 let private renderBoolLiteral value = if value then "true" else "false"
 
@@ -119,6 +121,11 @@ let private renderQueryByAnnotation (annotation: QueryByAnnotation) =
 let private renderQueryLikeAnnotation (annotation: QueryLikeAnnotation) =
   $"{{ columns = {renderList renderStringLiteral annotation.columns} }}"
 
+let private renderQueryWhereAnnotation (annotation: QueryWhereAnnotation) =
+  let renderedOrderBy = renderOption renderStringLiteral annotation.orderBy
+
+  $"{{ name = {renderStringLiteral annotation.name}; whereSql = {renderStringLiteral annotation.whereSql}; columns = {renderList renderStringLiteral annotation.columns}; orderBy = {renderedOrderBy} }}"
+
 let private renderQueryByOrCreateAnnotation (annotation: QueryByOrCreateAnnotation) =
   $"{{ columns = {renderList renderStringLiteral annotation.columns} }}"
 
@@ -139,6 +146,9 @@ let private renderCreateView (view: CreateView) =
   let renderedQueryLikeAnnotations =
     renderList renderQueryLikeAnnotation view.queryLikeAnnotations
 
+  let renderedQueryWhereAnnotations =
+    renderList renderQueryWhereAnnotation view.queryWhereAnnotations
+
   let renderedQueryByOrCreateAnnotations =
     renderList renderQueryByOrCreateAnnotation view.queryByOrCreateAnnotations
 
@@ -154,7 +164,7 @@ let private renderCreateView (view: CreateView) =
   let renderedUpsertAnnotations =
     renderList (fun _ -> "UpsertAnnotation") view.upsertAnnotations
 
-  $"{{ name = {renderStringLiteral view.name}; previousName = {renderedPreviousName}; sql = {renderedSql}; declaredColumns = {renderedDeclaredColumns}; dependencies = {renderedDependencies}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; selectOneAnnotations = {renderedSelectOneAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; deleteAllAnnotations = {renderedDeleteAllAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
+  $"{{ name = {renderStringLiteral view.name}; previousName = {renderedPreviousName}; sql = {renderedSql}; declaredColumns = {renderedDeclaredColumns}; dependencies = {renderedDependencies}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryWhereAnnotations = {renderedQueryWhereAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; selectOneAnnotations = {renderedSelectOneAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; deleteAllAnnotations = {renderedDeleteAllAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
 
 let private renderCreateTable (table: CreateTable) =
   let renderedPreviousName = renderOption renderStringLiteral table.previousName
@@ -167,6 +177,9 @@ let private renderCreateTable (table: CreateTable) =
 
   let renderedQueryLikeAnnotations =
     renderList renderQueryLikeAnnotation table.queryLikeAnnotations
+
+  let renderedQueryWhereAnnotations =
+    renderList renderQueryWhereAnnotation table.queryWhereAnnotations
 
   let renderedQueryByOrCreateAnnotations =
     renderList renderQueryByOrCreateAnnotation table.queryByOrCreateAnnotations
@@ -183,7 +196,7 @@ let private renderCreateTable (table: CreateTable) =
   let renderedUpsertAnnotations =
     renderList (fun _ -> "UpsertAnnotation") table.upsertAnnotations
 
-  $"{{ name = {renderStringLiteral table.name}; previousName = {renderedPreviousName}; dropColumns = {renderedDropColumns}; columns = {renderedColumns}; constraints = {renderedConstraints}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; selectOneAnnotations = {renderedSelectOneAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; deleteAllAnnotations = {renderedDeleteAllAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
+  $"{{ name = {renderStringLiteral table.name}; previousName = {renderedPreviousName}; dropColumns = {renderedDropColumns}; columns = {renderedColumns}; constraints = {renderedConstraints}; queryByAnnotations = {renderedQueryByAnnotations}; queryLikeAnnotations = {renderedQueryLikeAnnotations}; queryWhereAnnotations = {renderedQueryWhereAnnotations}; queryByOrCreateAnnotations = {renderedQueryByOrCreateAnnotations}; selectOneAnnotations = {renderedSelectOneAnnotations}; insertOrIgnoreAnnotations = {renderedInsertOrIgnoreAnnotations}; deleteAllAnnotations = {renderedDeleteAllAnnotations}; upsertAnnotations = {renderedUpsertAnnotations} }}"
 
 let private renderCreateIndex (index: CreateIndex) =
   $"{{ name = {renderStringLiteral index.name}; table = {renderStringLiteral index.table}; columns = {renderList renderStringLiteral index.columns} }}"
@@ -249,7 +262,8 @@ let private generateCode
 
     let orderedSchema = { schema with views = orderedViews }
 
-    let! viewsWithColumns = ViewIntrospection.getViewsColumns orderedSchema.tables orderedSchema.views
+    let! viewsWithColumns =
+      ViewIntrospection.getViewsColumns orderedSchema.tables orderedSchema.views
 
     let normalizedTables, regularTables =
       NormalizedSchema.classifyTables orderedSchema.tables
@@ -295,7 +309,8 @@ let private generateCode
       |> List.distinctBy (fun enumLikeDu -> enumLikeDu.typeName, enumLikeDu.cases)
 
     let moduleContent =
-      [ yield "// <auto-generated />"
+      [
+        yield "// <auto-generated />"
         yield "// This file was generated by MigLib. Do not edit manually."
         yield ""
         yield generatedCodeAttribute ()
@@ -329,7 +344,8 @@ let private generateCode
           |> List.collect (fun (view, columns) -> [ TypeGenerator.generateViewRecordType view.name columns; "" ])
         yield! normalizedTableCodes
         yield! regularTableCodes
-        yield! viewCodes ]
+        yield! viewCodes
+      ]
       |> String.concat "\n"
       |> fun value -> value.TrimEnd()
 
@@ -344,10 +360,12 @@ let private generateCode
     File.WriteAllText(fullOutputPath, formattedContent)
 
     return
-      { normalizedTables = normalizedTables.Length
+      {
+        normalizedTables = normalizedTables.Length
         regularTables = regularTables.Length
         views = viewsWithColumns.Length
-        generatedFiles = [ fullOutputPath ] }
+        generatedFiles = [ fullOutputPath ]
+      }
   }
 
 let generateCodeFromSchema

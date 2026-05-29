@@ -9,9 +9,11 @@ open MigLib.Types
 open MigLib.TaskResult
 
 type MigrationPlan =
-  { sourceSchema: SqlFile option
+  {
+    sourceSchema: SqlFile option
     targetSchema: SqlFile
-    result: PlanResult }
+    result: PlanResult
+  }
 
 let private joinOrNone values =
   match values with
@@ -62,7 +64,9 @@ let private compareColumn (tableName: string) (sourceColumnByName: Map<string, C
       Ok [ $"added column: {tableName}.{targetColumn.name}" ]
     else
       Error
-        [ $"Column '{tableName}.{targetColumn.name}' is required in target but missing from source and has no default." ]
+        [
+          $"Column '{tableName}.{targetColumn.name}' is required in target but missing from source and has no default."
+        ]
   | Some sourceColumn ->
     if sourceColumn.columnType = targetColumn.columnType then
       if sourceColumnName = targetColumn.name then
@@ -72,7 +76,11 @@ let private compareColumn (tableName: string) (sourceColumnByName: Map<string, C
     else
       let sourceType = sqlTypeDisplayName sourceColumn.columnType
       let targetType = sqlTypeDisplayName targetColumn.columnType
-      Error [ $"Column '{tableName}.{targetColumn.name}' changes type from {sourceType} to {targetType}." ]
+
+      Error
+        [
+          $"Column '{tableName}.{targetColumn.name}' changes type from {sourceType} to {targetType}."
+        ]
 
 let private compareColumns (sourceTable: CreateTable) (targetTable: CreateTable) =
   let sourceColumnByName =
@@ -174,12 +182,16 @@ let buildPlan (reportProgress: ProgReport) (project: ResolvedProject) : Task<Res
       | Some oldSchema -> analyzeSchemaDifferences oldSchema targetSchema
 
     return
-      { sourceSchema = sourceSchema
+      {
+        sourceSchema = sourceSchema
         targetSchema = targetSchema
         result =
-          { sourceDbPath = project.sourceDbPath
+          {
+            sourceDbPath = project.sourceDbPath
             targetDbPath = project.targetDbPath
             canMigrate = unsupportedDifferences.IsEmpty
             supportedDifferences = supportedDifferences
-            unsupportedDifferences = unsupportedDifferences } }
+            unsupportedDifferences = unsupportedDifferences
+          }
+      }
   }

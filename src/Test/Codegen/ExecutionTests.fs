@@ -5,6 +5,8 @@ open System.IO
 
 open MigLib.Codegen.Execution
 open MigLib.Codegen.Inputs
+open MigLib.Codegen.QueryGeneratorTableGenerate
+open MigLib.Schema.Types
 open MigLib.Types
 open MigLib.Resolution.Types
 open Xunit
@@ -136,12 +138,57 @@ let ``runCodegen writes Db fs with metadata types and CRUD helpers`` () =
       Assert.Contains("static member SelectByName", generated)
       Assert.Contains("WHERE name = @name ORDER BY age DESC", generated)
       Assert.Contains("static member SelectNameLike", generated)
+      Assert.Contains("static member SelectAdults", generated)
+      Assert.Contains("WHERE age >= @age ORDER BY name ASC", generated)
+      Assert.Contains("static member SelectNamed", generated)
       Assert.Contains("static member SelectByNameOrInsert", generated)
       Assert.Contains("static member Upsert", generated)
       Assert.DoesNotContain("Recording.", generated)
     | Error error -> failwith $"Expected codegen to run, got: {error}"
   finally
     Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``table codegen fails when SelectWhere references missing parameter column`` () =
+  let table =
+    {
+      name = "student"
+      previousName = None
+      dropColumns = []
+      columns =
+        [
+          {
+            name = "id"
+            previousName = None
+            columnType = SqlInteger
+            constraints = [ NotNull ]
+            enumLikeDu = None
+            unitOfMeasure = None
+          }
+        ]
+      constraints = []
+      queryByAnnotations = []
+      queryLikeAnnotations = []
+      queryWhereAnnotations =
+        [
+          {
+            name = "Adults"
+            whereSql = "age >= @age"
+            columns = [ "age" ]
+            orderBy = None
+          }
+        ]
+      queryByOrCreateAnnotations = []
+      selectOneAnnotations = []
+      insertOrIgnoreAnnotations = []
+      deleteAllAnnotations = []
+      upsertAnnotations = []
+    }
+
+  generateTableCode table
+  |> function
+    | Error message -> Assert.Contains("QueryWhere annotation references non-existent column 'age'", message)
+    | Ok generated -> failwith $"Expected SelectWhere validation failure, got: {generated}"
 
 [<Fact>]
 let ``runCodegen fails when generated Db namespace attribute is missing`` () =

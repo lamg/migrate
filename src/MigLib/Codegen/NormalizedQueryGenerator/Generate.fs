@@ -20,6 +20,10 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
     normalized.baseTable.queryLikeAnnotations
     |> List.map (validateNormalizedQueryLikeAnnotation normalized)
 
+  let queryWhereValidationResults =
+    normalized.baseTable.queryWhereAnnotations
+    |> List.map (validateNormalizedQueryWhereAnnotation normalized)
+
   let queryByOrCreateValidationResults =
     normalized.baseTable.queryByOrCreateAnnotations
     |> List.map (validateNormalizedQueryByOrCreateAnnotation normalized)
@@ -27,6 +31,7 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
   let firstError =
     queryByValidationResults
     @ queryLikeValidationResults
+    @ queryWhereValidationResults
     @ queryByOrCreateValidationResults
     |> List.tryFind (function
       | Error _ -> true
@@ -69,12 +74,17 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
       normalized.baseTable.queryLikeAnnotations
       |> List.map (generateNormalizedQueryLike normalized)
 
+    let queryWhereMethods =
+      normalized.baseTable.queryWhereAnnotations
+      |> List.map (generateNormalizedQueryWhere normalized)
+
     let queryByOrCreateMethods =
       normalized.baseTable.queryByOrCreateAnnotations
       |> List.map (generateNormalizedQueryByOrCreate normalized)
 
     let allMethods =
-      [ Some insertMethod
+      [
+        Some insertMethod
         insertOrIgnoreMethod
         Some getAllMethod
         getByIdMethod
@@ -82,9 +92,11 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
         updateMethod
         upsertMethod
         deleteMethod
-        deleteAllMethod ]
+        deleteAllMethod
+      ]
       @ (queryByMethods |> List.map Some)
       @ (queryLikeMethods |> List.map Some)
+      @ (queryWhereMethods |> List.map Some)
       @ (queryByOrCreateMethods |> List.map Some)
       |> List.choose id
 

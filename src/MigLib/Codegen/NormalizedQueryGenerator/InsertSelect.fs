@@ -18,35 +18,44 @@ let private commandLambda (bindings: string list) =
 let private executeInsertExpr (sql: string) (bindings: string list) onSuccess =
   AppExpr(
     "executeInsert",
-    [ ConstantExpr(Ast.String sql)
+    [
+      ConstantExpr(Ast.String sql)
       commandLambda bindings
       rawExpr "tx"
-      onSuccess ]
+      onSuccess
+    ]
   )
 
 let private executeInsertOrIgnoreExpr (sql: string) (bindings: string list) onSuccess =
   AppExpr(
     "executeInsertOrIgnore",
-    [ ConstantExpr(Ast.String sql)
+    [
+      ConstantExpr(Ast.String sql)
       commandLambda bindings
       rawExpr "tx"
-      onSuccess ]
+      onSuccess
+    ]
   )
 
 let private executeWriteExpr (sql: string) (bindings: string list) onSuccess =
   AppExpr(
     "executeWrite",
-    [ ConstantExpr(Ast.String sql)
+    [
+      ConstantExpr(Ast.String sql)
       commandLambda bindings
       rawExpr "tx"
-      onSuccess ]
+      onSuccess
+    ]
   )
 
 let private readerLambda (caseSelectionExpr: string) =
   lambdaExpr "reader" (rawExpr caseSelectionExpr)
 
 let private catchSqliteTaskExpr (bodyExpr: WidgetBuilder<Expr>) =
-  taskExpr [ OtherExpr(TryWithExpr(bodyExpr, MatchClauseExpr(":? SqliteException as ex", returnExprRaw "Error ex"))) ]
+  taskExpr
+    [
+      OtherExpr(TryWithExpr(bodyExpr, MatchClauseExpr(":? SqliteException as ex", returnExprRaw "Error ex")))
+    ]
 
 let private baseCaseInsertClause (baseTable: CreateTable) (typeName: string) =
   let insertColumns = getInsertColumns baseTable
@@ -106,7 +115,9 @@ let private extensionInsertClause (baseTable: CreateTable) (extension: Extension
   let extensionBindings =
     match autoIncrementBasePkColumn with
     | Some _ ->
-      [ $"cmd.Parameters.AddWithValue(\"@{extension.fkColumns.Head}\", {baseTable.name}Id) |> ignore" ]
+      [
+        $"cmd.Parameters.AddWithValue(\"@{extension.fkColumns.Head}\", {baseTable.name}Id) |> ignore"
+      ]
       @ generateParamBindings extensionInsertColumns "cmd"
     | None ->
       let fkBindings =
@@ -125,14 +136,18 @@ let private extensionInsertClause (baseTable: CreateTable) (extension: Extension
   MatchClauseExpr(
     $"New{typeName}.With{caseName}({fieldPattern})",
     CompExprBodyExpr(
-      [ LetOrUseBangExpr(NamedPat("baseInsertResult"), baseInsertResultExpr)
+      [
+        LetOrUseBangExpr(NamedPat("baseInsertResult"), baseInsertResultExpr)
         OtherExpr(
           MatchExpr(
             "baseInsertResult",
-            [ MatchClauseExpr("Error ex", returnExprRaw "Error ex")
-              MatchClauseExpr($"Ok {baseTable.name}Id", returnFromExpr extensionWriteExpr) ]
+            [
+              MatchClauseExpr("Error ex", returnExprRaw "Error ex")
+              MatchClauseExpr($"Ok {baseTable.name}Id", returnFromExpr extensionWriteExpr)
+            ]
           )
-        ) ]
+        )
+      ]
     )
   )
 
@@ -168,7 +183,9 @@ let private extensionInsertOrIgnoreClause (baseTable: CreateTable) (extension: E
   let extensionBindings =
     match autoIncrementBasePkColumn with
     | Some _ ->
-      [ $"cmd.Parameters.AddWithValue(\"@{extension.fkColumns.Head}\", {baseTable.name}Id) |> ignore" ]
+      [
+        $"cmd.Parameters.AddWithValue(\"@{extension.fkColumns.Head}\", {baseTable.name}Id) |> ignore"
+      ]
       @ generateParamBindings extensionInsertColumns "cmd"
     | None ->
       let fkBindings =
@@ -187,15 +204,19 @@ let private extensionInsertOrIgnoreClause (baseTable: CreateTable) (extension: E
   MatchClauseExpr(
     $"New{typeName}.With{caseName}({fieldPattern})",
     CompExprBodyExpr(
-      [ LetOrUseBangExpr(NamedPat("baseInsertResult"), baseInsertResultExpr)
+      [
+        LetOrUseBangExpr(NamedPat("baseInsertResult"), baseInsertResultExpr)
         OtherExpr(
           MatchExpr(
             "baseInsertResult",
-            [ MatchClauseExpr("Error ex", returnExprRaw "Error ex")
+            [
+              MatchClauseExpr("Error ex", returnExprRaw "Error ex")
               MatchClauseExpr("Ok None", returnExprRaw "Ok None")
-              MatchClauseExpr($"Ok(Some {baseTable.name}Id)", returnFromExpr extensionWriteExpr) ]
+              MatchClauseExpr($"Ok(Some {baseTable.name}Id)", returnFromExpr extensionWriteExpr)
+            ]
           )
-        ) ]
+        )
+      ]
     )
   )
 
@@ -248,10 +269,12 @@ let generateGetAll (normalized: NormalizedTable) =
     [ txParam ]
     (AppExpr(
       "queryList",
-      [ ConstantExpr(Ast.String sql)
+      [
+        ConstantExpr(Ast.String sql)
         lambdaExpr "_" unitExpr
         readerLambda caseSelectionExpr
-        rawExpr "tx" ]
+        rawExpr "tx"
+      ]
     ))
     $"Task<Result<{typeName} list, SqliteException>>"
 
@@ -295,10 +318,12 @@ let generateGetById (normalized: NormalizedTable) =
         (parameters @ [ txParam ])
         (AppExpr(
           "querySingle",
-          [ ConstantExpr(Ast.String sql)
+          [
+            ConstantExpr(Ast.String sql)
             commandLambda bindings
             readerLambda caseSelectionExpr
-            rawExpr "tx" ]
+            rawExpr "tx"
+          ]
         ))
         $"Task<Result<{typeName} option, SqliteException>>"
     )
@@ -324,9 +349,11 @@ let generateGetOne (normalized: NormalizedTable) =
     [ txParam ]
     (AppExpr(
       "querySingle",
-      [ ConstantExpr(Ast.String sql)
+      [
+        ConstantExpr(Ast.String sql)
         lambdaExpr "_" unitExpr
         readerLambda caseSelectionExpr
-        rawExpr "tx" ]
+        rawExpr "tx"
+      ]
     ))
     $"Task<Result<{typeName} option, SqliteException>>"

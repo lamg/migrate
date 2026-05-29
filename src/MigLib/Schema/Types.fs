@@ -17,9 +17,11 @@ type Expr =
   | Value of string
 
 type InsertInto =
-  { table: string
+  {
+    table: string
     columns: string list
-    values: Expr list list }
+    values: Expr list list
+  }
 
 type FkAction =
   | Cascade
@@ -29,16 +31,20 @@ type FkAction =
   | SetDefault
 
 type ForeignKey =
-  { columns: string list
+  {
+    columns: string list
     refTable: string
     refColumns: string list
     onDelete: FkAction option
-    onUpdate: FkAction option }
+    onUpdate: FkAction option
+  }
 
 type PrimaryKey =
-  { constraintName: string option
+  {
+    constraintName: string option
     columns: string list
-    isAutoincrement: bool }
+    isAutoincrement: bool
+  }
 
 type ColumnConstraint =
   | PrimaryKey of PrimaryKey
@@ -50,24 +56,38 @@ type ColumnConstraint =
   | ForeignKey of ForeignKey
 
 type ColumnDef =
-  { name: string
+  {
+    name: string
     previousName: string option
     columnType: SqlType
     constraints: ColumnConstraint list
     enumLikeDu: EnumLikeDu option
-    unitOfMeasure: string option }
+    unitOfMeasure: string option
+  }
 
 type ViewColumn =
-  { name: string
+  {
+    name: string
     columnType: SqlType
     enumLikeDu: EnumLikeDu option
-    unitOfMeasure: string option }
+    unitOfMeasure: string option
+  }
 
 type QueryByAnnotation =
-  { columns: string list
-    orderBy: string option }
+  {
+    columns: string list
+    orderBy: string option
+  }
 
 type QueryLikeAnnotation = { columns: string list }
+
+type QueryWhereAnnotation =
+  {
+    name: string
+    whereSql: string
+    columns: string list
+    orderBy: string option
+  }
 
 type QueryByOrCreateAnnotation = { columns: string list }
 
@@ -80,55 +100,69 @@ type DeleteAllAnnotation = DeleteAllAnnotation
 type UpsertAnnotation = UpsertAnnotation
 
 type CreateView =
-  { name: string
+  {
+    name: string
     previousName: string option
     sql: string
     declaredColumns: ViewColumn list
     dependencies: string list
     queryByAnnotations: QueryByAnnotation list
     queryLikeAnnotations: QueryLikeAnnotation list
+    queryWhereAnnotations: QueryWhereAnnotation list
     queryByOrCreateAnnotations: QueryByOrCreateAnnotation list
     selectOneAnnotations: SelectOneAnnotation list
     insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list
     deleteAllAnnotations: DeleteAllAnnotation list
-    upsertAnnotations: UpsertAnnotation list }
+    upsertAnnotations: UpsertAnnotation list
+  }
 
 type CreateTable =
-  { name: string
+  {
+    name: string
     previousName: string option
     dropColumns: string list
     columns: ColumnDef list
     constraints: ColumnConstraint list
     queryByAnnotations: QueryByAnnotation list
     queryLikeAnnotations: QueryLikeAnnotation list
+    queryWhereAnnotations: QueryWhereAnnotation list
     queryByOrCreateAnnotations: QueryByOrCreateAnnotation list
     selectOneAnnotations: SelectOneAnnotation list
     insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list
     deleteAllAnnotations: DeleteAllAnnotation list
-    upsertAnnotations: UpsertAnnotation list }
+    upsertAnnotations: UpsertAnnotation list
+  }
 
 type CreateIndex =
-  { name: string
+  {
+    name: string
     table: string
-    columns: string list }
+    columns: string list
+  }
 
 type CreateTrigger =
-  { name: string
+  {
+    name: string
     sql: string
-    dependencies: string list }
+    dependencies: string list
+  }
 
 type SqlFile =
-  { measureTypes: string list
+  {
+    measureTypes: string list
     inserts: InsertInto list
     views: CreateView list
     tables: CreateTable list
     indexes: CreateIndex list
-    triggers: CreateTrigger list }
+    triggers: CreateTrigger list
+  }
 
 let emptyFile =
-  { measureTypes = []
+  {
+    measureTypes = []
     inserts = []
     views = []
     tables = []
     indexes = []
-    triggers = [] }
+    triggers = []
+  }

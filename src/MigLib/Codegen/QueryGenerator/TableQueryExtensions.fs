@@ -45,6 +45,21 @@ let validateQueryLikeAnnotation (table: CreateTable) (annotation: QueryLikeAnnot
     let receivedCols = annotation.columns |> String.concat ", "
     Error $"QueryLike annotation on table '{table.name}' supports exactly one column. Received: {receivedCols}"
 
+let validateQueryWhereAnnotation (table: CreateTable) (annotation: QueryWhereAnnotation) : Result<unit, string> =
+  let columnNames =
+    table.columns |> List.map (fun col -> col.name.ToLowerInvariant()) |> Set.ofList
+
+  annotation.columns
+  |> List.tryFind (fun col -> not (columnNames.Contains(col.ToLowerInvariant())))
+  |> function
+    | Some invalidCol ->
+      let availableCols =
+        table.columns |> List.map (fun col -> col.name) |> String.concat ", "
+
+      Error
+        $"QueryWhere annotation references non-existent column '{invalidCol}' in table '{table.name}'. Available columns: {availableCols}"
+    | None -> Ok()
+
 let generateQueryBy (table: CreateTable) (annotation: QueryByAnnotation) =
   let typeName = capitalizeName table.name
 
@@ -117,6 +132,49 @@ let generateQueryLike (table: CreateTable) (annotation: QueryLikeAnnotation) =
     $"(fun cmd ->\n        {asyncParamBindingExpr})"
     fieldMappings
 
+let generateQueryWhere (table: CreateTable) (annotation: QueryWhereAnnotation) =
+  let typeName = capitalizeName table.name
+  let methodName = $"Select{capitalizeName annotation.name}"
+
+  let parameters =
+    annotation.columns
+    |> List.map (fun col ->
+      let columnDef = findColumn table col |> Option.get
+      let fsharpType = TypeGenerator.mapColumnType columnDef
+      col, fsharpType)
+
+  let columnNames, fieldMappings =
+    buildRecordProjection (fun (column: ColumnDef) -> column.name) TypeGenerator.readColumnExpr table.columns
+
+  let asyncParamBindings =
+    annotation.columns
+    |> List.map (fun col ->
+      let columnDef = findColumn table col |> Option.get
+      addColumnBinding "cmd" columnDef col)
+
+  let configureExpr =
+    match asyncParamBindings with
+    | [] -> "(fun _ -> ())"
+    | bindings ->
+      bindings
+      |> joinBindings "        "
+      |> fun bindings -> $"(fun cmd ->\n        {bindings})"
+
+  let methodParameters =
+    match parameters with
+    | [] -> [ txParam ]
+    | _ -> [ typedTupledOrSingleParam parameters; txParam ]
+
+  renderSelectMember
+    methodName
+    methodParameters
+    $"Task<Result<{typeName} list, SqliteException>>"
+    "queryList"
+    ($"SELECT {columnNames} FROM {table.name} WHERE {annotation.whereSql}"
+     |> appendOrderBy annotation.orderBy)
+    configureExpr
+    fieldMappings
+
 let validateQueryByOrCreateAnnotation
   (table: CreateTable)
   (annotation: QueryByOrCreateAnnotation)
@@ -169,13 +227,15 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
   let selectExpr =
     AppExpr(
       "querySingle",
-      [ ConstantExpr(String($"SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1"))
+      [
+        ConstantExpr(String($"SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1"))
         lambdaStatementsExpr "cmd" paramBindings
         (fieldMappings
          |> List.map (fun (fieldName, expr) -> RecordFieldExpr(fieldName, expr))
          |> RecordExpr
          |> lambdaExpr "reader")
-        rawExpr "tx" ]
+        rawExpr "tx"
+      ]
     )
 
   let body =

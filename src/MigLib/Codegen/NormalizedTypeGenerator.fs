@@ -102,9 +102,11 @@ let generateQueryType (normalized: NormalizedTable) : string =
   |> Gen.run
 
 type private FieldInfo =
-  { Name: string
+  {
+    Name: string
     FSharpType: string
-    InAllCases: bool }
+    InAllCases: bool
+  }
 
 let private collectFields (normalized: NormalizedTable) (includeAutoIncrementPk: bool) : FieldInfo list =
   let baseCaseColumns = getBaseCaseColumns normalized.baseTable includeAutoIncrementPk
@@ -130,9 +132,11 @@ let private collectFields (normalized: NormalizedTable) (includeAutoIncrementPk:
       let count = occurrences.Length
 
       fieldName,
-      { Name = fieldName
+      {
+        Name = fieldName
         FSharpType = fsharpType
-        InAllCases = count = totalCases })
+        InAllCases = count = totalCases
+      })
     |> Map.ofList
 
   fieldMap |> Map.toList |> List.map snd

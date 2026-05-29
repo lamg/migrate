@@ -5,34 +5,40 @@ open MigLib.Schema.Types
 open Xunit
 
 let private view name sql dependencies =
-  { name = name
+  {
+    name = name
     previousName = None
     sql = sql
     declaredColumns = []
     dependencies = dependencies
     queryByAnnotations = []
     queryLikeAnnotations = []
+    queryWhereAnnotations = []
     queryByOrCreateAnnotations = []
     selectOneAnnotations = []
     insertOrIgnoreAnnotations = []
     deleteAllAnnotations = []
-    upsertAnnotations = [] }
+    upsertAnnotations = []
+  }
 
 [<Fact>]
 let ``orderViews infers SQL dependencies and sorts dependent views`` () =
   let baseTable =
-    { name = "student"
+    {
+      name = "student"
       previousName = None
       dropColumns = []
       columns = []
       constraints = []
       queryByAnnotations = []
       queryLikeAnnotations = []
+      queryWhereAnnotations = []
       queryByOrCreateAnnotations = []
       selectOneAnnotations = []
       insertOrIgnoreAnnotations = []
       deleteAllAnnotations = []
-      upsertAnnotations = [] }
+      upsertAnnotations = []
+    }
 
   let dependentView =
     view "student18_a" "SELECT id FROM student18 WHERE name LIKE 'A%'" []

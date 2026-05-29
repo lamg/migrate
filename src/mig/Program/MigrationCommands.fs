@@ -19,7 +19,8 @@ module internal ProgramMigrationCommands =
   let migrate (args: ParseResults<MigrateArgs>) =
     let result =
       result {
-        let! project = resolveCliProject (args.TryGetResult MigrateArgs.Dir) (args.TryGetResult MigrateArgs.Instance)
+        let! project =
+          resolveCliProject (args.TryGetResult MigrateArgs.Dir) (args.TryGetResult MigrateArgs.Instance)
 
         let! migrateResult =
           MigProject.Mig.migrate reportProgress project
@@ -43,7 +44,8 @@ module internal ProgramMigrationCommands =
   let plan (args: ParseResults<PlanArgs>) =
     let result =
       result {
-        let! project = resolveCliProject (args.TryGetResult PlanArgs.Dir) (args.TryGetResult PlanArgs.Instance)
+        let! project =
+          resolveCliProject (args.TryGetResult PlanArgs.Dir) (args.TryGetResult PlanArgs.Instance)
 
         let! planResult =
           MigProject.Mig.plan project
@@ -70,7 +72,8 @@ module internal ProgramMigrationCommands =
   let reset (args: ParseResults<ResetArgs>) =
     let result =
       result {
-        let! project = resolveCliProject (args.TryGetResult ResetArgs.Dir) (args.TryGetResult ResetArgs.Instance)
+        let! project =
+          resolveCliProject (args.TryGetResult ResetArgs.Dir) (args.TryGetResult ResetArgs.Instance)
 
         let! resetResult =
           MigProject.Mig.reset project
@@ -95,7 +98,8 @@ module internal ProgramMigrationCommands =
   let status (args: ParseResults<StatusArgs>) =
     let result =
       result {
-        let! project = resolveCliProject (args.TryGetResult StatusArgs.Dir) (args.TryGetResult StatusArgs.Instance)
+        let! project =
+          resolveCliProject (args.TryGetResult StatusArgs.Dir) (args.TryGetResult StatusArgs.Instance)
 
         let! statusResult =
           MigProject.Mig.status project

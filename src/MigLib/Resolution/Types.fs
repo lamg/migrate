@@ -4,18 +4,24 @@ open MigLib.Schema.Types
 open MigLib.Types
 
 type ResolvedProjectLayout =
-  { runtimeProjectPath: string
+  {
+    runtimeProjectPath: string
     runtimeProjectDirectory: string
     runtimeProjectName: string
     domainModelingProjectPath: string
-    domainModelingDirectory: string }
+    domainModelingDirectory: string
+  }
 
 type ResolvedAssembly =
-  { project: ResolvedProjectLayout
+  {
+    project: ResolvedProjectLayout
     assemblyName: string
-    assemblyPath: string }
+    assemblyPath: string
+  }
 
 type ResolvedGeneratedSchema =
-  { assembly: ResolvedAssembly
+  {
+    assembly: ResolvedAssembly
     moduleName: string
-    generatedModule: ResolvedGeneratedSchemaModule }
+    generatedModule: ResolvedGeneratedSchemaModule
+  }

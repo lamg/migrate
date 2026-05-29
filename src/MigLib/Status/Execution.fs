@@ -24,7 +24,9 @@ let status (project: ResolvedProject) : Task<Result<StatusResult, MigError>> =
         []
 
     return
-      { currentDbPath = currentDbPath
+      {
+        currentDbPath = currentDbPath
         archivedDbPaths = archivedDbPaths
-        needsMigration = project.sourceDbPath.IsSome }
+        needsMigration = project.sourceDbPath.IsSome
+      }
   }

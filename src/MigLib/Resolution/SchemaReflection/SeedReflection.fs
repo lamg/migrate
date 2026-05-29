@@ -138,18 +138,22 @@ let buildSeedInsert (recordTypes: Type list) (recordType: Type) (recordValue: ob
         []
 
     return
-      { table = toSnakeCase recordType.Name
+      {
+        table = toSnakeCase recordType.Name
         columns = columnValues |> List.map fst
-        values = [ columnValues |> List.map snd ] }
+        values = [ columnValues |> List.map snd ]
+      }
   }
 
 let mergeSeedInserts (inserts: InsertInto list) =
   inserts
   |> List.groupBy (fun insert -> insert.table, insert.columns)
   |> List.map (fun ((table, columns), (group: InsertInto list)) ->
-    { table = table
+    {
+      table = table
       columns = columns
-      values = group |> List.collect (fun insert -> insert.values) })
+      values = group |> List.collect (fun insert -> insert.values)
+    })
 
 let readSeedInsertsFromModule
   (assembly: Assembly)
@@ -190,5 +194,6 @@ let buildSchemaFromAssemblyModule (assembly: Assembly) (moduleName: string) : Re
 
         return
           { schema with
-              inserts = schema.inserts @ inserts }
+              inserts = schema.inserts @ inserts
+          }
       }

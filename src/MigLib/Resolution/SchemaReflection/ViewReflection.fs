@@ -198,8 +198,12 @@ let getViewJoinAttributes
 
         return
           joins
-          @ [ { leftTable = leftTable
-                rightTable = rightTable } ]
+          @ [
+            {
+              leftTable = leftTable
+              rightTable = rightTable
+            }
+          ]
       })
     []
 
@@ -365,7 +369,9 @@ let synthesizeViewSql
       | Some(index, join, existingTable, newTable) ->
         let existingAlias = getOrCreateAlias existingTable
         let newAlias = getOrCreateAlias newTable
-        let! condition = inferJoinCondition tablesByName existingTable existingAlias newTable newAlias
+
+        let! condition =
+          inferJoinCondition tablesByName existingTable existingAlias newTable newAlias
 
         joinClauses.Add $"JOIN {newTable} {newAlias} ON {condition}"
         addJoinedTable newTable
@@ -405,9 +411,11 @@ let synthesizeViewSql
     let selectClause = String.concat ", " selectColumns
 
     let sql =
-      [ $"CREATE VIEW {viewName} AS"
+      [
+        $"CREATE VIEW {viewName} AS"
         $"SELECT {selectClause}"
-        $"FROM {baseTable} {baseAlias}" ]
+        $"FROM {baseTable} {baseAlias}"
+      ]
       @ (joinClauses |> Seq.toList)
       |> String.concat "\n"
       |> fun value -> value + ";"
@@ -434,10 +442,14 @@ let buildView
           | Some(sqlType, enumLikeDu) ->
             Ok(
               columns
-              @ [ { name = toSnakeCase field.Name
-                    columnType = sqlType
-                    enumLikeDu = enumLikeDu
-                    unitOfMeasure = None } ]
+              @ [
+                {
+                  name = toSnakeCase field.Name
+                  columnType = sqlType
+                  enumLikeDu = enumLikeDu
+                  unitOfMeasure = None
+                }
+              ]
             )
           | None ->
             Error(
@@ -473,25 +485,30 @@ let buildView
         )
       | _ -> Error(MigError.Regular $"""View type "{viewType.Name}" defines multiple [<ViewSql>] attributes.""")
 
-    let! queryByAnnotations,
-         queryLikeAnnotations,
-         queryByOrCreateAnnotations,
-         selectOneAnnotations,
-         insertOrIgnoreAnnotations,
-         deleteAllAnnotations,
-         upsertAnnotations = readQueryAnnotations viewType resolver
+    let! (queryByAnnotations,
+          queryLikeAnnotations,
+          queryWhereAnnotations,
+          queryByOrCreateAnnotations,
+          selectOneAnnotations,
+          insertOrIgnoreAnnotations,
+          deleteAllAnnotations,
+          upsertAnnotations) =
+      readQueryAnnotations viewType resolver
 
     return
-      { name = tableName
+      {
+        name = tableName
         previousName = previousViewName
         sql = sql
         declaredColumns = declaredColumns
         dependencies = dependencies
         queryByAnnotations = queryByAnnotations
         queryLikeAnnotations = queryLikeAnnotations
+        queryWhereAnnotations = queryWhereAnnotations
         queryByOrCreateAnnotations = queryByOrCreateAnnotations
         selectOneAnnotations = selectOneAnnotations
         insertOrIgnoreAnnotations = insertOrIgnoreAnnotations
         deleteAllAnnotations = deleteAllAnnotations
-        upsertAnnotations = upsertAnnotations }
+        upsertAnnotations = upsertAnnotations
+      }
   }

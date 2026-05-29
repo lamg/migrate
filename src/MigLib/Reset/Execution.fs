@@ -66,12 +66,16 @@ let reset (project: ResolvedProject) : Task<Result<ResetResult, MigError>> =
           do! removeReadonlyMarker destination
 
           return
-            { restoredDbPath = Some destination
-              removedCurrentDbPath = removedCurrentDbPath }
+            {
+              restoredDbPath = Some destination
+              removedCurrentDbPath = removedCurrentDbPath
+            }
         | _ ->
           return
-            { restoredDbPath = None
-              removedCurrentDbPath = removedCurrentDbPath }
+            {
+              restoredDbPath = None
+              removedCurrentDbPath = removedCurrentDbPath
+            }
     with
     | :? SqliteException as ex -> return! Error(MigError.Sqlite ex)
     | ex -> return! Error(MigError.Other ex)
