@@ -10,10 +10,11 @@ type Marker = class end
 [<Default("age", "18")>]
 [<SelectBy("name", OrderBy = "age DESC")>]
 [<SelectLike "name">]
-[<SelectWhere("Adults", "age >= @age", "age", OrderBy = "name ASC")>]
+[<SelectWhere("Adults", "age >= @age AND name LIKE @name OR name LIKE @name", OrderBy = "name ASC")>]
 [<SelectByOrInsert "name">]
 [<SelectOne>]
 [<InsertOrIgnore>]
+[<DeleteWhere("Adults", "age >= @age AND name LIKE @name OR name LIKE @name")>]
 [<DeleteAll>]
 [<Upsert>]
 type CodegenFixture = { id: int64; name: string; age: int64 }
@@ -31,7 +32,7 @@ type PersonExt = Email of Person * email: string
 
 [<ViewSql "SELECT id, name FROM codegen_fixture">]
 [<SelectBy "name">]
-[<SelectWhere("Named", "name = @name", "name")>]
+[<SelectWhere("Named", "name = @name")>]
 [<SelectOne>]
 type CodegenFixtureView = { id: int64; name: string }
 

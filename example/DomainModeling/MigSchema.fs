@@ -12,6 +12,7 @@ open MigLib.Dsl.Attributes
 [<SelectOne>]
 [<InsertOrIgnore>]
 [<DeleteAll>]
+[<DeleteWhere("Adult", "age >= @age")>]
 [<Upsert>]
 type Student = { id: int64; name: string; age: int64 }
 

@@ -347,6 +347,28 @@ let validateNormalizedQueryByOrCreateAnnotation
         $"QueryByOrCreate annotation references non-existent column '{invalidCol}' in normalized table '{normalized.baseTable.name}'. Available columns: {availableCols}"
     | None -> Ok()
 
+let validateNormalizedDeleteWhereAnnotation
+  (normalized: NormalizedTable)
+  (annotation: DeleteWhereAnnotation)
+  : Result<unit, string> =
+  let allColumns = getAllNormalizedColumns normalized
+
+  let columnNames =
+    allColumns
+    |> List.map (fun (_, col) -> col.name.ToLowerInvariant())
+    |> Set.ofList
+
+  annotation.columns
+  |> List.tryFind (fun col -> not (columnNames.Contains(col.ToLowerInvariant())))
+  |> function
+    | Some invalidCol ->
+      let availableCols =
+        allColumns |> List.map (fun (_, col) -> col.name) |> String.concat ", "
+
+      Error
+        $"DeleteWhere annotation references non-existent column '{invalidCol}' in normalized table '{normalized.baseTable.name}'. Available columns: {availableCols}"
+    | None -> Ok()
+
 let caseHasAllQueryColumns (caseColumns: ColumnDef list) (queryColumns: string list) : bool =
   let caseColumnNames =
     caseColumns |> List.map (fun col -> col.name.ToLowerInvariant()) |> Set.ofList

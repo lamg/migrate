@@ -9,9 +9,13 @@ let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<stri
   let typeName = capitalizeName view.name
 
   match
-    view.queryByOrCreateAnnotations, view.insertOrIgnoreAnnotations, view.deleteAllAnnotations, view.upsertAnnotations
+    view.queryByOrCreateAnnotations,
+    view.insertOrIgnoreAnnotations,
+    view.deleteWhereAnnotations,
+    view.deleteAllAnnotations,
+    view.upsertAnnotations
   with
-  | [], [], [], [] ->
+  | [], [], [], [], [] ->
     let queryByValidationResults =
       view.queryByAnnotations
       |> List.map (validateViewQueryByAnnotation view.name columns)
@@ -63,9 +67,11 @@ let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<stri
         @ queryWhereMethods
 
       Ok(generateAugmentationCode typeName allMethods)
-  | _ :: _, _, _, _ ->
+  | _ :: _, _, _, _, _ ->
     Error
       $"QueryByOrCreate annotation is not supported on views (view '{view.name}' is read-only). Use QueryBy instead."
-  | [], _ :: _, _, _ -> Error $"InsertOrIgnore annotation is not supported on views (view '{view.name}' is read-only)."
-  | [], [], _ :: _, _ -> Error $"DeleteAll annotation is not supported on views (view '{view.name}' is read-only)."
-  | [], [], [], _ :: _ -> Error $"Upsert annotation is not supported on views (view '{view.name}' is read-only)."
+  | [], _ :: _, _, _, _ ->
+    Error $"InsertOrIgnore annotation is not supported on views (view '{view.name}' is read-only)."
+  | [], [], _ :: _, _, _ -> Error $"DeleteWhere annotation is not supported on views (view '{view.name}' is read-only)."
+  | [], [], [], _ :: _, _ -> Error $"DeleteAll annotation is not supported on views (view '{view.name}' is read-only)."
+  | [], [], [], [], _ :: _ -> Error $"Upsert annotation is not supported on views (view '{view.name}' is read-only)."

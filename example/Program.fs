@@ -38,7 +38,10 @@ let studentOperations (db: DbTxnBuilder) : Task<Result<unit, MigError>> =
 
     let! carol = Db.Student.SelectByName "Carol"
     let! fuzzyMatch = Db.Student.SelectNameLike "ar"
-    let! ensuredStudent = Db.Student.SelectByNameOrInsert(Db.NewStudent.Base("Dora", 19L))
+
+    let! ensuredStudent =
+      Db.Student.SelectByNameOrInsert(Db.NewStudent.Base("Dora", 19L))
+
     let! allStudents = Db.Student.SelectAll
 
     printStudents "Rows returned by generated Student.SelectByName \"Carol\":" carol
@@ -47,6 +50,7 @@ let studentOperations (db: DbTxnBuilder) : Task<Result<unit, MigError>> =
     printfn $"SelectByNameOrInsert returned: id={ensuredStudent.Id} name={ensuredStudent.Name} age={ensuredStudent.Age}"
 
     printStudents "All students after generated CRUD operations:" allStudents
+    do! Db.Student.DeleteAdult(21)
     return ()
   }
 
@@ -55,7 +59,9 @@ let studentOperations (db: DbTxnBuilder) : Task<Result<unit, MigError>> =
 let main _ =
   let result =
     taskResult {
-      let! proj = MigProject.Mig.resolveFromGeneratedSchema __SOURCE_DIRECTORY__ None Db.GeneratedSchema
+      let! proj =
+        MigProject.Mig.resolveFromGeneratedSchema __SOURCE_DIRECTORY__ None Db.GeneratedSchema
+
       let! migRes = MigProject.Mig.migrate reportProgress proj
       do! studentOperations migRes.db
       return ()

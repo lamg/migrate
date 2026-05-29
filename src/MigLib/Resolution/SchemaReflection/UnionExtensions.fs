@@ -160,6 +160,7 @@ let buildUnionExtensionTables
                 queryByOrCreateAnnotations = []
                 selectOneAnnotations = []
                 insertOrIgnoreAnnotations = []
+                deleteWhereAnnotations = []
                 deleteAllAnnotations = []
                 upsertAnnotations = []
               }

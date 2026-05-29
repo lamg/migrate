@@ -47,6 +47,7 @@ Examples of generated helpers include:
 - `Student.SelectByName`
 - `Student.SelectNameLike`
 - `Student.SelectAdults`
+- `Student.DeleteAdults`
 - `Student.SelectByNameOrInsert`
 - `Student.Upsert`
 

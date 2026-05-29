@@ -2,6 +2,7 @@ module internal MigLib.Resolution.SchemaReflection.Attributes
 
 open System
 open System.Reflection
+open System.Text.RegularExpressions
 open Microsoft.FSharp.Reflection
 
 open MigLib.Types
@@ -148,6 +149,23 @@ let resolveOrderBy
     |> Result.map (function
       | [] -> None
       | clauses -> Some(String.concat ", " clauses))
+
+let private extractSqlParameterNames (sql: string) =
+  Regex.Matches(sql, "@([A-Za-z_][A-Za-z0-9_]*)")
+  |> Seq.cast<Match>
+  |> Seq.map (fun sqlMatch -> sqlMatch.Groups[1].Value)
+  |> Seq.distinct
+  |> Seq.toList
+
+let private resolveWhereParameterColumns resolver recordTypeName whereSql =
+  extractSqlParameterNames whereSql
+  |> foldResults
+    (fun names raw ->
+      result {
+        let! resolved = resolveColumnName resolver recordTypeName raw
+        return names @ [ resolved ]
+      })
+    []
 
 let addColumnConstraint
   (columnName: string)
@@ -474,6 +492,7 @@ let readQueryAnnotations
       QueryByOrCreateAnnotation list *
       SelectOneAnnotation list *
       InsertOrIgnoreAnnotation list *
+      DeleteWhereAnnotation list *
       DeleteAllAnnotation list *
       UpsertAnnotation list,
       MigError
@@ -490,6 +509,7 @@ let readQueryAnnotations
     let selectOneAttributes = getTypeAttributes<SelectOneAttribute> recordType
 
     let insertOrIgnoreAttributes = getTypeAttributes<InsertOrIgnoreAttribute> recordType
+    let deleteWhereAttributes = getTypeAttributes<DeleteWhereAttribute> recordType
     let deleteAllAttributes = getTypeAttributes<DeleteAllAttribute> recordType
     let upsertAttributes = getTypeAttributes<UpsertAttribute> recordType
 
@@ -530,16 +550,7 @@ let readQueryAnnotations
       |> foldResults
         (fun acc attr ->
           result {
-            let! columns =
-              attr.Columns
-              |> Seq.toList
-              |> foldResults
-                (fun names raw ->
-                  result {
-                    let! resolved = resolveColumnName resolver recordType.Name raw
-                    return names @ [ resolved ]
-                  })
-                []
+            let! columns = resolveWhereParameterColumns resolver recordType.Name attr.WhereSql
 
             let! orderBy = resolveOrderBy resolver recordType.Name attr.OrderBy
 
@@ -589,6 +600,26 @@ let readQueryAnnotations
       else
         [ InsertOrIgnoreAnnotation ]
 
+    let! deleteWhere =
+      deleteWhereAttributes
+      |> foldResults
+        (fun acc attr ->
+          result {
+            let! columns = resolveWhereParameterColumns resolver recordType.Name attr.WhereSql
+
+            return
+              acc
+              @ [
+                ({
+                  name = attr.Name
+                  whereSql = attr.WhereSql
+                  columns = columns
+                }
+                : DeleteWhereAnnotation)
+              ]
+          })
+        []
+
     let deleteAll =
       if deleteAllAttributes.IsEmpty then
         []
@@ -601,5 +632,5 @@ let readQueryAnnotations
       else
         [ UpsertAnnotation ]
 
-    return queryBy, queryLike, queryWhere, queryByOrCreate, selectOne, insertOrIgnore, deleteAll, upsert
+    return queryBy, queryLike, queryWhere, queryByOrCreate, selectOne, insertOrIgnore, deleteWhere, deleteAll, upsert
   }

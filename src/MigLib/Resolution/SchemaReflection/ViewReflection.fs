@@ -491,6 +491,7 @@ let buildView
           queryByOrCreateAnnotations,
           selectOneAnnotations,
           insertOrIgnoreAnnotations,
+          deleteWhereAnnotations,
           deleteAllAnnotations,
           upsertAnnotations) =
       readQueryAnnotations viewType resolver
@@ -508,6 +509,7 @@ let buildView
         queryByOrCreateAnnotations = queryByOrCreateAnnotations
         selectOneAnnotations = selectOneAnnotations
         insertOrIgnoreAnnotations = insertOrIgnoreAnnotations
+        deleteWhereAnnotations = deleteWhereAnnotations
         deleteAllAnnotations = deleteAllAnnotations
         upsertAnnotations = upsertAnnotations
       }

@@ -16,6 +16,7 @@ type QueryWhereAnnotation = Schema.Types.QueryWhereAnnotation
 type QueryByOrCreateAnnotation = Schema.Types.QueryByOrCreateAnnotation
 type SelectOneAnnotation = Schema.Types.SelectOneAnnotation
 type InsertOrIgnoreAnnotation = Schema.Types.InsertOrIgnoreAnnotation
+type DeleteWhereAnnotation = Schema.Types.DeleteWhereAnnotation
 type DeleteAllAnnotation = Schema.Types.DeleteAllAnnotation
 type UpsertAnnotation = Schema.Types.UpsertAnnotation
 type CreateView = Schema.Types.CreateView

@@ -268,6 +268,7 @@ let private buildTableDefinition
     queryByOrCreateAnnotations = []
     selectOneAnnotations = []
     insertOrIgnoreAnnotations = []
+    deleteWhereAnnotations = []
     deleteAllAnnotations = []
     upsertAnnotations = []
   }

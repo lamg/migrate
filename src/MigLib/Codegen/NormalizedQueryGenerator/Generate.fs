@@ -28,11 +28,16 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
     normalized.baseTable.queryByOrCreateAnnotations
     |> List.map (validateNormalizedQueryByOrCreateAnnotation normalized)
 
+  let deleteWhereValidationResults =
+    normalized.baseTable.deleteWhereAnnotations
+    |> List.map (validateNormalizedDeleteWhereAnnotation normalized)
+
   let firstError =
     queryByValidationResults
     @ queryLikeValidationResults
     @ queryWhereValidationResults
     @ queryByOrCreateValidationResults
+    @ deleteWhereValidationResults
     |> List.tryFind (function
       | Error _ -> true
       | _ -> false)
@@ -66,6 +71,10 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
       else
         Some(generateDeleteAll normalized)
 
+    let deleteWhereMethods =
+      normalized.baseTable.deleteWhereAnnotations
+      |> List.map (generateDeleteWhere normalized)
+
     let queryByMethods =
       normalized.baseTable.queryByAnnotations
       |> List.map (generateNormalizedQueryBy normalized)
@@ -94,6 +103,7 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
         deleteMethod
         deleteAllMethod
       ]
+      @ (deleteWhereMethods |> List.map Some)
       @ (queryByMethods |> List.map Some)
       @ (queryLikeMethods |> List.map Some)
       @ (queryWhereMethods |> List.map Some)

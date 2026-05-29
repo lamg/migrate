@@ -198,6 +198,7 @@ let buildTable
           queryByOrCreateAnnotations,
           selectOneAnnotations,
           insertOrIgnoreAnnotations,
+          deleteWhereAnnotations,
           deleteAllAnnotations,
           upsertAnnotations) =
       readQueryAnnotations recordType resolver
@@ -219,6 +220,7 @@ let buildTable
         queryByOrCreateAnnotations = queryByOrCreateAnnotations
         selectOneAnnotations = selectOneAnnotations
         insertOrIgnoreAnnotations = insertOrIgnoreAnnotations
+        deleteWhereAnnotations = deleteWhereAnnotations
         deleteAllAnnotations = deleteAllAnnotations
         upsertAnnotations = upsertAnnotations
       },

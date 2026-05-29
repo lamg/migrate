@@ -272,3 +272,33 @@ let generateDeleteAll (normalized: NormalizedTable) =
     [ txParam ]
     (executeWriteUnitExpr $"DELETE FROM {normalized.baseTable.name}" [])
     "Task<Result<unit, SqliteException>>"
+
+let generateDeleteWhere (normalized: NormalizedTable) (annotation: DeleteWhereAnnotation) =
+  let methodName = $"Delete{TypeGenerator.toPascalCase annotation.name}"
+
+  let deleteSql =
+    $"DELETE FROM {normalized.baseTable.name} WHERE {annotation.whereSql}"
+
+  let parameters =
+    annotation.columns
+    |> List.map (fun col ->
+      let _, columnDef = findNormalizedColumn normalized col |> Option.get
+      let fsharpType = TypeGenerator.mapColumnType columnDef
+      col, fsharpType)
+
+  let bindings =
+    annotation.columns
+    |> List.map (fun col ->
+      let _, columnDef = findNormalizedColumn normalized col |> Option.get
+      addColumnBinding "cmd" columnDef col)
+
+  let methodParameters =
+    match parameters with
+    | [] -> [ txParam ]
+    | _ -> [ typedTupledOrSingleParam parameters; txParam ]
+
+  staticMember
+    methodName
+    methodParameters
+    (executeWriteUnitExpr deleteSql bindings)
+    "Task<Result<unit, SqliteException>>"

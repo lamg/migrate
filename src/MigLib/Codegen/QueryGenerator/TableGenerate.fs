@@ -23,12 +23,16 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
     table.queryByOrCreateAnnotations
     |> List.map (validateQueryByOrCreateAnnotation table)
 
+  let deleteWhereValidationResults =
+    table.deleteWhereAnnotations |> List.map (validateDeleteWhereAnnotation table)
+
   let firstError =
     ([ upsertValidationResult ]
      @ queryByValidationResults
      @ queryLikeValidationResults
      @ queryWhereValidationResults
-     @ queryByOrCreateValidationResults)
+     @ queryByOrCreateValidationResults
+     @ deleteWhereValidationResults)
     |> List.tryFind (function
       | Error _ -> true
       | _ -> false)
@@ -68,6 +72,9 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
       else
         generateDeleteAll table
 
+    let deleteWhereMethods =
+      table.deleteWhereAnnotations |> List.map (generateDeleteWhere table)
+
     let queryByMethods = table.queryByAnnotations |> List.map (generateQueryBy table)
 
     let queryLikeMethods =
@@ -91,6 +98,7 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
         deleteMethod
         deleteAllMethod
       ]
+      @ (deleteWhereMethods |> List.map Some)
       @ (queryByMethods |> List.map Some)
       @ (queryLikeMethods |> List.map Some)
       @ (queryWhereMethods |> List.map Some)

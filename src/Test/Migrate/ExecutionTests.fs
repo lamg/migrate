@@ -129,6 +129,7 @@ let private generatedFixtureTableWithName =
     queryByOrCreateAnnotations = []
     selectOneAnnotations = []
     insertOrIgnoreAnnotations = []
+    deleteWhereAnnotations = []
     deleteAllAnnotations = []
     upsertAnnotations = []
   }

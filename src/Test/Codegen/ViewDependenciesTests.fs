@@ -17,6 +17,7 @@ let private view name sql dependencies =
     queryByOrCreateAnnotations = []
     selectOneAnnotations = []
     insertOrIgnoreAnnotations = []
+    deleteWhereAnnotations = []
     deleteAllAnnotations = []
     upsertAnnotations = []
   }
@@ -36,6 +37,7 @@ let ``orderViews infers SQL dependencies and sorts dependent views`` () =
       queryByOrCreateAnnotations = []
       selectOneAnnotations = []
       insertOrIgnoreAnnotations = []
+      deleteWhereAnnotations = []
       deleteAllAnnotations = []
       upsertAnnotations = []
     }

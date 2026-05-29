@@ -61,14 +61,22 @@ let Schema: SqlFile =
             [
               {
                 name = "Adults"
-                whereSql = "age >= @age"
-                columns = [ "age" ]
+                whereSql = "age >= @age AND name LIKE @name OR name LIKE @name"
+                columns = [ "age"; "name" ]
                 orderBy = Some "name ASC"
               }
             ]
           queryByOrCreateAnnotations = [ { columns = [ "name" ] } ]
           selectOneAnnotations = [ SelectOneAnnotation ]
           insertOrIgnoreAnnotations = [ InsertOrIgnoreAnnotation ]
+          deleteWhereAnnotations =
+            [
+              {
+                name = "Adults"
+                whereSql = "age >= @age AND name LIKE @name OR name LIKE @name"
+                columns = [ "age"; "name" ]
+              }
+            ]
           deleteAllAnnotations = [ DeleteAllAnnotation ]
           upsertAnnotations = [ UpsertAnnotation ]
         }
@@ -157,6 +165,14 @@ type Student with
   static member DeleteAll(tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
     executeWriteUnit "DELETE FROM student" (fun _ -> ()) tx
 
+  static member DeleteAdults (age: int64, name: string) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
+    executeWriteUnit
+      "DELETE FROM student WHERE age >= @age AND name LIKE @name OR name LIKE @name"
+      (fun cmd ->
+        cmd.Parameters.AddWithValue("@age", age) |> ignore
+        cmd.Parameters.AddWithValue("@name", name) |> ignore)
+      tx
+
   static member SelectByName (name: string) (tx: SqliteTransaction) : Task<Result<Student list, SqliteException>> =
     queryList
       "SELECT id, name, age FROM student WHERE name = @name"
@@ -181,10 +197,15 @@ type Student with
         })
       tx
 
-  static member SelectAdults (age: int64) (tx: SqliteTransaction) : Task<Result<Student list, SqliteException>> =
+  static member SelectAdults
+    (age: int64, name: string)
+    (tx: SqliteTransaction)
+    : Task<Result<Student list, SqliteException>> =
     queryList
-      "SELECT id, name, age FROM student WHERE age >= @age ORDER BY name ASC"
-      (fun cmd -> cmd.Parameters.AddWithValue("@age", age) |> ignore)
+      "SELECT id, name, age FROM student WHERE age >= @age AND name LIKE @name OR name LIKE @name ORDER BY name ASC"
+      (fun cmd ->
+        cmd.Parameters.AddWithValue("@age", age) |> ignore
+        cmd.Parameters.AddWithValue("@name", name) |> ignore)
       (fun reader ->
         {
           Id = reader.GetInt64 0

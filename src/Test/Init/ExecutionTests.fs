@@ -60,6 +60,7 @@ let private studentSchema inserts =
           queryByOrCreateAnnotations = []
           selectOneAnnotations = []
           insertOrIgnoreAnnotations = []
+          deleteWhereAnnotations = []
           deleteAllAnnotations = []
           upsertAnnotations = []
         }

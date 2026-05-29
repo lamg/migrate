@@ -6,6 +6,7 @@ open type Fabulous.AST.Ast
 open MigLib.Codegen
 open MigLib.Codegen.AstExprBuilders
 open MigLib.Codegen.QueryGeneratorCommon
+open MigLib.Codegen.SqlParamBindings
 
 let private commandLambda (bindings: string list) =
   match bindings with
@@ -231,6 +232,49 @@ let generateDeleteAll (table: CreateTable) =
       (executeWriteUnitExpr $"DELETE FROM {table.name}" [])
       "Task<Result<unit, SqliteException>>"
   )
+
+let validateDeleteWhereAnnotation (table: CreateTable) (annotation: DeleteWhereAnnotation) : Result<unit, string> =
+  let columnNames =
+    table.columns |> List.map (fun col -> col.name.ToLowerInvariant()) |> Set.ofList
+
+  annotation.columns
+  |> List.tryFind (fun col -> not (columnNames.Contains(col.ToLowerInvariant())))
+  |> function
+    | Some invalidCol ->
+      let availableCols =
+        table.columns |> List.map (fun col -> col.name) |> String.concat ", "
+
+      Error
+        $"DeleteWhere annotation references non-existent column '{invalidCol}' in table '{table.name}'. Available columns: {availableCols}"
+    | None -> Ok()
+
+let generateDeleteWhere (table: CreateTable) (annotation: DeleteWhereAnnotation) =
+  let methodName = $"Delete{capitalizeName annotation.name}"
+  let deleteSql = $"DELETE FROM {table.name} WHERE {annotation.whereSql}"
+
+  let parameters =
+    annotation.columns
+    |> List.map (fun col ->
+      let columnDef = findColumn table col |> Option.get
+      let fsharpType = TypeGenerator.mapColumnType columnDef
+      col, fsharpType)
+
+  let bindings =
+    annotation.columns
+    |> List.map (fun col ->
+      let columnDef = findColumn table col |> Option.get
+      addColumnBinding "cmd" columnDef col)
+
+  let methodParameters =
+    match parameters with
+    | [] -> [ txParam ]
+    | _ -> [ typedTupledOrSingleParam parameters; txParam ]
+
+  staticMember
+    methodName
+    methodParameters
+    (executeWriteUnitExpr deleteSql bindings)
+    "Task<Result<unit, SqliteException>>"
 
 let generateUpsert (table: CreateTable) =
   let typeName = capitalizeName table.name

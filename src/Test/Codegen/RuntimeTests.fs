@@ -70,7 +70,7 @@ let ``generated CRUD helper style works against sqlite`` () =
         let! byId = TestCodegenRuntime.Db.Student.SelectById insertedId
         let! byName = TestCodegenRuntime.Db.Student.SelectByName "Alice"
         let! byLike = TestCodegenRuntime.Db.Student.SelectNameLike "lic"
-        let! adults = TestCodegenRuntime.Db.Student.SelectAdults 21L
+        let! adults = TestCodegenRuntime.Db.Student.SelectAdults(21L, "%A%")
         let! first = TestCodegenRuntime.Db.Student.SelectOne
 
         let! reused =
@@ -90,13 +90,39 @@ let ``generated CRUD helper style works against sqlite`` () =
         let! afterUpsert = TestCodegenRuntime.Db.Student.SelectById insertedId
         do! TestCodegenRuntime.Db.Student.Delete created.Id
         let! remaining = TestCodegenRuntime.Db.Student.SelectAll
-        return insertedId, insertedAgain, byId, byName, byLike, adults, first, reused, created, afterUpsert, remaining
+        do! TestCodegenRuntime.Db.Student.DeleteAdults(21L, "%A%")
+        let! afterDeleteWhere = TestCodegenRuntime.Db.Student.SelectAll
+
+        return
+          insertedId,
+          insertedAgain,
+          byId,
+          byName,
+          byLike,
+          adults,
+          first,
+          reused,
+          created,
+          afterUpsert,
+          remaining,
+          afterDeleteWhere
       }
       |> fun task -> task.Result
 
     match result with
     | Error ex -> failwith $"Expected generated CRUD flow to succeed, got: {ex}"
-    | Ok(insertedId, insertedAgain, byId, byName, byLike, adults, first, reused, created, afterUpsert, remaining) ->
+    | Ok(insertedId,
+         insertedAgain,
+         byId,
+         byName,
+         byLike,
+         adults,
+         first,
+         reused,
+         created,
+         afterUpsert,
+         remaining,
+         afterDeleteWhere) ->
       Assert.Equal(None, insertedAgain)
       Assert.Equal(Some insertedId, byId |> Option.map _.Id)
       Assert.Equal<int>(1, byName.Length)
@@ -108,6 +134,7 @@ let ``generated CRUD helper style works against sqlite`` () =
       Assert.Equal(Some 22L, afterUpsert |> Option.map _.Age)
       Assert.Single remaining |> ignore
       Assert.Equal("Alice", remaining.Head.Name)
+      Assert.Empty afterDeleteWhere
   finally
     Directory.Delete(tempDir, true)
 

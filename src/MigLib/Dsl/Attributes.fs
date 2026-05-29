@@ -70,11 +70,10 @@ type SelectLikeAttribute(column: string) =
   member _.Column = column
 
 [<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
-type SelectWhereAttribute(name: string, whereSql: string, [<ParamArray>] columns: string array) =
+type SelectWhereAttribute(name: string, whereSql: string) =
   inherit Attribute()
   member _.Name = name
   member _.WhereSql = whereSql
-  member _.Columns = columns
   member val OrderBy: string = null with get, set
 
 [<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
@@ -91,6 +90,12 @@ type UpdateByAttribute(column: string) =
 type DeleteByAttribute(column: string) =
   inherit Attribute()
   member _.Column = column
+
+[<AttributeUsage(AttributeTargets.Class, AllowMultiple = true)>]
+type DeleteWhereAttribute(name: string, whereSql: string) =
+  inherit Attribute()
+  member _.Name = name
+  member _.WhereSql = whereSql
 
 [<AttributeUsage(AttributeTargets.Class)>]
 type DeleteAllAttribute() =

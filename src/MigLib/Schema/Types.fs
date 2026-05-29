@@ -95,6 +95,13 @@ type SelectOneAnnotation = SelectOneAnnotation
 
 type InsertOrIgnoreAnnotation = InsertOrIgnoreAnnotation
 
+type DeleteWhereAnnotation =
+  {
+    name: string
+    whereSql: string
+    columns: string list
+  }
+
 type DeleteAllAnnotation = DeleteAllAnnotation
 
 type UpsertAnnotation = UpsertAnnotation
@@ -112,6 +119,7 @@ type CreateView =
     queryByOrCreateAnnotations: QueryByOrCreateAnnotation list
     selectOneAnnotations: SelectOneAnnotation list
     insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list
+    deleteWhereAnnotations: DeleteWhereAnnotation list
     deleteAllAnnotations: DeleteAllAnnotation list
     upsertAnnotations: UpsertAnnotation list
   }
@@ -129,6 +137,7 @@ type CreateTable =
     queryByOrCreateAnnotations: QueryByOrCreateAnnotation list
     selectOneAnnotations: SelectOneAnnotation list
     insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list
+    deleteWhereAnnotations: DeleteWhereAnnotation list
     deleteAllAnnotations: DeleteAllAnnotation list
     upsertAnnotations: UpsertAnnotation list
   }
