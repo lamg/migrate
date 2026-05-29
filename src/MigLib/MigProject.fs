@@ -18,6 +18,7 @@ type ProgReport = Types.ProgReport
 type ResolvedProject = Types.ResolvedProject
 type ResolvedGeneratedSchemaModule = Types.ResolvedGeneratedSchemaModule
 type SqliteJournalMode = Types.SqliteJournalMode
+type SqliteTransactionMode = Types.SqliteTransactionMode
 
 /// Reusable transaction-bound database operation. Generated query helpers and
 /// custom reusable database operations use this shape.
@@ -46,6 +47,13 @@ let dbTxn dbPath = Types.dbTxn dbPath
 /// Creates a reusable database runtime bound to <paramref name="dbPath"/>.
 let dbRuntime dbPath = Types.dbRuntime dbPath
 
+/// Creates a read-only transaction computation expression builder bound to
+/// <paramref name="dbPath"/>.
+let readOnlyDbTxn dbPath = Types.readOnlyDbTxn dbPath
+
+/// Creates a read-only reusable database runtime bound to <paramref name="dbPath"/>.
+let readOnlyDbRuntime dbPath = Types.readOnlyDbRuntime dbPath
+
 /// Returns a new transaction builder that applies the selected SQLite journal
 /// mode when opening transaction connections.
 let withJournalMode journalMode db = Types.withJournalMode journalMode db
@@ -53,6 +61,11 @@ let withJournalMode journalMode db = Types.withJournalMode journalMode db
 /// Returns a new transaction builder with the SQLite busy timeout applied to
 /// transaction connections.
 let withBusyTimeout timeout db = Types.withBusyTimeout timeout db
+
+/// Returns a new transaction builder that uses the selected SQLite transaction
+/// mode when opening transaction connections.
+let withTransactionMode transactionMode db =
+  Types.withTransactionMode transactionMode db
 
 /// Shared transaction computation expression builder for composing reusable
 /// <see cref="TxnStep{T}"/> values before binding them to a concrete database

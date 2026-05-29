@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [8.3.0] - 2026-05-29
+
+Added:
+
+- **MigLib**: add read-only transaction support for generated database workflows
+  - `readOnlyDbTxn`, `readOnlyDbRuntime`, and `withTransactionMode` expose explicit read-only database access
+  - read-only SQLite connections open in read-only mode and reject write operations
+
+Changed:
+
+- **MigLib**: serialize top-level read/write transactions per resolved database path
+  - nested same-path transactions reuse the active transaction instead of waiting on the writer gate
+  - top-level read-only transactions avoid the writer gate, while different database paths remain independent
+  - write transactions inside active read-only transactions now fail with a clear error
+- **mig CLI**: version kept in sync with MigLib for runtime feature availability.
+- **MigLib.Web**: version kept in sync with MigLib for package alignment.
+
 ## [8.2.0] - 2026-05-29
 
 Added:

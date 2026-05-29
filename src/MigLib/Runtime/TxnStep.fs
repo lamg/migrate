@@ -1,6 +1,8 @@
 module MigLib.Runtime.TxnStep
 
 open System
+open System.Collections.Concurrent
+open System.Threading
 open System.Threading.Tasks
 
 open Microsoft.Data.Sqlite
@@ -78,6 +80,71 @@ let internal forEach (items: 'a seq) (body: 'a -> TxnStep<unit>) : TxnStep<unit>
       | None -> return Ok()
     }
 
+let private transactionGates = ConcurrentDictionary<string, SemaphoreSlim>()
+
+let private transactionGate resolvedDbPath =
+  transactionGates.GetOrAdd(resolvedDbPath, fun _ -> new SemaphoreSlim(1, 1))
+
+type private ActiveTransaction =
+  {
+    resolvedDbPath: string
+    transactionMode: SqliteTransactionMode
+    transaction: SqliteTransaction
+  }
+
+let private activeTransaction = AsyncLocal<ActiveTransaction option>()
+
+let private canReuseTransaction requestedMode activeMode =
+  match requestedMode, activeMode with
+  | SqliteTransactionMode.ReadOnly, _ -> true
+  | SqliteTransactionMode.ReadWrite, SqliteTransactionMode.ReadWrite -> true
+  | SqliteTransactionMode.ReadWrite, SqliteTransactionMode.ReadOnly -> false
+
+let private readWriteInsideReadOnlyError =
+  SqliteException("Cannot run a read-write transaction inside an active read-only transaction.", 0)
+
+let private runInExistingTransaction mapDbError body transaction =
+  task {
+    try
+      return! body transaction
+    with :? SqliteException as ex ->
+      return Error(mapDbError ex)
+  }
+
+let private runInNewTransaction connectionConfig resolvedDbPath body =
+  task {
+    use connection = Core.openSqliteConnection connectionConfig resolvedDbPath
+    use transaction = connection.BeginTransaction()
+    let previous = activeTransaction.Value
+
+    activeTransaction.Value <-
+      Some
+        {
+          resolvedDbPath = resolvedDbPath
+          transactionMode = connectionConfig.transactionMode
+          transaction = transaction
+        }
+
+    try
+      return! body transaction
+    finally
+      activeTransaction.Value <- previous
+  }
+
+let private runWithTransactionGate (connectionConfig: Sqlite.ConnectionConfig) resolvedDbPath operation =
+  task {
+    match connectionConfig.transactionMode with
+    | SqliteTransactionMode.ReadOnly -> return! operation ()
+    | SqliteTransactionMode.ReadWrite ->
+      let gate = transactionGate resolvedDbPath
+      do! gate.WaitAsync()
+
+      try
+        return! operation ()
+      finally
+        gate.Release() |> ignore
+  }
+
 /// Opens the database at <paramref name="dbPath"/>, starts a transaction,
 /// runs <paramref name="body"/>, and commits on success or rolls back on
 /// failure.
@@ -91,20 +158,32 @@ let internal runTransactionInternal
     match Core.resolveDatabasePath dbPath with
     | Error message -> return Error(mapDbError (SqliteException(message, 0)))
     | Ok resolvedDbPath ->
-      use connection = Core.openSqliteConnection connectionConfig resolvedDbPath
-      use transaction = connection.BeginTransaction()
+      match activeTransaction.Value with
+      | Some active when active.resolvedDbPath = resolvedDbPath ->
+        if canReuseTransaction connectionConfig.transactionMode active.transactionMode then
+          return! runInExistingTransaction mapDbError body active.transaction
+        else
+          return Error(mapDbError readWriteInsideReadOnlyError)
+      | _ ->
+        return!
+          runWithTransactionGate connectionConfig resolvedDbPath (fun () ->
+            task {
+              return!
+                runInNewTransaction connectionConfig resolvedDbPath (fun transaction ->
+                  task {
+                    try
+                      let! result = body transaction
 
-      try
-        let! result = body transaction
-
-        match result with
-        | Ok value ->
-          transaction.Commit()
-          return Ok value
-        | Error _ ->
-          transaction.Rollback()
-          return result
-      with :? SqliteException as ex ->
-        transaction.Rollback()
-        return Error(mapDbError ex)
+                      match result with
+                      | Ok value ->
+                        transaction.Commit()
+                        return Ok value
+                      | Error _ ->
+                        transaction.Rollback()
+                        return result
+                    with :? SqliteException as ex ->
+                      transaction.Rollback()
+                      return Error(mapDbError ex)
+                  })
+            })
   }

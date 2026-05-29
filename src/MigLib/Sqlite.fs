@@ -10,6 +10,11 @@ type SqliteJournalMode =
   | Wal
   | Delete
 
+/// Controls how MigLib opens SQLite transaction connections.
+type SqliteTransactionMode =
+  | ReadWrite
+  | ReadOnly
+
 module internal Sqlite =
 
   let private sqliteInitialized = lazy (SQLitePCL.Batteries_V2.Init())
@@ -20,12 +25,14 @@ module internal Sqlite =
     {
       journalMode: SqliteJournalMode
       busyTimeout: TimeSpan option
+      transactionMode: SqliteTransactionMode
     }
 
   let defaultConnectionConfig =
     {
       journalMode = Preserve
       busyTimeout = None
+      transactionMode = ReadWrite
     }
 
   let private timeoutSeconds (timeout: TimeSpan) = int (Math.Ceiling timeout.TotalSeconds)
@@ -33,6 +40,10 @@ module internal Sqlite =
   let connectionString (config: ConnectionConfig) (dbPath: string) =
     let builder = SqliteConnectionStringBuilder()
     builder.DataSource <- dbPath
+
+    match config.transactionMode with
+    | ReadWrite -> builder.Mode <- SqliteOpenMode.ReadWriteCreate
+    | ReadOnly -> builder.Mode <- SqliteOpenMode.ReadOnly
 
     match config.busyTimeout with
     | Some timeout -> builder.DefaultTimeout <- timeoutSeconds timeout
@@ -55,13 +66,18 @@ module internal Sqlite =
 
       cmd.ExecuteScalar() |> ignore
 
+  let private applyConnectionConfig (connection: SqliteConnection) config =
+    match config.transactionMode with
+    | ReadWrite -> applyJournalMode connection config.journalMode
+    | ReadOnly -> ()
+
   let openConnectionWithConfig (config: ConnectionConfig) (dbPath: string) =
     ensureInitialized ()
     let connection = new SqliteConnection(connectionString config dbPath)
     connection.Open()
 
     try
-      applyJournalMode connection config.journalMode
+      applyConnectionConfig connection config
     with _ ->
       connection.Dispose()
       reraise ()

@@ -43,6 +43,8 @@ type PlanResult =
 
 type SqliteJournalMode = MigLib.SqliteJournalMode
 
+type SqliteTransactionMode = MigLib.SqliteTransactionMode
+
 let private runTxnStepAsMigError dbPath connectionConfig (step: TxnStep<'a>) : Task<Result<'a, MigError>> =
   runTransactionInternal connectionConfig dbPath MigError.Sqlite (fun tx ->
     task {
@@ -126,6 +128,28 @@ let dbTxn dbPath = DbTxnBuilder dbPath
 
 /// Creates a reusable database runtime bound to <paramref name="dbPath"/>.
 let dbRuntime dbPath = DbRuntime dbPath
+
+/// Returns a new transaction builder that uses the selected SQLite transaction
+/// mode when opening transaction connections.
+let withTransactionMode transactionMode (db: DbTxnBuilder) =
+  db.WithConnectionConfig
+    { db.ConnectionConfig with
+        transactionMode = transactionMode
+    }
+
+/// Creates a read-only transaction computation expression builder bound to
+/// <paramref name="dbPath"/>.
+let readOnlyDbTxn dbPath =
+  dbTxn dbPath |> withTransactionMode SqliteTransactionMode.ReadOnly
+
+/// Creates a read-only reusable database runtime bound to <paramref name="dbPath"/>.
+let readOnlyDbRuntime dbPath =
+  DbRuntime(
+    dbPath,
+    { MigLib.Sqlite.defaultConnectionConfig with
+        transactionMode = SqliteTransactionMode.ReadOnly
+    }
+  )
 
 /// Returns a new transaction builder that applies the selected SQLite journal
 /// mode when opening transaction connections.

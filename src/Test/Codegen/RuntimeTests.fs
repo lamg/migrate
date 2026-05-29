@@ -2,6 +2,7 @@ module Test.Codegen.RuntimeTests
 
 open System
 open System.IO
+open System.Threading
 open System.Threading.Tasks
 open Microsoft.Data.Sqlite
 open MigLib.Types
@@ -47,6 +48,25 @@ let private journalMode (tx: SqliteTransaction) =
     use cmd = new SqliteCommand("PRAGMA journal_mode;", tx.Connection, tx)
     let! value = cmd.ExecuteScalarAsync()
     return Ok(string value)
+  }
+
+let private waitForSignal (signal: TaskCompletionSource<unit>) =
+  Assert.True(signal.Task.Wait(TimeSpan.FromSeconds 5.0), "timed out waiting for transaction signal")
+
+let private pendingSignal (signal: TaskCompletionSource<unit>) =
+  Assert.False(signal.Task.Wait(TimeSpan.FromMilliseconds 100.0), "transaction entered before it was expected")
+
+let private blockingTransaction (entered: TaskCompletionSource<unit>) (release: TaskCompletionSource<unit>) _ =
+  task {
+    entered.SetResult()
+    do! release.Task
+    return Ok()
+  }
+
+let private signalingTransaction (entered: TaskCompletionSource<unit>) _ =
+  task {
+    entered.SetResult()
+    return Ok()
   }
 
 [<Fact>]
@@ -180,6 +200,237 @@ let ``db connection config applies and preserves journal mode through runtime`` 
     Assert.Equal("wal", walMode)
     Assert.Equal("wal", preservedMode)
     Assert.Equal("delete", deleteMode)
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``read write transactions for the same database path are serialized`` () =
+  let tempDir = createTempDir "mig_codegen_runtime_same_path_serial"
+  let dbPath = Path.Combine(tempDir, "runtime.sqlite")
+
+  try
+    let db = dbTxn dbPath
+
+    let firstEntered =
+      TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+    let releaseFirst =
+      TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+    let secondEntered =
+      TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+    let first =
+      db.DbRuntime.RunInTransaction MigError.Sqlite (blockingTransaction firstEntered releaseFirst)
+
+    waitForSignal firstEntered
+
+    let second =
+      db.DbRuntime.RunInTransaction MigError.Sqlite (signalingTransaction secondEntered)
+
+    pendingSignal secondEntered
+    releaseFirst.SetResult()
+
+    Assert.True(Task.WaitAll([| first :> Task; second :> Task |], TimeSpan.FromSeconds 5.0))
+
+    waitForSignal secondEntered
+    unwrapResult first.Result
+    unwrapResult second.Result
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``read write transactions for different database paths are independent`` () =
+  let tempDir = createTempDir "mig_codegen_runtime_different_path"
+  let firstDbPath = Path.Combine(tempDir, "first.sqlite")
+  let secondDbPath = Path.Combine(tempDir, "second.sqlite")
+
+  try
+    let firstDb = dbTxn firstDbPath
+    let secondDb = dbTxn secondDbPath
+
+    let firstEntered =
+      TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+    let releaseFirst =
+      TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+    let secondEntered =
+      TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+    let first =
+      firstDb.DbRuntime.RunInTransaction MigError.Sqlite (blockingTransaction firstEntered releaseFirst)
+
+    waitForSignal firstEntered
+
+    let second =
+      secondDb.DbRuntime.RunInTransaction MigError.Sqlite (signalingTransaction secondEntered)
+
+    waitForSignal secondEntered
+    releaseFirst.SetResult()
+
+    Assert.True(Task.WaitAll([| first :> Task; second :> Task |], TimeSpan.FromSeconds 5.0))
+
+    unwrapResult first.Result
+    unwrapResult second.Result
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``read only transactions do not wait for the write transaction gate`` () =
+  let tempDir = createTempDir "mig_codegen_runtime_read_only_not_gated"
+  let dbPath = Path.Combine(tempDir, "runtime.sqlite")
+
+  try
+    createStudentTable dbPath
+
+    let writer = dbTxn dbPath
+    let reader = readOnlyDbTxn dbPath
+
+    let writerEntered =
+      TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+    let releaseWriter =
+      TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+    let readerEntered =
+      TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+    let write =
+      writer.DbRuntime.RunInTransaction MigError.Sqlite (blockingTransaction writerEntered releaseWriter)
+
+    waitForSignal writerEntered
+
+    let read =
+      reader.DbRuntime.RunInTransaction MigError.Sqlite (signalingTransaction readerEntered)
+
+    waitForSignal readerEntered
+    releaseWriter.SetResult()
+
+    Assert.True(Task.WaitAll([| write :> Task; read :> Task |], TimeSpan.FromSeconds 5.0))
+
+    unwrapResult write.Result
+    unwrapResult read.Result
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``read only transactions can read but reject writes`` () =
+  let tempDir = createTempDir "mig_codegen_runtime_read_only"
+  let dbPath = Path.Combine(tempDir, "runtime.sqlite")
+
+  try
+    createStudentTable dbPath
+
+    dbTxn dbPath {
+      let! _ = TestCodegenRuntime.Db.Student.Insert { Id = 0L; Name = "Alice"; Age = 21L }
+
+      return ()
+    }
+    |> fun task -> task.Result
+    |> unwrapResult
+
+    let readResult =
+      readOnlyDbTxn dbPath { return! TestCodegenRuntime.Db.Student.SelectAll }
+      |> fun task -> task.Result
+      |> unwrapResult
+
+    let writeResult =
+      readOnlyDbTxn dbPath {
+        let! _ = TestCodegenRuntime.Db.Student.Insert { Id = 0L; Name = "Bob"; Age = 25L }
+
+        return ()
+      }
+      |> fun task -> task.Result
+
+    Assert.Equal<string list>([ "Alice" ], readResult |> List.map _.Name)
+
+    match writeResult with
+    | Error _ -> ()
+    | Ok() -> failwith "expected read-only transaction write to fail"
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``nested read write transaction for same database path reuses active transaction`` () =
+  let tempDir = createTempDir "mig_codegen_runtime_nested_write"
+  let dbPath = Path.Combine(tempDir, "runtime.sqlite")
+
+  try
+    createStudentTable dbPath
+    let db = dbTxn dbPath
+
+    let work =
+      db {
+        let! _ = TestCodegenRuntime.Db.Student.Insert { Id = 0L; Name = "Alice"; Age = 21L }
+
+        let! bobId: int64 =
+          db { return! TestCodegenRuntime.Db.Student.Insert { Id = 0L; Name = "Bob"; Age = 25L } }
+
+        return bobId
+      }
+
+    Assert.True(work.Wait(TimeSpan.FromSeconds 5.0), "nested write transaction did not complete")
+    let bobId = unwrapResult work.Result
+
+    let rows =
+      db { return! TestCodegenRuntime.Db.Student.SelectAll }
+      |> fun task -> task.Result
+      |> unwrapResult
+
+    Assert.True(bobId > 0L)
+    Assert.Equal<string list>([ "Alice"; "Bob" ], rows |> List.map _.Name)
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``nested read only transaction for same database path reuses active read write transaction`` () =
+  let tempDir = createTempDir "mig_codegen_runtime_nested_read_only"
+  let dbPath = Path.Combine(tempDir, "runtime.sqlite")
+
+  try
+    createStudentTable dbPath
+    let db = dbTxn dbPath
+    let readOnlyDb = readOnlyDbTxn dbPath
+
+    let rows =
+      db {
+        let! _ = TestCodegenRuntime.Db.Student.Insert { Id = 0L; Name = "Alice"; Age = 21L }
+
+        let! rows: TestCodegenRuntime.Db.Student list =
+          readOnlyDb { return! TestCodegenRuntime.Db.Student.SelectAll }
+
+        return rows
+      }
+      |> fun task -> task.Result
+      |> unwrapResult
+
+    Assert.Equal<string list>([ "Alice" ], rows |> List.map _.Name)
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``nested read write transaction inside read only transaction fails`` () =
+  let tempDir = createTempDir "mig_codegen_runtime_nested_read_only_write"
+  let dbPath = Path.Combine(tempDir, "runtime.sqlite")
+
+  try
+    createStudentTable dbPath
+    let db = dbTxn dbPath
+    let readOnlyDb = readOnlyDbTxn dbPath
+
+    let result =
+      readOnlyDb {
+        let! insertedId: int64 =
+          db { return! TestCodegenRuntime.Db.Student.Insert { Id = 0L; Name = "Alice"; Age = 21L } }
+
+        return insertedId
+      }
+      |> fun task -> task.Result
+
+    match result with
+    | Error _ -> ()
+    | Ok _ -> failwith "expected nested read-write transaction inside read-only transaction to fail"
   finally
     Directory.Delete(tempDir, true)
 
