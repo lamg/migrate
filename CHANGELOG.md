@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [8.2.0] - 2026-05-29
+
+Added:
+
+- **MigLib**: add generated raw `WHERE` helpers for queries and deletes
+  - `SelectWhere` and `DeleteWhere` infer parameters from `@column` placeholders
+  - generated helpers support repeated placeholders with a single binding
+  - view code generation continues to reject delete helpers as read-only
+
+Changed:
+
+- **mig CLI**: version kept in sync with MigLib for codegen feature availability.
+
 ## [7.0.1] - 2026-04-14
 
 Fixed:

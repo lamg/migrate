@@ -7,7 +7,7 @@
     <IsTrimmable>true</IsTrimmable>
 
     <PackageId>MigLib</PackageId>
-    <Version>8.1.1</Version>
+    <Version>8.2.0</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <AssemblyName>MigLib</AssemblyName>
 
