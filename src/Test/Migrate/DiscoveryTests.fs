@@ -26,10 +26,10 @@ let private writeFile (path: string) (text: string) =
 
 let private runtimeProjectPath tempDir = Path.Combine(tempDir, "Runtime.fsproj")
 
-let private schemaDirectory tempDir = Path.Combine(tempDir, "DomainModeling")
+let private schemaDirectory tempDir = Path.Combine(tempDir, "MigSchema")
 
 let private schemaProjectPath tempDir =
-  Path.Combine(schemaDirectory tempDir, "DomainModeling.fsproj")
+  Path.Combine(schemaDirectory tempDir, "MigSchema.fsproj")
 
 let private runtimeAssemblyPath tempDir =
   let assemblyName =

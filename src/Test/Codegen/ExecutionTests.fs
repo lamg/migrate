@@ -1,6 +1,7 @@
 module Test.Codegen.ExecutionTests
 
 open System
+open System.Diagnostics
 open System.IO
 
 open MigLib.Codegen.Execution
@@ -28,12 +29,10 @@ let private writeFile (path: string) (text: string) =
 
 let private makeInputs tempDir =
   let runtimeProjectPath = Path.Combine(tempDir, "Runtime.fsproj")
-  let domainModelingDirectory = Path.Combine(tempDir, "DomainModeling")
+  let schemaDirectory = Path.Combine(tempDir, "MigSchema")
 
-  let domainModelingProjectPath =
-    Path.Combine(domainModelingDirectory, "DomainModeling.fsproj")
+  let schemaProjectPath = Path.Combine(schemaDirectory, "MigSchema.fsproj")
 
-  let schemaSourcePath = Path.Combine(domainModelingDirectory, "MigSchema.fs")
   let outputPath = Path.Combine(tempDir, "Db.fs")
 
   writeFile
@@ -41,31 +40,26 @@ let private makeInputs tempDir =
     "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>RuntimeRoot</RootNamespace></PropertyGroup></Project>"
 
   writeFile
-    domainModelingProjectPath
+    schemaProjectPath
     "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>TestCodegenSchema</RootNamespace></PropertyGroup></Project>"
-
-  writeFile
-    schemaSourcePath
-    "[<MigLib.Dsl.Attributes.GeneratedDbNamespace(\"TestGeneratedDb\")>]\nmodule TestCodegenSchema.MigSchema"
 
   let project =
     {
       runtimeProjectPath = runtimeProjectPath
       runtimeProjectDirectory = tempDir
       runtimeProjectName = "Runtime"
-      domainModelingProjectPath = domainModelingProjectPath
-      domainModelingDirectory = domainModelingDirectory
+      schemaProjectPath = schemaProjectPath
+      schemaDirectory = schemaDirectory
     }
 
   {
     project = project
-    domainModelingAssembly =
+    schemaAssembly =
       {
         project = project
         assemblyName = "Test"
         assemblyPath = typeof<TestCodegenSchema.MigSchema.Marker>.Assembly.Location
       }
-    schemaSourcePath = schemaSourcePath
     outputPath = outputPath
   }
 
@@ -74,6 +68,39 @@ let private assertRegularErrorContains expectedText result =
   | Error(MigError.Regular message) -> Assert.Contains(expectedText, message)
   | Error error -> failwith $"Expected MigError.Regular, got: {error}"
   | Ok value -> failwith $"Expected error, got: {value}"
+
+let private buildCSharpAssembly tempDir sourceText =
+  let projectDir = Path.Combine(tempDir, "SchemaAssembly")
+  let projectPath = Path.Combine(projectDir, "SchemaAssembly.csproj")
+  let sourcePath = Path.Combine(projectDir, "Schema.cs")
+  let migLibPath = typeof<CodegenResult>.Assembly.Location
+
+  writeFile
+    projectPath
+    $"""<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><Reference Include="MigLib"><HintPath>{migLibPath}</HintPath></Reference></ItemGroup></Project>"""
+
+  writeFile sourcePath sourceText
+
+  let startInfo =
+    ProcessStartInfo(
+      FileName = "dotnet",
+      Arguments = $"build \"{projectPath}\" --nologo -v:q",
+      RedirectStandardOutput = true,
+      RedirectStandardError = true,
+      UseShellExecute = false
+    )
+
+  startInfo.WorkingDirectory <- projectDir
+
+  use proc = Process.Start startInfo
+  let stdout = proc.StandardOutput.ReadToEnd()
+  let stderr = proc.StandardError.ReadToEnd()
+  proc.WaitForExit()
+
+  if proc.ExitCode <> 0 then
+    failwith $"Expected fixture assembly to build. stdout: {stdout}\nstderr: {stderr}"
+
+  Path.Combine(projectDir, "bin", "Debug", "net10.0", "SchemaAssembly.dll")
 
 [<Fact>]
 let ``runCodegen writes Db fs with metadata types and CRUD helpers`` () =
@@ -109,8 +136,15 @@ let ``runCodegen writes Db fs with metadata types and CRUD helpers`` () =
       Assert.Contains("type CodegenFixture =", generated)
       Assert.Contains("type CodegenFixtureView =", generated)
       Assert.Contains("type CodegenFixtureViewA =", generated)
+      Assert.Contains("type LedgerAccount =", generated)
+      Assert.Contains("type Invoice =", generated)
       Assert.Contains("type NewPerson =", generated)
       Assert.Contains("type Person =", generated)
+      Assert.Contains("table = \"person\"", generated)
+      Assert.Contains("columns = [ \"owner_id\" ]", generated)
+      Assert.Contains("refTable = \"person\"", generated)
+      Assert.Contains("Expr.String \"revenue\"", generated)
+      Assert.Contains("Expr.Real 10", generated)
 
       Assert.True(
         generated.IndexOf("name = \"codegen_fixture_view\"") < generated.IndexOf("name = \"codegen_fixture_view_a\""),
@@ -286,13 +320,46 @@ let ``runCodegen fails when generated Db namespace attribute is missing`` () =
 
     let inputs =
       { inputs with
-          domainModelingAssembly =
-            { inputs.domainModelingAssembly with
+          schemaAssembly =
+            { inputs.schemaAssembly with
                 assemblyPath = typeof<CodegenResult>.Assembly.Location
             }
       }
 
     runCodegen inputs
     |> assertRegularErrorContains "does not contain a module marked with GeneratedDbNamespaceAttribute"
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``runCodegen fails when generated Db namespace attributes disagree`` () =
+  let tempDir = createTempDir "mig_codegen_execution_mismatched_schema_modules"
+
+  try
+    let inputs = makeInputs tempDir
+
+    let assemblyPath =
+      buildCSharpAssembly
+        tempDir
+        """
+using MigLib.Dsl;
+
+[Attributes.GeneratedDbNamespace("One")]
+public static class FirstSchemaModule {}
+
+[Attributes.GeneratedDbNamespace("Two")]
+public static class SecondSchemaModule {}
+"""
+
+    let inputs =
+      { inputs with
+          schemaAssembly =
+            { inputs.schemaAssembly with
+                assemblyPath = assemblyPath
+            }
+      }
+
+    runCodegen inputs
+    |> assertRegularErrorContains "different GeneratedDbNamespaceAttribute values"
   finally
     Directory.Delete(tempDir, true)

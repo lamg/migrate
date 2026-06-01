@@ -42,7 +42,7 @@ let private scalar<'a> (connection: SqliteConnection) sql =
 let private runtimeProjectPath tempDir = Path.Combine(tempDir, "Runtime.fsproj")
 
 let private schemaProjectPath tempDir =
-  Path.Combine(tempDir, "DomainModeling", "DomainModeling.fsproj")
+  Path.Combine(tempDir, "MigSchema", "MigSchema.fsproj")
 
 let private runtimeAssemblyPath tempDir =
   let assemblyName =
@@ -90,38 +90,27 @@ let private assertRegularErrorContains expectedText result =
   | Ok value -> failwith $"Expected error, got: {value}"
 
 let private generatedFixtureTableWithName =
-  {
-    name = "generated_fixture"
+  { name = "generated_fixture"
     previousName = None
     dropColumns = []
     columns =
-      [
-        {
-          name = "id"
+      [ { name = "id"
           previousName = None
           columnType = SqlInteger
           constraints =
-            [
-              NotNull
+            [ NotNull
               PrimaryKey
-                {
-                  constraintName = None
+                { constraintName = None
                   columns = []
-                  isAutoincrement = false
-                }
-            ]
+                  isAutoincrement = false } ]
           enumLikeDu = None
-          unitOfMeasure = None
-        }
-        {
-          name = "name"
+          unitOfMeasure = None }
+        { name = "name"
           previousName = None
           columnType = SqlText
           constraints = [ NotNull ]
           enumLikeDu = None
-          unitOfMeasure = None
-        }
-      ]
+          unitOfMeasure = None } ]
     constraints = []
     queryByAnnotations = []
     queryLikeAnnotations = []
@@ -131,8 +120,87 @@ let private generatedFixtureTableWithName =
     insertOrIgnoreAnnotations = []
     deleteWhereAnnotations = []
     deleteAllAnnotations = []
-    upsertAnnotations = []
-  }
+    upsertAnnotations = [] }
+
+let private requiredIntegerColumn name constraints =
+  { name = name
+    previousName = None
+    columnType = SqlInteger
+    constraints = NotNull :: constraints
+    enumLikeDu = None
+    unitOfMeasure = None }
+
+let private textColumn name =
+  { name = name
+    previousName = None
+    columnType = SqlText
+    constraints = [ NotNull ]
+    enumLikeDu = None
+    unitOfMeasure = None }
+
+let private primaryKeyColumn name =
+  requiredIntegerColumn
+    name
+    [ PrimaryKey
+        { constraintName = None
+          columns = []
+          isAutoincrement = false } ]
+
+let private simpleTable name columns constraints =
+  { name = name
+    previousName = None
+    dropColumns = []
+    columns = columns
+    constraints = constraints
+    queryByAnnotations = []
+    queryLikeAnnotations = []
+    queryWhereAnnotations = []
+    queryByOrCreateAnnotations = []
+    selectOneAnnotations = []
+    insertOrIgnoreAnnotations = []
+    deleteWhereAnnotations = []
+    deleteAllAnnotations = []
+    upsertAnnotations = [] }
+
+let private foreignKey refTable columns =
+  ForeignKey
+    { columns = columns
+      refTable = refTable
+      refColumns = [ "id" ]
+      onDelete = None
+      onUpdate = None }
+
+let private parentTable =
+  simpleTable "parent" [ primaryKeyColumn "id"; textColumn "name" ] []
+
+let private childTable =
+  simpleTable
+    "child"
+    [ primaryKeyColumn "id"
+      requiredIntegerColumn "parent_id" [ foreignKey "parent" [] ]
+      textColumn "name" ]
+    []
+
+let private cyclicTable name referencedTable referencedColumn =
+  simpleTable
+    name
+    [ primaryKeyColumn "id"
+      requiredIntegerColumn referencedColumn [ foreignKey referencedTable [] ] ]
+    []
+
+let private projectWithTargetTables tempDir tables =
+  let project = makeProject tempDir
+
+  { project with
+      targetSchema =
+        { project.targetSchema with
+            schema =
+              { project.targetSchema.schema with
+                  tables = tables
+                  views = []
+                  indexes = []
+                  triggers = []
+                  inserts = [] } } }
 
 let private projectWithSeededGeneratedFixture tempDir =
   let project = makeProject tempDir
@@ -141,21 +209,14 @@ let private projectWithSeededGeneratedFixture tempDir =
     { project.targetSchema.schema with
         tables = [ generatedFixtureTableWithName ]
         inserts =
-          [
-            {
-              table = "generated_fixture"
+          [ { table = "generated_fixture"
               columns = [ "id"; "name" ]
-              values = [ [ Integer 1; String "seed-conflict" ]; [ Integer 3; String "seed-default" ] ]
-            }
-          ]
-    }
+              values = [ [ Integer 1; String "seed-conflict" ]; [ Integer 3; String "seed-default" ] ] } ] }
 
   { project with
       targetSchema =
         { project.targetSchema with
-            schema = targetSql
-        }
-  }
+            schema = targetSql } }
 
 [<Fact>]
 let ``migrate creates target database when no source exists`` () =
@@ -249,6 +310,78 @@ let ``migrate copies source rows before applying missing seeds`` () =
       Assert.Equal("source-only", scalar<string> targetConnection "SELECT name FROM generated_fixture WHERE id = 2")
       Assert.Equal("seed-default", scalar<string> targetConnection "SELECT name FROM generated_fixture WHERE id = 3")
     | Error error -> failwith $"Expected migrate to succeed, got: {error}"
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``migrate copies parent tables before child tables`` () =
+  let tempDir = createTempDir "mig_execution_copy_parent_before_child"
+
+  try
+    writeProjectLayout tempDir
+    use sourceConnection = openConnection (sourceDbPath tempDir)
+    executeSql sourceConnection "CREATE TABLE parent(id INTEGER NOT NULL, name TEXT NOT NULL);"
+
+    executeSql
+      sourceConnection
+      "CREATE TABLE child(id INTEGER NOT NULL, parent_id INTEGER NOT NULL, name TEXT NOT NULL);"
+
+    executeSql sourceConnection "INSERT INTO parent(id, name) VALUES (1, 'parent');"
+    executeSql sourceConnection "INSERT INTO child(id, parent_id, name) VALUES (10, 1, 'child');"
+    sourceConnection.Close()
+
+    let messages = ResizeArray<string>()
+
+    let report message =
+      messages.Add message
+      Task.FromResult()
+
+    let project = projectWithTargetTables tempDir [ childTable; parentTable ]
+
+    match migrate report project |> fun task -> task.Result with
+    | Ok result ->
+      Assert.Equal(2, result.copiedTables)
+      Assert.Equal(2L, result.copiedRows)
+
+      let copiedMessages = messages |> Seq.toList
+
+      let parentCopyIndex =
+        copiedMessages
+        |> List.findIndex (fun message -> message.Contains "Copying table: parent -> parent")
+
+      let childCopyIndex =
+        copiedMessages
+        |> List.findIndex (fun message -> message.Contains "Copying table: child -> child")
+
+      Assert.True(parentCopyIndex < childCopyIndex, "Parent table should be copied before child table.")
+
+      use targetConnection = openConnection result.newDbPath
+      Assert.Equal(1L, scalar<int64> targetConnection "SELECT COUNT(*) FROM parent")
+      Assert.Equal(1L, scalar<int64> targetConnection "SELECT COUNT(*) FROM child")
+    | Error error -> failwith $"Expected migrate to succeed, got: {error}"
+  finally
+    Directory.Delete(tempDir, true)
+
+[<Fact>]
+let ``migrate reports table dependency cycles during data copy`` () =
+  let tempDir = createTempDir "mig_execution_copy_dependency_cycle"
+
+  try
+    writeProjectLayout tempDir
+    use sourceConnection = openConnection (sourceDbPath tempDir)
+    executeSql sourceConnection "CREATE TABLE a(id INTEGER NOT NULL, b_id INTEGER NOT NULL);"
+    executeSql sourceConnection "CREATE TABLE b(id INTEGER NOT NULL, a_id INTEGER NOT NULL);"
+    executeSql sourceConnection "INSERT INTO a(id, b_id) VALUES (1, 1);"
+    executeSql sourceConnection "INSERT INTO b(id, a_id) VALUES (1, 1);"
+    sourceConnection.Close()
+
+    let tableA = cyclicTable "a" "b" "b_id"
+    let tableB = cyclicTable "b" "a" "a_id"
+    let project = projectWithTargetTables tempDir [ tableA; tableB ]
+
+    migrate report project
+    |> fun task -> task.Result
+    |> assertRegularErrorContains "Table dependency cycle detected among"
   finally
     Directory.Delete(tempDir, true)
 

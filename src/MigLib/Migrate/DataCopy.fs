@@ -24,6 +24,64 @@ let private sourceTableExpression tableName =
   let sourceDbName = quoteIdentifier "source_db"
   $"{sourceDbName}.{quoteIdentifier tableName}"
 
+let private foreignKeysForTable (table: CreateTable) =
+  let columnForeignKeys =
+    table.columns
+    |> List.collect (fun column ->
+      column.constraints
+      |> List.choose (function
+        | ForeignKey fk -> Some fk
+        | _ -> None))
+
+  let tableForeignKeys =
+    table.constraints
+    |> List.choose (function
+      | ForeignKey fk -> Some fk
+      | _ -> None)
+
+  columnForeignKeys @ tableForeignKeys
+
+let private copyDependencies (knownTables: Collections.Generic.HashSet<string>) (table: CreateTable) =
+  table
+  |> foreignKeysForTable
+  |> List.choose (fun fk ->
+    if
+      knownTables.Contains fk.refTable
+      && not (String.Equals(fk.refTable, table.name, StringComparison.OrdinalIgnoreCase))
+    then
+      Some fk.refTable
+    else
+      None)
+  |> List.distinctBy _.ToLowerInvariant()
+
+let private orderTablesForDataCopy (tables: CreateTable list) : Result<CreateTable list, string> =
+  let knownTables =
+    Collections.Generic.HashSet<string>(tables |> List.map _.name, StringComparer.OrdinalIgnoreCase)
+
+  let pending = Collections.Generic.List<CreateTable>(tables)
+  let ordered = Collections.Generic.List<CreateTable>()
+  let copied = Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
+  let mutable cycleError = None
+
+  while pending.Count > 0 && cycleError.IsNone do
+    let readyIndex =
+      pending
+      |> Seq.mapi (fun index table -> index, table)
+      |> Seq.tryFind (fun (_, table) -> table |> copyDependencies knownTables |> List.forall copied.Contains)
+
+    match readyIndex with
+    | Some(index, table) ->
+      ordered.Add table
+      copied.Add table.name |> ignore
+      pending.RemoveAt index
+    | None ->
+      let remaining = pending |> Seq.map _.name |> String.concat ", "
+      cycleError <- Some $"Table dependency cycle detected among: {remaining}"
+
+  match cycleError with
+  | Some error -> Error error
+  | None -> Ok(ordered |> Seq.toList)
+
 let private attachSourceDatabase (connection: SqliteConnection) (tx: SqliteTransaction) sourceDbPath =
   task {
     let sourceDbName = quoteIdentifier "source_db"
@@ -95,25 +153,26 @@ let copyData
       let mutable copiedTables = 0
       let mutable copiedRows = 0L
 
-      for targetTable in targetSchema.tables do
-        match sourceTableByName.TryFind(sourceTableName targetTable) with
-        | None -> ()
-        | Some sourceTable ->
-          do! reportProgress $"Copying table: {sourceTable.name} -> {targetTable.name}"
-          let! rows = copyMappedColumns connection tx sourceTable targetTable
-          do! reportProgress $"Copied {rows} row(s) into table: {targetTable.name}"
-          copiedTables <- copiedTables + 1
-          copiedRows <- copiedRows + rows
+      match orderTablesForDataCopy targetSchema.tables with
+      | Error error -> return Error(MigError.Regular error)
+      | Ok orderedTargetTables ->
+        for targetTable in orderedTargetTables do
+          match sourceTableByName.TryFind(sourceTableName targetTable) with
+          | None -> ()
+          | Some sourceTable ->
+            do! reportProgress $"Copying table: {sourceTable.name} -> {targetTable.name}"
+            let! rows = copyMappedColumns connection tx sourceTable targetTable
+            do! reportProgress $"Copied {rows} row(s) into table: {targetTable.name}"
+            copiedTables <- copiedTables + 1
+            copiedRows <- copiedRows + rows
 
-      tx.Commit()
-      do! reportProgress $"Copied {copiedRows} row(s) across {copiedTables} table(s)."
+        tx.Commit()
+        do! reportProgress $"Copied {copiedRows} row(s) across {copiedTables} table(s)."
 
-      return
-        Ok
-          {
-            copiedTables = copiedTables
-            copiedRows = copiedRows
-          }
+        return
+          Ok
+            { copiedTables = copiedTables
+              copiedRows = copiedRows }
     with
     | :? SqliteException as ex -> return Error(MigError.Sqlite ex)
     | ex -> return Error(MigError.Other ex)

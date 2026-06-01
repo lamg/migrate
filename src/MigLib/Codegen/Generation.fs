@@ -228,15 +228,25 @@ let private renderSqlFile (schema: SqlFile) =
 let private normalizeLineEndings (text: string) =
   text.Replace("\r\n", "\n").Replace("\r", "\n")
 
-let private computeShortSchemaHash (schemaPath: string) : Result<string, string> =
-  try
-    let normalizedSchema = File.ReadAllText schemaPath |> normalizeLineEndings
-    use sha256 = SHA256.Create()
-    let schemaBytes = Encoding.UTF8.GetBytes normalizedSchema
-    let hashBytes = sha256.ComputeHash schemaBytes
-    Ok(Convert.ToHexString(hashBytes).ToLowerInvariant().Substring(0, 16))
-  with ex ->
-    Error $"Could not compute schema hash from source file '{schemaPath}': {ex.Message}"
+let private canonicalizeSchemaForHash (schema: SqlFile) =
+  { schema with
+      measureTypes = schema.measureTypes |> List.sort
+      inserts = schema.inserts |> List.sortBy renderInsertInto
+      views = schema.views |> List.sortBy _.name
+      tables = schema.tables |> List.sortBy _.name
+      indexes = schema.indexes |> List.sortBy _.name
+      triggers = schema.triggers |> List.sortBy _.name
+  }
+
+let private computeShortSchemaHash (schema: SqlFile) =
+  let normalizedSchema =
+    schema |> canonicalizeSchemaForHash |> renderSqlFile |> normalizeLineEndings
+
+  use sha256 = SHA256.Create()
+  let schemaBytes = Encoding.UTF8.GetBytes normalizedSchema
+  let hashBytes = sha256.ComputeHash schemaBytes
+
+  Convert.ToHexString(hashBytes).ToLowerInvariant().Substring(0, 16)
 
 let private isValidModuleSegment (segment: string) =
   not (String.IsNullOrWhiteSpace segment)
@@ -262,7 +272,6 @@ let private generateCode
   (dbApp: string)
   (schema: SqlFile)
   (outputFilePath: string)
-  (schemaHash: string)
   : Result<CodegenStats, string> =
   result {
     do! validateModuleName moduleName
@@ -270,6 +279,7 @@ let private generateCode
     let! orderedViews = ViewDependencies.orderViews schema.tables schema.views
 
     let orderedSchema = { schema with views = orderedViews }
+    let schemaHash = computeShortSchemaHash orderedSchema
 
     let! viewsWithColumns =
       ViewIntrospection.getViewsColumns orderedSchema.tables orderedSchema.views
@@ -380,7 +390,6 @@ let private generateCode
 let generateCodeFromSchema
   (moduleName: string)
   (dbApp: string)
-  (schemaSourcePath: string)
   (schema: SqlFile)
   (outputPath: string)
   : Result<CodegenStats, string> =
@@ -388,6 +397,5 @@ let generateCodeFromSchema
     if String.IsNullOrWhiteSpace dbApp then
       return! Error "Database app name is empty."
 
-    let! schemaHash = computeShortSchemaHash schemaSourcePath
-    return! generateCode moduleName (dbApp.Trim()) schema outputPath schemaHash
+    return! generateCode moduleName (dbApp.Trim()) schema outputPath
   }

@@ -40,7 +40,7 @@ let private scalar<'a> (connection: SqliteConnection) sql =
 let private runtimeProjectPath tempDir = Path.Combine(tempDir, "Runtime.fsproj")
 
 let private schemaProjectPath tempDir =
-  Path.Combine(tempDir, "DomainModeling", "DomainModeling.fsproj")
+  Path.Combine(tempDir, "MigSchema", "MigSchema.fsproj")
 
 let private runtimeAssemblyPath tempDir =
   let assemblyName =

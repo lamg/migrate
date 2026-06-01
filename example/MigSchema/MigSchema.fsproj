@@ -2,12 +2,15 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <RootNamespace>ExampleDomainModeling</RootNamespace>
+    <RootNamespace>ExampleMigSchema</RootNamespace>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="MigSchema.fs" />
+    <Compile Include="Main.fs" />
+    <Compile Include="StudentExtensions.fs" />
+    <Compile Include="Courses.fs" />
+    <Compile Include="StudentViews.fs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -14,14 +14,13 @@ if not (Context.isFakeContext ()) then
   Context.RuntimeContext.Fake executionContext |> Context.setExecutionContext
 
 let rootDir = Path.GetFullPath __SOURCE_DIRECTORY__
-let domainModelingDir = Path.Combine(rootDir, "DomainModeling")
+let schemaDir = Path.Combine(rootDir, "MigSchema")
 
-let domainModelingProjectPath =
-  Path.Combine(domainModelingDir, "DomainModeling.fsproj")
+let schemaProjectPath = Path.Combine(schemaDir, "MigSchema.fsproj")
 
 let exampleProjectPath = Path.Combine(rootDir, "example.fsproj")
 let migProjectPath = Path.Combine(rootDir, "..", "src", "mig", "mig.fsproj")
-let generatedDbPath = Path.Combine(domainModelingDir, "Db.fs")
+let generatedDbPath = Path.Combine(schemaDir, "Db.fs")
 let exampleDbPrefix = "ExampleApp-main"
 
 [<Literal>]
@@ -31,7 +30,7 @@ let clean = "clean"
 let restore = "restore"
 
 [<Literal>]
-let buildDomainModeling = "build-domain-modeling"
+let buildMigSchema = "build-schema"
 
 [<Literal>]
 let generate = "generate"
@@ -68,18 +67,20 @@ Target.create clean (fun _ ->
   Directory.GetFiles(rootDir, $"{exampleDbPrefix}-*.sqlite*")
   |> Seq.iter deleteIfExists
 
-  [ Path.Combine(rootDir, "bin")
+  [
+    Path.Combine(rootDir, "bin")
     Path.Combine(rootDir, "obj")
-    Path.Combine(domainModelingDir, "bin")
-    Path.Combine(domainModelingDir, "obj") ]
+    Path.Combine(schemaDir, "bin")
+    Path.Combine(schemaDir, "obj")
+  ]
   |> Shell.cleanDirs)
 
 Target.create restore (fun _ ->
   runDotNetCommand "restore" $"\"{migProjectPath}\""
-  runDotNetCommand "restore" $"\"{domainModelingProjectPath}\""
+  runDotNetCommand "restore" $"\"{schemaProjectPath}\""
   runDotNetCommand "restore" $"\"{exampleProjectPath}\"")
 
-Target.create buildDomainModeling (fun _ -> runDotNetCommand "build" $"\"{domainModelingProjectPath}\" --no-restore")
+Target.create buildMigSchema (fun _ -> runDotNetCommand "build" $"\"{schemaProjectPath}\" --no-restore")
 
 Target.create generate (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPath}\" -- codegen -d \"{rootDir}\"")
 
@@ -89,8 +90,8 @@ Target.create init (fun _ -> runDotNetCommand "run" $"--project \"{migProjectPat
 
 Target.create run (fun _ -> runDotNetCommand "run" $"--project \"{exampleProjectPath}\" --no-build")
 
-clean ==> restore ==> buildDomainModeling ==> generate ==> build ==> run
+clean ==> restore ==> buildMigSchema ==> generate ==> build ==> run
 
-clean ==> restore ==> buildDomainModeling ==> generate ==> init
+clean ==> restore ==> buildMigSchema ==> generate ==> init
 
 Target.runOrDefault target

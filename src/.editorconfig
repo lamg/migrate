@@ -1,15 +1,12 @@
 [*.fs]
 indent_size = 2
 end_of_line = lf
+fsharp_multiline_bracket_style = cramped
 
 [*.fsx]
 indent_size = 2
 end_of_line = lf
 
 [*.fsproj]
-indent_size = 2
-end_of_line = lf
-
-[*.csproj]
 indent_size = 2
 end_of_line = lf

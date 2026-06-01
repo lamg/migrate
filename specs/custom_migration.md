@@ -1,12 +1,12 @@
 # Custom migrations
 
-This document reserves a future extension point for schema transitions that cannot be derived safely from `MigSchema.fs` alone.
+This document reserves a future extension point for schema transitions that cannot be derived safely from the compiled schema alone.
 
 ## Current rule
 
 Today:
 
-- `MigSchema.fs` is the source of truth for schema shape
+- compiled `MigSchema` modules are the source of truth for schema shape
 - `Db.fs` is fully generated
 - if a migration cannot be expressed with the supported schema primitives, planning fails clearly
 
@@ -38,7 +38,7 @@ Project code should only provide the transformation logic that MigLib cannot inf
 
 If this is implemented later, the intended file model is:
 
-- `MigSchema.fs`: declarative schema definition
+- `MigSchema` source files: declarative schema definitions
 - `Db.fs`: fully generated runtime surface
 - `CustomMigration.fs`: optional handwritten migration helpers
 
@@ -60,4 +60,4 @@ For now, the implementation should continue to assume:
 
 - no `CustomMigration.fs`
 - no handwritten migration code
-- only migrations supported by current `MigSchema.fs` primitives are allowed
+- only migrations supported by current schema DSL primitives are allowed

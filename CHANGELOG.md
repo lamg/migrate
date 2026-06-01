@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.0.0] - 2026-06-01
+
+Added:
+
+- **MigLib**: support schema reflection from multiple compiled modules marked with `GeneratedDbNamespaceAttribute`
+  - merges all attributed modules with the same generated namespace into one reflected schema
+  - supports cross-module record references, union extension tables, views, and seed values
+  - computes generated schema hashes from the canonical reflected schema model instead of a single source file
+
+Changed:
+
+- **mig CLI**: replace the `DomainModeling/DomainModeling.fsproj` project convention with `MigSchema/MigSchema.fsproj`
+  - `mig codegen` now resolves the schema project from `MigSchema/MigSchema.fsproj`
+  - generated `Db.fs` is written to `MigSchema/Db.fs`
+  - `MigSchema/Main.fs` is documented as the default first schema file convention, but codegen does not require that file name
+  - the old `DomainModeling` layout is no longer accepted by discovery
+- **MigLib**: remove the legacy codegen fallback that read a static `Schema: SqlFile` value from an attributed module with no reflected schema types
+- **MigLib.Web**: version kept in sync with MigLib for package alignment.
+
 ## [8.3.0] - 2026-05-29
 
 Added:

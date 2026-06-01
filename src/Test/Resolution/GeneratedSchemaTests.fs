@@ -24,7 +24,7 @@ let private writeFile (path: string) (text: string) =
 
 let private makeAssembly tempDir assemblyPath =
   let runtimeProjectPath = Path.Combine(tempDir, "Runtime.fsproj")
-  let domainModelingDirectory = Path.Combine(tempDir, "DomainModeling")
+  let schemaDirectory = Path.Combine(tempDir, "MigSchema")
 
   writeFile runtimeProjectPath "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
 
@@ -34,8 +34,8 @@ let private makeAssembly tempDir assemblyPath =
         runtimeProjectPath = runtimeProjectPath
         runtimeProjectDirectory = tempDir
         runtimeProjectName = "Runtime"
-        domainModelingProjectPath = Path.Combine(domainModelingDirectory, "DomainModeling.fsproj")
-        domainModelingDirectory = domainModelingDirectory
+        schemaProjectPath = Path.Combine(schemaDirectory, "MigSchema.fsproj")
+        schemaDirectory = schemaDirectory
       }
     assemblyName = "Test"
     assemblyPath = assemblyPath

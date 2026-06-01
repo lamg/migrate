@@ -658,7 +658,7 @@ Nested seed values also support composite foreign keys. If a field references a 
 
 ## SQL generation
 
-The supported CLI code-generation path starts from the runtime project directory plus the compiled `DomainModeling` project.
+The supported CLI code-generation path starts from the runtime project directory plus the compiled `MigSchema` project.
 
 Use `mig codegen` from the runtime project directory:
 
@@ -666,9 +666,9 @@ Use `mig codegen` from the runtime project directory:
 mig codegen [--dir|-d /path/to/project]
 ```
 
-The runtime directory must contain exactly one runtime `.fsproj`. The domain modeling project must live at `DomainModeling/DomainModeling.fsproj`, and the schema source file must be `DomainModeling/MigSchema.fs`. `MigSchema.fs` marks the schema module with `GeneratedDbNamespaceAttribute`.
+The runtime directory must contain exactly one runtime `.fsproj`. The schema project must live at `MigSchema/MigSchema.fsproj`. By convention, the first schema source file is `MigSchema/Main.fs`, but codegen only requires compiled attributed modules. Schema types may be split across multiple compiled modules, and every schema module must be marked with the same non-empty `GeneratedDbNamespaceAttribute` value.
 
-`mig codegen` writes `Db.fs` into the domain modeling directory. The generated module contains:
+`mig codegen` writes `Db.fs` into the schema directory. The generated module contains:
 
 - `GeneratedSchema`
 - generated record and DU types

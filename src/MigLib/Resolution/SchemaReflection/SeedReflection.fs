@@ -173,6 +173,38 @@ let readSeedInsertsFromModule
       []
     |> Result.map mergeSeedInserts
 
+let buildSchemaFromAssemblyModuleTypes
+  (assembly: Assembly)
+  (moduleNames: string list)
+  (types: Type list)
+  : Result<SqlFile, MigError> =
+  if moduleNames |> List.exists String.IsNullOrWhiteSpace then
+    Error(MigError.Regular "Schema module name cannot be empty.")
+  elif types.IsEmpty then
+    let moduleList = String.concat ", " moduleNames
+
+    Error(MigError.Regular $"No record or union schema types were found under compiled modules: {moduleList}.")
+  else
+    result {
+      let recordTypes = types |> List.filter isRecordType
+      let! schema = buildSchemaFromTypes types
+
+      let! inserts =
+        moduleNames
+        |> foldResults
+          (fun allInserts moduleName ->
+            result {
+              let! moduleInserts = readSeedInsertsFromModule assembly moduleName recordTypes
+              return allInserts @ moduleInserts
+            })
+          []
+
+      return
+        { schema with
+            inserts = schema.inserts @ mergeSeedInserts inserts
+        }
+    }
+
 let buildSchemaFromAssemblyModule (assembly: Assembly) (moduleName: string) : Result<SqlFile, MigError> =
   if String.IsNullOrWhiteSpace moduleName then
     Error(MigError.Regular "Schema module name cannot be empty.")
@@ -182,18 +214,7 @@ let buildSchemaFromAssemblyModule (assembly: Assembly) (moduleName: string) : Re
       |> Array.filter (fun t -> t.Assembly = assembly)
       |> Array.filter (fun t -> isTypeUnderModuleName moduleName t)
       |> Array.filter (fun t -> isRecordType t || isUnionType t)
+      |> Array.sortBy _.FullName
       |> Array.toList
 
-    if types.IsEmpty then
-      Error(MigError.Regular $"No record or union schema types were found under compiled module '{moduleName}'.")
-    else
-      result {
-        let recordTypes = types |> List.filter isRecordType
-        let! schema = buildSchemaFromTypes types
-        let! inserts = readSeedInsertsFromModule assembly moduleName recordTypes
-
-        return
-          { schema with
-              inserts = schema.inserts @ inserts
-          }
-      }
+    buildSchemaFromAssemblyModuleTypes assembly [ moduleName ] types

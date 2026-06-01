@@ -13,6 +13,7 @@
     <Compile Include="Resolution/GeneratedSchemaTests.fs" />
     <Compile Include="Resolution/DatabasePathsTests.fs" />
     <Compile Include="Codegen/ExecutionFixture.fs" />
+    <Compile Include="Codegen/AdditionalExecutionFixture.fs" />
     <Compile Include="Codegen/RuntimeFixture.fs" />
     <Compile Include="Codegen/InputsTests.fs" />
     <Compile Include="Codegen/ViewDependenciesTests.fs" />

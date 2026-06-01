@@ -59,8 +59,8 @@ let private openConnection dbPath =
 
 let private runtimeProjectPath tempDir = Path.Combine(tempDir, "Runtime.fsproj")
 
-let private domainModelingProjectPath tempDir =
-  Path.Combine(tempDir, "DomainModeling", "DomainModeling.fsproj")
+let private schemaProjectPath tempDir =
+  Path.Combine(tempDir, "MigSchema", "MigSchema.fsproj")
 
 let private targetDbPath tempDir =
   Path.Combine(tempDir, "generated-fixture-main-0123456789abcdef.sqlite")
@@ -82,7 +82,7 @@ let private writeRuntimeLayout tempDir =
     (runtimeProjectPath tempDir)
     $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>TestGenerated</RootNamespace><AssemblyName>{assemblyName}</AssemblyName></PropertyGroup></Project>"
 
-  writeFile (domainModelingProjectPath tempDir) "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
+  writeFile (schemaProjectPath tempDir) "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
 
   Directory.CreateDirectory(Path.GetDirectoryName runtimeAssemblyPath) |> ignore
   File.Copy(fixtureAssembly, runtimeAssemblyPath, true)
@@ -92,16 +92,16 @@ let private writeCodegenLayout tempDir =
   let assemblyName = Path.GetFileNameWithoutExtension fixtureAssembly
 
   let schemaAssemblyPath =
-    Path.Combine(tempDir, "DomainModeling", "bin", "Debug", "net10.0", $"{assemblyName}.dll")
+    Path.Combine(tempDir, "MigSchema", "bin", "Debug", "net10.0", $"{assemblyName}.dll")
 
-  let schemaSourcePath = Path.Combine(tempDir, "DomainModeling", "MigSchema.fs")
+  let schemaSourcePath = Path.Combine(tempDir, "MigSchema", "Main.fs")
 
   writeFile
     (runtimeProjectPath tempDir)
     "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>CliGenerated</RootNamespace></PropertyGroup></Project>"
 
   writeFile
-    (domainModelingProjectPath tempDir)
+    (schemaProjectPath tempDir)
     $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><AssemblyName>{assemblyName}</AssemblyName></PropertyGroup></Project>"
 
   writeFile
@@ -158,12 +158,12 @@ let ``cli init creates target database from runtime project convention`` () =
     Directory.Delete(tempDir, true)
 
 [<Fact>]
-let ``cli codegen generates Db fs from runtime and DomainModeling convention`` () =
+let ``cli codegen generates Db fs from runtime and MigSchema convention`` () =
   let tempDir = createTempDir "mig_cli_codegen_commands"
 
   try
     writeCodegenLayout tempDir
-    let outputPath = Path.Combine(tempDir, "DomainModeling", "Db.fs")
+    let outputPath = Path.Combine(tempDir, "MigSchema", "Db.fs")
 
     let exitCode, stdOut, stdErr = runMigCliInDirectory (Some tempDir) [ "codegen" ]
 

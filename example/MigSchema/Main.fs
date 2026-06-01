@@ -1,5 +1,5 @@
 [<MigLib.Dsl.Attributes.GeneratedDbNamespace("ExampleApp")>]
-module ExampleDomainModeling.MigSchema
+module ExampleMigSchema.MigSchema
 
 open MigLib.Dsl.Attributes
 
@@ -15,17 +15,3 @@ open MigLib.Dsl.Attributes
 [<DeleteWhere("Adult", "age >= @age")>]
 [<Upsert>]
 type Student = { id: int64; name: string; age: int64 }
-
-type StudentOpt = WithAddress of Student * address: string
-
-[<ViewSql "
-SELECT id, name, age FROM student
-WHERE age >= 18
-">]
-type Student18 = { id: int64; name: string; age: int64 }
-
-[<ViewSql "
-SELECT id, name, age FROM student18
-WHERE name like 'A%'
-">]
-type Student18A = { id: int64; name: string; age: int64 }
