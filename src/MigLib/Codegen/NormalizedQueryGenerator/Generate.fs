@@ -16,6 +16,10 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
     normalized.baseTable.queryByAnnotations
     |> List.map (validateNormalizedQueryByAnnotation normalized)
 
+  let selectOneByValidationResults =
+    normalized.baseTable.selectOneByAnnotations
+    |> List.map (validateNormalizedSelectOneByAnnotation normalized)
+
   let queryLikeValidationResults =
     normalized.baseTable.queryLikeAnnotations
     |> List.map (validateNormalizedQueryLikeAnnotation normalized)
@@ -34,6 +38,7 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
 
   let firstError =
     queryByValidationResults
+    @ selectOneByValidationResults
     @ queryLikeValidationResults
     @ queryWhereValidationResults
     @ queryByOrCreateValidationResults
@@ -79,6 +84,10 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
       normalized.baseTable.queryByAnnotations
       |> List.map (generateNormalizedQueryBy normalized)
 
+    let selectOneByMethods =
+      normalized.baseTable.selectOneByAnnotations
+      |> List.map (generateNormalizedSelectOneBy normalized)
+
     let queryLikeMethods =
       normalized.baseTable.queryLikeAnnotations
       |> List.map (generateNormalizedQueryLike normalized)
@@ -92,8 +101,7 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
       |> List.map (generateNormalizedQueryByOrCreate normalized)
 
     let allMethods =
-      [
-        Some insertMethod
+      [ Some insertMethod
         insertOrIgnoreMethod
         Some getAllMethod
         getByIdMethod
@@ -101,10 +109,10 @@ let generateNormalizedTableCode (normalized: NormalizedTable) : Result<string, s
         updateMethod
         upsertMethod
         deleteMethod
-        deleteAllMethod
-      ]
+        deleteAllMethod ]
       @ (deleteWhereMethods |> List.map Some)
       @ (queryByMethods |> List.map Some)
+      @ (selectOneByMethods |> List.map Some)
       @ (queryLikeMethods |> List.map Some)
       @ (queryWhereMethods |> List.map Some)
       @ (queryByOrCreateMethods |> List.map Some)

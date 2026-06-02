@@ -20,6 +20,10 @@ let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<stri
       view.queryByAnnotations
       |> List.map (validateViewQueryByAnnotation view.name columns)
 
+    let selectOneByValidationResults =
+      view.selectOneByAnnotations
+      |> List.map (validateViewSelectOneByAnnotation view.name columns)
+
     let queryLikeValidationResults =
       view.queryLikeAnnotations
       |> List.map (validateViewQueryLikeAnnotation view.name columns)
@@ -30,6 +34,7 @@ let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<stri
 
     let validationResults =
       queryByValidationResults
+      @ selectOneByValidationResults
       @ queryLikeValidationResults
       @ queryWhereValidationResults
 
@@ -53,6 +58,10 @@ let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<stri
       let queryByMethods =
         view.queryByAnnotations |> List.map (generateViewQueryBy view.name columns)
 
+      let selectOneByMethods =
+        view.selectOneByAnnotations
+        |> List.map (generateViewSelectOneBy view.name columns)
+
       let queryLikeMethods =
         view.queryLikeAnnotations |> List.map (generateViewQueryLike view.name columns)
 
@@ -63,6 +72,7 @@ let generateViewCode (view: CreateView) (columns: ViewColumn list) : Result<stri
       let allMethods =
         getAllMethod :: getOneMethod
         @ queryByMethods
+        @ selectOneByMethods
         @ queryLikeMethods
         @ queryWhereMethods
 

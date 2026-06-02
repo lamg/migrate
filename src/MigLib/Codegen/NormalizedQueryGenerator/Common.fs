@@ -6,6 +6,7 @@ open MigLib.Codegen
 open MigLib.Codegen.AstExprBuilders
 open MigLib.Codegen.NormalizedSchema
 open MigLib.Codegen.SqlParamBindings
+open MigLib.Codegen.Validation
 
 let getInsertColumns (table: CreateTable) : ColumnDef list =
   table.columns
@@ -255,21 +256,25 @@ let validateNormalizedQueryByAnnotation
   : Result<unit, string> =
   let allColumns = getAllNormalizedColumns normalized
 
-  let columnNames =
-    allColumns
-    |> List.map (fun (_, col) -> col.name.ToLowerInvariant())
-    |> Set.ofList
+  validateAnnotationColumns
+    "QueryBy"
+    "normalized table"
+    normalized.baseTable.name
+    (allColumns |> List.map (fun (_, column) -> column.name))
+    annotation.columns
 
-  annotation.columns
-  |> List.tryFind (fun col -> not (columnNames.Contains(col.ToLowerInvariant())))
-  |> function
-    | Some invalidCol ->
-      let availableCols =
-        allColumns |> List.map (fun (_, col) -> col.name) |> String.concat ", "
+let validateNormalizedSelectOneByAnnotation
+  (normalized: NormalizedTable)
+  (annotation: SelectOneByAnnotation)
+  : Result<unit, string> =
+  let allColumns = getAllNormalizedColumns normalized
 
-      Error
-        $"QueryBy annotation references non-existent column '{invalidCol}' in normalized table '{normalized.baseTable.name}'. Available columns: {availableCols}"
-    | None -> Ok()
+  validateAnnotationColumns
+    "SelectOneBy"
+    "normalized table"
+    normalized.baseTable.name
+    (allColumns |> List.map (fun (_, column) -> column.name))
+    annotation.columns
 
 let validateNormalizedQueryLikeAnnotation
   (normalized: NormalizedTable)
@@ -305,21 +310,12 @@ let validateNormalizedQueryWhereAnnotation
   : Result<unit, string> =
   let allColumns = getAllNormalizedColumns normalized
 
-  let columnNames =
-    allColumns
-    |> List.map (fun (_, col) -> col.name.ToLowerInvariant())
-    |> Set.ofList
-
-  annotation.columns
-  |> List.tryFind (fun col -> not (columnNames.Contains(col.ToLowerInvariant())))
-  |> function
-    | Some invalidCol ->
-      let availableCols =
-        allColumns |> List.map (fun (_, col) -> col.name) |> String.concat ", "
-
-      Error
-        $"QueryWhere annotation references non-existent column '{invalidCol}' in normalized table '{normalized.baseTable.name}'. Available columns: {availableCols}"
-    | None -> Ok()
+  validateAnnotationColumns
+    "QueryWhere"
+    "normalized table"
+    normalized.baseTable.name
+    (allColumns |> List.map (fun (_, column) -> column.name))
+    annotation.columns
 
 let findNormalizedColumn (normalized: NormalizedTable) (colName: string) : (string * ColumnDef) option =
   getAllNormalizedColumns normalized
@@ -331,21 +327,12 @@ let validateNormalizedQueryByOrCreateAnnotation
   : Result<unit, string> =
   let allColumns = getAllNormalizedColumns normalized
 
-  let allColumnNames =
-    allColumns
-    |> List.map (fun (_, column) -> column.name.ToLowerInvariant())
-    |> Set.ofList
-
-  annotation.columns
-  |> List.tryFind (fun col -> not (allColumnNames.Contains(col.ToLowerInvariant())))
-  |> function
-    | Some invalidCol ->
-      let availableCols =
-        allColumns |> List.map (fun (_, column) -> column.name) |> String.concat ", "
-
-      Error
-        $"QueryByOrCreate annotation references non-existent column '{invalidCol}' in normalized table '{normalized.baseTable.name}'. Available columns: {availableCols}"
-    | None -> Ok()
+  validateAnnotationColumns
+    "QueryByOrCreate"
+    "normalized table"
+    normalized.baseTable.name
+    (allColumns |> List.map (fun (_, column) -> column.name))
+    annotation.columns
 
 let validateNormalizedDeleteWhereAnnotation
   (normalized: NormalizedTable)
@@ -353,21 +340,12 @@ let validateNormalizedDeleteWhereAnnotation
   : Result<unit, string> =
   let allColumns = getAllNormalizedColumns normalized
 
-  let columnNames =
-    allColumns
-    |> List.map (fun (_, col) -> col.name.ToLowerInvariant())
-    |> Set.ofList
-
-  annotation.columns
-  |> List.tryFind (fun col -> not (columnNames.Contains(col.ToLowerInvariant())))
-  |> function
-    | Some invalidCol ->
-      let availableCols =
-        allColumns |> List.map (fun (_, col) -> col.name) |> String.concat ", "
-
-      Error
-        $"DeleteWhere annotation references non-existent column '{invalidCol}' in normalized table '{normalized.baseTable.name}'. Available columns: {availableCols}"
-    | None -> Ok()
+  validateAnnotationColumns
+    "DeleteWhere"
+    "normalized table"
+    normalized.baseTable.name
+    (allColumns |> List.map (fun (_, column) -> column.name))
+    annotation.columns
 
 let caseHasAllQueryColumns (caseColumns: ColumnDef list) (queryColumns: string list) : bool =
   let caseColumnNames =

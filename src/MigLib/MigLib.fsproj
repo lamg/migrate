@@ -6,7 +6,7 @@
     <IsTrimmable>true</IsTrimmable>
 
     <PackageId>MigLib</PackageId>
-    <Version>9.0.0</Version>
+    <Version>9.1.0</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <AssemblyName>MigLib</AssemblyName>
 
@@ -50,6 +50,7 @@
     <Compile Include="Codegen/TypeGenerator.fs" />
     <Compile Include="Codegen/SqlParamBindings.fs" />
     <Compile Include="Codegen/SqlFragments.fs" />
+    <Compile Include="Codegen/Validation.fs" />
     <Compile Include="Codegen/NormalizedSchema.fs" />
     <Compile Include="Codegen/NormalizedTypeGenerator.fs" />
     <Compile Include="Codegen/NormalizedQueryGenerator/Common.fs" />

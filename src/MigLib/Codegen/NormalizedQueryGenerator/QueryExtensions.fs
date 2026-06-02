@@ -23,6 +23,16 @@ let private tupledOrSingleNamePattern (names: string list) =
   | [ name ] -> NamedPat(name)
   | _ -> names |> List.map NamedPat |> TuplePat |> ParenPat
 
+let private orderByMethodSuffix (orderBy: string option) =
+  match orderBy with
+  | Some raw when not (System.String.IsNullOrWhiteSpace raw) ->
+    raw.Replace(",", " ").Split([| ' ' |], System.StringSplitOptions.RemoveEmptyEntries)
+    |> Array.toList
+    |> List.map TypeGenerator.toPascalCase
+    |> String.concat ""
+    |> fun suffix -> $"OrderBy{suffix}"
+  | _ -> ""
+
 let private generateAliasedSelectColumns (normalized: NormalizedTable) =
   let baseColumns =
     normalized.baseTable.columns |> List.map (fun col -> $"b.{col.name}")
@@ -90,14 +100,75 @@ let generateNormalizedQueryBy (normalized: NormalizedTable) (annotation: QueryBy
     [ typedTupledOrSingleParam parameters; txParam ]
     (AppExpr(
       "queryList",
-      [
-        ConstantExpr(Ast.String sql)
+      [ ConstantExpr(Ast.String sql)
         commandLambda bindings
         readerLambda caseSelectionExpr
-        rawExpr "tx"
-      ]
+        rawExpr "tx" ]
     ))
     $"Task<Result<{typeName} list, SqliteException>>"
+
+let generateNormalizedSelectOneBy (normalized: NormalizedTable) (annotation: SelectOneByAnnotation) =
+  let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
+
+  let methodName =
+    let columnsSuffix =
+      annotation.columns |> List.map TypeGenerator.toPascalCase |> String.concat ""
+
+    $"SelectOneBy{columnsSuffix}{orderByMethodSuffix annotation.orderBy}"
+
+  let parameters =
+    annotation.columns
+    |> List.map (fun col ->
+      let _, columnDef = findNormalizedColumn normalized col |> Option.get
+      let fsharpType = TypeGenerator.mapColumnType columnDef
+      col, fsharpType)
+
+  let whereClause =
+    annotation.columns
+    |> List.map (fun col -> $"{col} = @{col}")
+    |> String.concat " AND "
+
+  let allSelects = generateAliasedSelectColumns normalized
+
+  let joins =
+    normalized.extensions
+    |> List.map (fun ext ->
+      let alias = $"e{ext.aspectName}"
+
+      let joinCondition =
+        generateExtensionJoinCondition "b" normalized.baseTable ext alias
+
+      $"LEFT JOIN {ext.table.name} AS {alias} ON {joinCondition}")
+    |> String.concat "\n        "
+
+  let sql =
+    if normalized.extensions.IsEmpty then
+      $"SELECT {allSelects} FROM {normalized.baseTable.name} AS b WHERE {whereClause}"
+    else
+      $"SELECT {allSelects}\n        FROM {normalized.baseTable.name} AS b\n        {joins}\n        WHERE {whereClause}"
+      |> appendOrderBy annotation.orderBy
+      |> fun selectSql -> $"{selectSql} LIMIT 1"
+
+  let bindings =
+    annotation.columns
+    |> List.map (fun col ->
+      let _, columnDef = findNormalizedColumn normalized col |> Option.get
+      addColumnBinding "cmd" columnDef col)
+
+  let caseSelectionExpr =
+    generateCaseSelectionExpr normalized.baseTable normalized.extensions typeName
+
+  staticMember
+    methodName
+    [ typedTupledOrSingleParam parameters; txParam ]
+    (AppExpr(
+      "querySingle",
+      [ ConstantExpr(Ast.String sql)
+        commandLambda bindings
+        readerLambda caseSelectionExpr
+        rawExpr "tx" ]
+    ))
+    $"Task<Result<{typeName} option, SqliteException>>"
 
 let generateNormalizedQueryLike (normalized: NormalizedTable) (annotation: QueryLikeAnnotation) =
   let typeName = TypeGenerator.toPascalCase normalized.baseTable.name
@@ -139,12 +210,10 @@ let generateNormalizedQueryLike (normalized: NormalizedTable) (annotation: Query
     [ typedParenParam col parameterType; txParam ]
     (AppExpr(
       "queryList",
-      [
-        ConstantExpr(Ast.String sql)
+      [ ConstantExpr(Ast.String sql)
         commandLambda [ addColumnBinding "cmd" columnDef col ]
         readerLambda caseSelectionExpr
-        rawExpr "tx"
-      ]
+        rawExpr "tx" ]
     ))
     $"Task<Result<{typeName} list, SqliteException>>"
 
@@ -198,12 +267,10 @@ let generateNormalizedQueryWhere (normalized: NormalizedTable) (annotation: Quer
     methodParameters
     (AppExpr(
       "queryList",
-      [
-        ConstantExpr(Ast.String sql)
+      [ ConstantExpr(Ast.String sql)
         commandLambda bindings
         readerLambda caseSelectionExpr
-        rawExpr "tx"
-      ]
+        rawExpr "tx" ]
     ))
     $"Task<Result<{typeName} list, SqliteException>>"
 
@@ -316,23 +383,19 @@ let generateNormalizedQueryByOrCreate (normalized: NormalizedTable) (annotation:
   let selectExpr =
     AppExpr(
       "querySingle",
-      [
-        ConstantExpr(Ast.String selectSql)
+      [ ConstantExpr(Ast.String selectSql)
         commandLambda paramBindings
         readerLambda caseSelectionExpr
-        rawExpr "tx"
-      ]
+        rawExpr "tx" ]
     )
 
   let body =
     CompExprBodyExpr(
-      [
-        LetOrUseExpr(Value(tupledOrSingleNamePattern annotation.columns, rawExpr extractionExpr))
+      [ LetOrUseExpr(Value(tupledOrSingleNamePattern annotation.columns, rawExpr extractionExpr))
         LetOrUseExpr(Function("select", UnitPat(), selectExpr))
         OtherExpr(
           AppExpr("querySingleOrInsert", [ rawExpr "select"; lambdaRawExpr "()" $"{typeName}.Insert newItem tx" ])
-        )
-      ]
+        ) ]
     )
 
   staticMember

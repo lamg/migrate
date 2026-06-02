@@ -10,14 +10,22 @@ open Microsoft.Data.Sqlite
 open MigLib.Generated
 
 let GeneratedSchema: ResolvedGeneratedSchemaModule =
-  { schema =
-      { measureTypes = []
+  {
+    schema =
+      {
+        measureTypes = []
         inserts =
-          [ { table = "course"
+          [
+            {
+              table = "course"
               columns = [ "id"; "code"; "title" ]
-              values = [ [ Expr.Integer 0; Expr.String "intro-fsharp"; Expr.String "Intro to F#" ] ] } ]
+              values = [ [ Expr.Integer 0; Expr.String "intro-fsharp"; Expr.String "Intro to F#" ] ]
+            }
+          ]
         views =
-          [ { name = "enrollment_summary"
+          [
+            {
+              name = "enrollment_summary"
               previousName = None
               sql =
                 "CREATE VIEW enrollment_summary AS 
@@ -30,29 +38,40 @@ JOIN student ON student.id = enrollment.student_id
 JOIN course ON course.id = enrollment.course_id
 "
               declaredColumns =
-                [ { name = "id"
+                [
+                  {
+                    name = "id"
                     columnType = SqlType.SqlInteger
                     enumLikeDu = None
-                    unitOfMeasure = None }
-                  { name = "student_name"
+                    unitOfMeasure = None
+                  }
+                  {
+                    name = "student_name"
                     columnType = SqlType.SqlText
                     enumLikeDu = None
-                    unitOfMeasure = None }
-                  { name = "course_code"
+                    unitOfMeasure = None
+                  }
+                  {
+                    name = "course_code"
                     columnType = SqlType.SqlText
                     enumLikeDu = None
-                    unitOfMeasure = None } ]
+                    unitOfMeasure = None
+                  }
+                ]
               dependencies = [ "enrollment"; "student"; "course" ]
               queryByAnnotations = []
               queryLikeAnnotations = []
               queryWhereAnnotations = []
               queryByOrCreateAnnotations = []
               selectOneAnnotations = []
+              selectOneByAnnotations = []
               insertOrIgnoreAnnotations = []
               deleteWhereAnnotations = []
               deleteAllAnnotations = []
-              upsertAnnotations = [] }
-            { name = "student18"
+              upsertAnnotations = []
+            }
+            {
+              name = "student18"
               previousName = None
               sql =
                 "CREATE VIEW student18 AS 
@@ -60,29 +79,40 @@ SELECT id, name, age FROM student
 WHERE age >= 18
 "
               declaredColumns =
-                [ { name = "id"
+                [
+                  {
+                    name = "id"
                     columnType = SqlType.SqlInteger
                     enumLikeDu = None
-                    unitOfMeasure = None }
-                  { name = "name"
+                    unitOfMeasure = None
+                  }
+                  {
+                    name = "name"
                     columnType = SqlType.SqlText
                     enumLikeDu = None
-                    unitOfMeasure = None }
-                  { name = "age"
+                    unitOfMeasure = None
+                  }
+                  {
+                    name = "age"
                     columnType = SqlType.SqlInteger
                     enumLikeDu = None
-                    unitOfMeasure = None } ]
+                    unitOfMeasure = None
+                  }
+                ]
               dependencies = [ "student" ]
               queryByAnnotations = []
               queryLikeAnnotations = []
               queryWhereAnnotations = []
               queryByOrCreateAnnotations = []
               selectOneAnnotations = []
+              selectOneByAnnotations = []
               insertOrIgnoreAnnotations = []
               deleteWhereAnnotations = []
               deleteAllAnnotations = []
-              upsertAnnotations = [] }
-            { name = "student18a"
+              upsertAnnotations = []
+            }
+            {
+              name = "student18a"
               previousName = None
               sql =
                 "CREATE VIEW student18a AS 
@@ -90,209 +120,304 @@ SELECT id, name, age FROM student18
 WHERE name like 'A%'
 "
               declaredColumns =
-                [ { name = "id"
+                [
+                  {
+                    name = "id"
                     columnType = SqlType.SqlInteger
                     enumLikeDu = None
-                    unitOfMeasure = None }
-                  { name = "name"
+                    unitOfMeasure = None
+                  }
+                  {
+                    name = "name"
                     columnType = SqlType.SqlText
                     enumLikeDu = None
-                    unitOfMeasure = None }
-                  { name = "age"
+                    unitOfMeasure = None
+                  }
+                  {
+                    name = "age"
                     columnType = SqlType.SqlInteger
                     enumLikeDu = None
-                    unitOfMeasure = None } ]
+                    unitOfMeasure = None
+                  }
+                ]
               dependencies = [ "student18" ]
               queryByAnnotations = []
               queryLikeAnnotations = []
               queryWhereAnnotations = []
               queryByOrCreateAnnotations = []
               selectOneAnnotations = []
+              selectOneByAnnotations = []
               insertOrIgnoreAnnotations = []
               deleteWhereAnnotations = []
               deleteAllAnnotations = []
-              upsertAnnotations = [] } ]
+              upsertAnnotations = []
+            }
+          ]
         tables =
-          [ { name = "course"
+          [
+            {
+              name = "course"
               previousName = None
               dropColumns = []
               columns =
-                [ { name = "id"
+                [
+                  {
+                    name = "id"
                     previousName = None
                     columnType = SqlType.SqlInteger
                     constraints =
-                      [ ColumnConstraint.NotNull
+                      [
+                        ColumnConstraint.NotNull
                         ColumnConstraint.PrimaryKey
-                          { constraintName = None
+                          {
+                            constraintName = None
                             columns = []
-                            isAutoincrement = true } ]
+                            isAutoincrement = true
+                          }
+                      ]
                     enumLikeDu = None
-                    unitOfMeasure = None }
-                  { name = "code"
+                    unitOfMeasure = None
+                  }
+                  {
+                    name = "code"
                     previousName = None
                     columnType = SqlType.SqlText
                     constraints = [ ColumnConstraint.NotNull; ColumnConstraint.Unique [] ]
                     enumLikeDu = None
-                    unitOfMeasure = None }
-                  { name = "title"
+                    unitOfMeasure = None
+                  }
+                  {
+                    name = "title"
                     previousName = None
                     columnType = SqlType.SqlText
                     constraints = [ ColumnConstraint.NotNull ]
                     enumLikeDu = None
-                    unitOfMeasure = None } ]
+                    unitOfMeasure = None
+                  }
+                ]
               constraints = []
               queryByAnnotations = [ { columns = [ "code" ]; orderBy = None } ]
               queryLikeAnnotations = []
               queryWhereAnnotations = []
               queryByOrCreateAnnotations = []
               selectOneAnnotations = []
+              selectOneByAnnotations = []
               insertOrIgnoreAnnotations = []
               deleteWhereAnnotations = []
               deleteAllAnnotations = []
-              upsertAnnotations = [] }
-            { name = "enrollment"
+              upsertAnnotations = []
+            }
+            {
+              name = "enrollment"
               previousName = None
               dropColumns = []
               columns =
-                [ { name = "id"
+                [
+                  {
+                    name = "id"
                     previousName = None
                     columnType = SqlType.SqlInteger
                     constraints =
-                      [ ColumnConstraint.NotNull
+                      [
+                        ColumnConstraint.NotNull
                         ColumnConstraint.PrimaryKey
-                          { constraintName = None
+                          {
+                            constraintName = None
                             columns = []
-                            isAutoincrement = true } ]
+                            isAutoincrement = true
+                          }
+                      ]
                     enumLikeDu = None
-                    unitOfMeasure = None }
-                  { name = "student_id"
+                    unitOfMeasure = None
+                  }
+                  {
+                    name = "student_id"
                     previousName = None
                     columnType = SqlType.SqlInteger
                     constraints =
-                      [ ColumnConstraint.NotNull
+                      [
+                        ColumnConstraint.NotNull
                         ColumnConstraint.ForeignKey
-                          { columns = []
+                          {
+                            columns = []
                             refTable = "student"
                             refColumns = [ "id" ]
                             onDelete = None
-                            onUpdate = None } ]
+                            onUpdate = None
+                          }
+                      ]
                     enumLikeDu = None
-                    unitOfMeasure = None }
-                  { name = "course_id"
+                    unitOfMeasure = None
+                  }
+                  {
+                    name = "course_id"
                     previousName = None
                     columnType = SqlType.SqlInteger
                     constraints =
-                      [ ColumnConstraint.NotNull
+                      [
+                        ColumnConstraint.NotNull
                         ColumnConstraint.ForeignKey
-                          { columns = []
+                          {
+                            columns = []
                             refTable = "course"
                             refColumns = [ "id" ]
                             onDelete = None
-                            onUpdate = None } ]
+                            onUpdate = None
+                          }
+                      ]
                     enumLikeDu = None
-                    unitOfMeasure = None }
-                  { name = "enrolled_on"
+                    unitOfMeasure = None
+                  }
+                  {
+                    name = "enrolled_on"
                     previousName = None
                     columnType = SqlType.SqlText
                     constraints = [ ColumnConstraint.NotNull ]
                     enumLikeDu = None
-                    unitOfMeasure = None } ]
+                    unitOfMeasure = None
+                  }
+                ]
               constraints = []
               queryByAnnotations =
-                [ { columns = [ "student_id" ]
-                    orderBy = None }
-                  { columns = [ "course_id" ]
-                    orderBy = None } ]
+                [
+                  {
+                    columns = [ "student_id" ]
+                    orderBy = None
+                  }
+                  {
+                    columns = [ "course_id" ]
+                    orderBy = None
+                  }
+                ]
               queryLikeAnnotations = []
               queryWhereAnnotations = []
               queryByOrCreateAnnotations = []
               selectOneAnnotations = []
+              selectOneByAnnotations = []
               insertOrIgnoreAnnotations = []
               deleteWhereAnnotations = []
               deleteAllAnnotations = []
-              upsertAnnotations = [] }
-            { name = "student"
+              upsertAnnotations = []
+            }
+            {
+              name = "student"
               previousName = None
               dropColumns = []
               columns =
-                [ { name = "id"
+                [
+                  {
+                    name = "id"
                     previousName = None
                     columnType = SqlType.SqlInteger
                     constraints =
-                      [ ColumnConstraint.NotNull
+                      [
+                        ColumnConstraint.NotNull
                         ColumnConstraint.PrimaryKey
-                          { constraintName = None
+                          {
+                            constraintName = None
                             columns = []
-                            isAutoincrement = true } ]
+                            isAutoincrement = true
+                          }
+                      ]
                     enumLikeDu = None
-                    unitOfMeasure = None }
-                  { name = "name"
+                    unitOfMeasure = None
+                  }
+                  {
+                    name = "name"
                     previousName = None
                     columnType = SqlType.SqlText
                     constraints = [ ColumnConstraint.NotNull; ColumnConstraint.Unique [] ]
                     enumLikeDu = None
-                    unitOfMeasure = None }
-                  { name = "age"
+                    unitOfMeasure = None
+                  }
+                  {
+                    name = "age"
                     previousName = None
                     columnType = SqlType.SqlInteger
                     constraints = [ ColumnConstraint.NotNull; ColumnConstraint.Default(Expr.Integer 18) ]
                     enumLikeDu = None
-                    unitOfMeasure = None } ]
+                    unitOfMeasure = None
+                  }
+                ]
               constraints = []
               queryByAnnotations = [ { columns = [ "name" ]; orderBy = None } ]
               queryLikeAnnotations = [ { columns = [ "name" ] } ]
               queryWhereAnnotations = []
               queryByOrCreateAnnotations = [ { columns = [ "name" ] } ]
               selectOneAnnotations = [ SelectOneAnnotation ]
+              selectOneByAnnotations = []
               insertOrIgnoreAnnotations = [ InsertOrIgnoreAnnotation ]
               deleteWhereAnnotations =
-                [ { name = "Adult"
+                [
+                  {
+                    name = "Adult"
                     whereSql = "age >= @age"
-                    columns = [ "age" ] } ]
+                    columns = [ "age" ]
+                  }
+                ]
               deleteAllAnnotations = [ DeleteAllAnnotation ]
-              upsertAnnotations = [ UpsertAnnotation ] }
-            { name = "student_address"
+              upsertAnnotations = [ UpsertAnnotation ]
+            }
+            {
+              name = "student_address"
               previousName = None
               dropColumns = []
               columns =
-                [ { name = "student_id"
+                [
+                  {
+                    name = "student_id"
                     previousName = None
                     columnType = SqlType.SqlInteger
                     constraints =
-                      [ ColumnConstraint.NotNull
+                      [
+                        ColumnConstraint.NotNull
                         ColumnConstraint.ForeignKey
-                          { columns = []
+                          {
+                            columns = []
                             refTable = "student"
                             refColumns = [ "id" ]
                             onDelete = None
-                            onUpdate = None }
+                            onUpdate = None
+                          }
                         ColumnConstraint.PrimaryKey
-                          { constraintName = None
+                          {
+                            constraintName = None
                             columns = []
-                            isAutoincrement = false } ]
+                            isAutoincrement = false
+                          }
+                      ]
                     enumLikeDu = None
-                    unitOfMeasure = None }
-                  { name = "address"
+                    unitOfMeasure = None
+                  }
+                  {
+                    name = "address"
                     previousName = None
                     columnType = SqlType.SqlText
                     constraints = [ ColumnConstraint.NotNull ]
                     enumLikeDu = None
-                    unitOfMeasure = None } ]
+                    unitOfMeasure = None
+                  }
+                ]
               constraints = []
               queryByAnnotations = []
               queryLikeAnnotations = []
               queryWhereAnnotations = []
               queryByOrCreateAnnotations = []
               selectOneAnnotations = []
+              selectOneByAnnotations = []
               insertOrIgnoreAnnotations = []
               deleteWhereAnnotations = []
               deleteAllAnnotations = []
-              upsertAnnotations = [] } ]
+              upsertAnnotations = []
+            }
+          ]
         indexes = []
-        triggers = [] }
+        triggers = []
+      }
     schemaHash = "e3c6faea8214f25c"
     dbApp = "ExampleApp"
-    defaultDbInstance = "main" }
+    defaultDbInstance = "main"
+  }
 
 [<RequireQualifiedAccess>]
 type NewStudent =
@@ -329,22 +454,28 @@ type Student with
 
 
 type Course =
-  { Id: int64
+  {
+    Id: int64
     Code: string
-    Title: string }
+    Title: string
+  }
 
 
 type Enrollment =
-  { Id: int64
+  {
+    Id: int64
     StudentId: int64
     CourseId: int64
-    EnrolledOn: string }
+    EnrolledOn: string
+  }
 
 
 type EnrollmentSummary =
-  { Id: int64
+  {
+    Id: int64
     StudentName: string
-    CourseCode: string }
+    CourseCode: string
+  }
 
 
 type Student18 = { Id: int64; Name: string; Age: int64 }
@@ -495,15 +626,18 @@ type Student with
         | Student.Base(id, name, age) ->
           let deleteExtensions () =
             sequenceUnitResults
-              [ (fun () ->
+              [
+                (fun () ->
                   executeWriteUnit
                     "DELETE FROM student_address WHERE student_id = @student_id"
                     (fun cmd -> cmd.Parameters.AddWithValue("@student_id", id) |> ignore)
-                    tx) ]
+                    tx)
+              ]
 
           return!
             sequenceUnitResults
-              [ (fun () ->
+              [
+                (fun () ->
                   executeWriteUnit
                     "UPDATE student SET name = @name, age = @age WHERE id = @id"
                     (fun cmd ->
@@ -511,13 +645,15 @@ type Student with
                       cmd.Parameters.AddWithValue("@name", name) |> ignore
                       cmd.Parameters.AddWithValue("@age", age) |> ignore)
                     tx)
-                (fun () -> deleteExtensions ()) ]
+                (fun () -> deleteExtensions ())
+              ]
         | Student.WithAddress(id, name, age, address) ->
           let deleteOtherExtensions () = sequenceUnitResults []
 
           return!
             sequenceUnitResults
-              [ (fun () ->
+              [
+                (fun () ->
                   executeWriteUnit
                     "UPDATE student SET name = @name, age = @age WHERE id = @id"
                     (fun cmd ->
@@ -532,7 +668,8 @@ type Student with
                       cmd.Parameters.AddWithValue("@student_id", id) |> ignore
                       cmd.Parameters.AddWithValue("@address", address) |> ignore)
                     tx)
-                (fun () -> deleteOtherExtensions ()) ]
+                (fun () -> deleteOtherExtensions ())
+              ]
       with :? SqliteException as ex ->
         return Error ex
     }
@@ -641,9 +778,11 @@ type Course with
       "SELECT id, code, title FROM course WHERE id = @id"
       (fun cmd -> cmd.Parameters.AddWithValue("@id", id) |> ignore)
       (fun reader ->
-        { Id = reader.GetInt64 0
+        {
+          Id = reader.GetInt64 0
           Code = reader.GetString 1
-          Title = reader.GetString 2 })
+          Title = reader.GetString 2
+        })
       tx
 
   static member SelectAll(tx: SqliteTransaction) : Task<Result<Course list, SqliteException>> =
@@ -651,9 +790,11 @@ type Course with
       "SELECT id, code, title FROM course"
       (fun _ -> ())
       (fun reader ->
-        { Id = reader.GetInt64 0
+        {
+          Id = reader.GetInt64 0
           Code = reader.GetString 1
-          Title = reader.GetString 2 })
+          Title = reader.GetString 2
+        })
       tx
 
   static member Update (item: Course) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
@@ -676,9 +817,11 @@ type Course with
       "SELECT id, code, title FROM course WHERE code = @code"
       (fun cmd -> cmd.Parameters.AddWithValue("@code", code) |> ignore)
       (fun reader ->
-        { Id = reader.GetInt64 0
+        {
+          Id = reader.GetInt64 0
           Code = reader.GetString 1
-          Title = reader.GetString 2 })
+          Title = reader.GetString 2
+        })
       tx
 
 
@@ -698,10 +841,12 @@ type Enrollment with
       "SELECT id, student_id, course_id, enrolled_on FROM enrollment WHERE id = @id"
       (fun cmd -> cmd.Parameters.AddWithValue("@id", id) |> ignore)
       (fun reader ->
-        { Id = reader.GetInt64 0
+        {
+          Id = reader.GetInt64 0
           StudentId = reader.GetInt64 1
           CourseId = reader.GetInt64 2
-          EnrolledOn = reader.GetString 3 })
+          EnrolledOn = reader.GetString 3
+        })
       tx
 
   static member SelectAll(tx: SqliteTransaction) : Task<Result<Enrollment list, SqliteException>> =
@@ -709,10 +854,12 @@ type Enrollment with
       "SELECT id, student_id, course_id, enrolled_on FROM enrollment"
       (fun _ -> ())
       (fun reader ->
-        { Id = reader.GetInt64 0
+        {
+          Id = reader.GetInt64 0
           StudentId = reader.GetInt64 1
           CourseId = reader.GetInt64 2
-          EnrolledOn = reader.GetString 3 })
+          EnrolledOn = reader.GetString 3
+        })
       tx
 
   static member Update (item: Enrollment) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
@@ -739,10 +886,12 @@ type Enrollment with
       "SELECT id, student_id, course_id, enrolled_on FROM enrollment WHERE student_id = @student_id"
       (fun cmd -> cmd.Parameters.AddWithValue("@student_id", student_id) |> ignore)
       (fun reader ->
-        { Id = reader.GetInt64 0
+        {
+          Id = reader.GetInt64 0
           StudentId = reader.GetInt64 1
           CourseId = reader.GetInt64 2
-          EnrolledOn = reader.GetString 3 })
+          EnrolledOn = reader.GetString 3
+        })
       tx
 
   static member SelectByCourseId
@@ -753,10 +902,12 @@ type Enrollment with
       "SELECT id, student_id, course_id, enrolled_on FROM enrollment WHERE course_id = @course_id"
       (fun cmd -> cmd.Parameters.AddWithValue("@course_id", course_id) |> ignore)
       (fun reader ->
-        { Id = reader.GetInt64 0
+        {
+          Id = reader.GetInt64 0
           StudentId = reader.GetInt64 1
           CourseId = reader.GetInt64 2
-          EnrolledOn = reader.GetString 3 })
+          EnrolledOn = reader.GetString 3
+        })
       tx
 
 
@@ -766,9 +917,11 @@ type EnrollmentSummary with
       "SELECT id, student_name, course_code FROM enrollment_summary"
       (fun _ -> ())
       (fun reader ->
-        { Id = reader.GetInt64 0
+        {
+          Id = reader.GetInt64 0
           StudentName = reader.GetString 1
-          CourseCode = reader.GetString 2 })
+          CourseCode = reader.GetString 2
+        })
       tx
 
 
@@ -778,9 +931,11 @@ type Student18 with
       "SELECT id, name, age FROM student18"
       (fun _ -> ())
       (fun reader ->
-        { Id = reader.GetInt64 0
+        {
+          Id = reader.GetInt64 0
           Name = reader.GetString 1
-          Age = reader.GetInt64 2 })
+          Age = reader.GetInt64 2
+        })
       tx
 
 
@@ -790,7 +945,9 @@ type Student18a with
       "SELECT id, name, age FROM student18a"
       (fun _ -> ())
       (fun reader ->
-        { Id = reader.GetInt64 0
+        {
+          Id = reader.GetInt64 0
           Name = reader.GetString 1
-          Age = reader.GetInt64 2 })
+          Age = reader.GetInt64 2
+        })
       tx

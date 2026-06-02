@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.1.0] - 2026-06-02
+
+Added:
+
+- **MigLib**: add `SelectOneBy` code generation support for tables, normalized tables, and views
+  - generated helpers return a single optional row with `LIMIT 1`
+  - `OrderBy` is applied before `LIMIT 1` and reflected in generated method names
+  - shared query validation now centralizes referenced-column checks across table, view, and normalized generators
+
+Changed:
+
+- **mig CLI**: version kept in sync with MigLib for codegen feature availability.
+- **MigLib.Web**: version kept in sync with MigLib for package alignment.
+
 ## [9.0.0] - 2026-06-01
 
 Added:

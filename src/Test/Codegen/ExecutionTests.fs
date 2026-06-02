@@ -44,24 +44,18 @@ let private makeInputs tempDir =
     "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><RootNamespace>TestCodegenSchema</RootNamespace></PropertyGroup></Project>"
 
   let project =
-    {
-      runtimeProjectPath = runtimeProjectPath
+    { runtimeProjectPath = runtimeProjectPath
       runtimeProjectDirectory = tempDir
       runtimeProjectName = "Runtime"
       schemaProjectPath = schemaProjectPath
-      schemaDirectory = schemaDirectory
-    }
+      schemaDirectory = schemaDirectory }
 
-  {
-    project = project
+  { project = project
     schemaAssembly =
-      {
-        project = project
+      { project = project
         assemblyName = "Test"
-        assemblyPath = typeof<TestCodegenSchema.MigSchema.Marker>.Assembly.Location
-      }
-    outputPath = outputPath
-  }
+        assemblyPath = typeof<TestCodegenSchema.MigSchema.Marker>.Assembly.Location }
+    outputPath = outputPath }
 
 let private assertRegularErrorContains expectedText result =
   match result with
@@ -167,6 +161,8 @@ let ``runCodegen writes Db fs with metadata types and CRUD helpers`` () =
       Assert.Contains("static member SelectById", generated)
       Assert.Contains("static member SelectAll", generated)
       Assert.Contains("static member SelectOne", generated)
+      Assert.Contains("static member SelectOneByNameOrderByAgeDesc", generated)
+      Assert.Contains("static member SelectOneByNameOrderByIdDesc", generated)
       Assert.Contains("static member Update", generated)
       Assert.Contains("static member Delete", generated)
       Assert.Contains("static member DeleteAdults", generated)
@@ -174,6 +170,8 @@ let ``runCodegen writes Db fs with metadata types and CRUD helpers`` () =
       Assert.Contains("static member DeleteAll", generated)
       Assert.Contains("static member SelectByName", generated)
       Assert.Contains("WHERE name = @name ORDER BY age DESC", generated)
+      Assert.Contains("WHERE name = @name ORDER BY age DESC LIMIT 1", generated)
+      Assert.Contains("FROM codegen_fixture_view WHERE name = @name ORDER BY id DESC LIMIT 1", generated)
       Assert.Contains("static member SelectNameLike", generated)
       Assert.Contains("static member SelectAdults", generated)
       Assert.Contains("WHERE age >= @age AND name LIKE @name OR name LIKE @name ORDER BY name ASC", generated)
@@ -189,40 +187,31 @@ let ``runCodegen writes Db fs with metadata types and CRUD helpers`` () =
 [<Fact>]
 let ``table codegen fails when SelectWhere references missing parameter column`` () =
   let table =
-    {
-      name = "student"
+    { name = "student"
       previousName = None
       dropColumns = []
       columns =
-        [
-          {
-            name = "id"
+        [ { name = "id"
             previousName = None
             columnType = SqlInteger
             constraints = [ NotNull ]
             enumLikeDu = None
-            unitOfMeasure = None
-          }
-        ]
+            unitOfMeasure = None } ]
       constraints = []
       queryByAnnotations = []
       queryLikeAnnotations = []
       queryWhereAnnotations =
-        [
-          {
-            name = "Adults"
+        [ { name = "Adults"
             whereSql = "age >= @age"
             columns = [ "age" ]
-            orderBy = None
-          }
-        ]
+            orderBy = None } ]
       queryByOrCreateAnnotations = []
       selectOneAnnotations = []
+      selectOneByAnnotations = []
       insertOrIgnoreAnnotations = []
       deleteWhereAnnotations = []
       deleteAllAnnotations = []
-      upsertAnnotations = []
-    }
+      upsertAnnotations = [] }
 
   generateTableCode table
   |> function
@@ -232,39 +221,30 @@ let ``table codegen fails when SelectWhere references missing parameter column``
 [<Fact>]
 let ``table codegen fails when DeleteWhere references missing parameter column`` () =
   let table =
-    {
-      name = "student"
+    { name = "student"
       previousName = None
       dropColumns = []
       columns =
-        [
-          {
-            name = "id"
+        [ { name = "id"
             previousName = None
             columnType = SqlInteger
             constraints = [ NotNull ]
             enumLikeDu = None
-            unitOfMeasure = None
-          }
-        ]
+            unitOfMeasure = None } ]
       constraints = []
       queryByAnnotations = []
       queryLikeAnnotations = []
       queryWhereAnnotations = []
       queryByOrCreateAnnotations = []
       selectOneAnnotations = []
+      selectOneByAnnotations = []
       insertOrIgnoreAnnotations = []
       deleteWhereAnnotations =
-        [
-          {
-            name = "Adults"
+        [ { name = "Adults"
             whereSql = "age >= @age"
-            columns = [ "age" ]
-          }
-        ]
+            columns = [ "age" ] } ]
       deleteAllAnnotations = []
-      upsertAnnotations = []
-    }
+      upsertAnnotations = [] }
 
   generateTableCode table
   |> function
@@ -274,37 +254,28 @@ let ``table codegen fails when DeleteWhere references missing parameter column``
 [<Fact>]
 let ``view codegen fails when DeleteWhere is used on read-only view`` () =
   let view =
-    {
-      name = "student_view"
+    { name = "student_view"
       previousName = None
       sql = "CREATE VIEW student_view AS SELECT id FROM student"
       declaredColumns =
-        [
-          {
-            name = "id"
+        [ { name = "id"
             columnType = SqlInteger
             enumLikeDu = None
-            unitOfMeasure = None
-          }
-        ]
+            unitOfMeasure = None } ]
       dependencies = [ "student" ]
       queryByAnnotations = []
       queryLikeAnnotations = []
       queryWhereAnnotations = []
       queryByOrCreateAnnotations = []
       selectOneAnnotations = []
+      selectOneByAnnotations = []
       insertOrIgnoreAnnotations = []
       deleteWhereAnnotations =
-        [
-          {
-            name = "ById"
+        [ { name = "ById"
             whereSql = "id = @id"
-            columns = [ "id" ]
-          }
-        ]
+            columns = [ "id" ] } ]
       deleteAllAnnotations = []
-      upsertAnnotations = []
-    }
+      upsertAnnotations = [] }
 
   generateViewCode view view.declaredColumns
   |> function
@@ -322,9 +293,7 @@ let ``runCodegen fails when generated Db namespace attribute is missing`` () =
       { inputs with
           schemaAssembly =
             { inputs.schemaAssembly with
-                assemblyPath = typeof<CodegenResult>.Assembly.Location
-            }
-      }
+                assemblyPath = typeof<CodegenResult>.Assembly.Location } }
 
     runCodegen inputs
     |> assertRegularErrorContains "does not contain a module marked with GeneratedDbNamespaceAttribute"
@@ -355,9 +324,7 @@ public static class SecondSchemaModule {}
       { inputs with
           schemaAssembly =
             { inputs.schemaAssembly with
-                assemblyPath = assemblyPath
-            }
-      }
+                assemblyPath = assemblyPath } }
 
     runCodegen inputs
     |> assertRegularErrorContains "different GeneratedDbNamespaceAttribute values"

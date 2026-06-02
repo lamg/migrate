@@ -13,6 +13,9 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
   let queryByValidationResults =
     table.queryByAnnotations |> List.map (validateQueryByAnnotation table)
 
+  let selectOneByValidationResults =
+    table.selectOneByAnnotations |> List.map (validateSelectOneByAnnotation table)
+
   let queryLikeValidationResults =
     table.queryLikeAnnotations |> List.map (validateQueryLikeAnnotation table)
 
@@ -29,6 +32,7 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
   let firstError =
     ([ upsertValidationResult ]
      @ queryByValidationResults
+     @ selectOneByValidationResults
      @ queryLikeValidationResults
      @ queryWhereValidationResults
      @ queryByOrCreateValidationResults
@@ -77,6 +81,9 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
 
     let queryByMethods = table.queryByAnnotations |> List.map (generateQueryBy table)
 
+    let selectOneByMethods =
+      table.selectOneByAnnotations |> List.map (generateSelectOneBy table)
+
     let queryLikeMethods =
       table.queryLikeAnnotations |> List.map (generateQueryLike table)
 
@@ -87,8 +94,7 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
       table.queryByOrCreateAnnotations |> List.map (generateQueryByOrCreate table)
 
     let allMethods =
-      [
-        Some insertMethod
+      [ Some insertMethod
         insertOrIgnoreMethod
         upsertMethod
         getMethod
@@ -96,10 +102,10 @@ let generateTableCode (table: CreateTable) : Result<string, string> =
         getOneMethod
         updateMethod
         deleteMethod
-        deleteAllMethod
-      ]
+        deleteAllMethod ]
       @ (deleteWhereMethods |> List.map Some)
       @ (queryByMethods |> List.map Some)
+      @ (selectOneByMethods |> List.map Some)
       @ (queryLikeMethods |> List.map Some)
       @ (queryWhereMethods |> List.map Some)
       @ (queryByOrCreateMethods |> List.map Some)

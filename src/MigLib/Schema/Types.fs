@@ -17,11 +17,9 @@ type Expr =
   | Value of string
 
 type InsertInto =
-  {
-    table: string
+  { table: string
     columns: string list
-    values: Expr list list
-  }
+    values: Expr list list }
 
 type FkAction =
   | Cascade
@@ -31,20 +29,16 @@ type FkAction =
   | SetDefault
 
 type ForeignKey =
-  {
-    columns: string list
+  { columns: string list
     refTable: string
     refColumns: string list
     onDelete: FkAction option
-    onUpdate: FkAction option
-  }
+    onUpdate: FkAction option }
 
 type PrimaryKey =
-  {
-    constraintName: string option
+  { constraintName: string option
     columns: string list
-    isAutoincrement: bool
-  }
+    isAutoincrement: bool }
 
 type ColumnConstraint =
   | PrimaryKey of PrimaryKey
@@ -56,59 +50,50 @@ type ColumnConstraint =
   | ForeignKey of ForeignKey
 
 type ColumnDef =
-  {
-    name: string
+  { name: string
     previousName: string option
     columnType: SqlType
     constraints: ColumnConstraint list
     enumLikeDu: EnumLikeDu option
-    unitOfMeasure: string option
-  }
+    unitOfMeasure: string option }
 
 type ViewColumn =
-  {
-    name: string
+  { name: string
     columnType: SqlType
     enumLikeDu: EnumLikeDu option
-    unitOfMeasure: string option
-  }
+    unitOfMeasure: string option }
 
 type QueryByAnnotation =
-  {
-    columns: string list
-    orderBy: string option
-  }
+  { columns: string list
+    orderBy: string option }
 
 type QueryLikeAnnotation = { columns: string list }
 
 type QueryWhereAnnotation =
-  {
-    name: string
+  { name: string
     whereSql: string
     columns: string list
-    orderBy: string option
-  }
+    orderBy: string option }
 
 type QueryByOrCreateAnnotation = { columns: string list }
 
 type SelectOneAnnotation = SelectOneAnnotation
 
+type SelectOneByAnnotation = QueryByAnnotation
+
 type InsertOrIgnoreAnnotation = InsertOrIgnoreAnnotation
 
 type DeleteWhereAnnotation =
-  {
-    name: string
+  { name: string
     whereSql: string
-    columns: string list
-  }
+    columns: string list }
 
 type DeleteAllAnnotation = DeleteAllAnnotation
 
 type UpsertAnnotation = UpsertAnnotation
 
 type CreateView =
-  {
-    name: string
+  { name: string
     previousName: string option
     sql: string
     declaredColumns: ViewColumn list
@@ -118,15 +103,14 @@ type CreateView =
     queryWhereAnnotations: QueryWhereAnnotation list
     queryByOrCreateAnnotations: QueryByOrCreateAnnotation list
     selectOneAnnotations: SelectOneAnnotation list
+    selectOneByAnnotations: SelectOneByAnnotation list
     insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list
     deleteWhereAnnotations: DeleteWhereAnnotation list
     deleteAllAnnotations: DeleteAllAnnotation list
-    upsertAnnotations: UpsertAnnotation list
-  }
+    upsertAnnotations: UpsertAnnotation list }
 
 type CreateTable =
-  {
-    name: string
+  { name: string
     previousName: string option
     dropColumns: string list
     columns: ColumnDef list
@@ -136,42 +120,34 @@ type CreateTable =
     queryWhereAnnotations: QueryWhereAnnotation list
     queryByOrCreateAnnotations: QueryByOrCreateAnnotation list
     selectOneAnnotations: SelectOneAnnotation list
+    selectOneByAnnotations: SelectOneByAnnotation list
     insertOrIgnoreAnnotations: InsertOrIgnoreAnnotation list
     deleteWhereAnnotations: DeleteWhereAnnotation list
     deleteAllAnnotations: DeleteAllAnnotation list
-    upsertAnnotations: UpsertAnnotation list
-  }
+    upsertAnnotations: UpsertAnnotation list }
 
 type CreateIndex =
-  {
-    name: string
+  { name: string
     table: string
-    columns: string list
-  }
+    columns: string list }
 
 type CreateTrigger =
-  {
-    name: string
+  { name: string
     sql: string
-    dependencies: string list
-  }
+    dependencies: string list }
 
 type SqlFile =
-  {
-    measureTypes: string list
+  { measureTypes: string list
     inserts: InsertInto list
     views: CreateView list
     tables: CreateTable list
     indexes: CreateIndex list
-    triggers: CreateTrigger list
-  }
+    triggers: CreateTrigger list }
 
 let emptyFile =
-  {
-    measureTypes = []
+  { measureTypes = []
     inserts = []
     views = []
     tables = []
     indexes = []
-    triggers = []
-  }
+    triggers = [] }

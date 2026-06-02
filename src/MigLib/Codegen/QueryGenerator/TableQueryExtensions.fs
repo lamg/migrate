@@ -8,21 +8,13 @@ open MigLib.Codegen.AstExprBuilders
 open MigLib.Codegen.QueryGeneratorCommon
 open MigLib.Codegen.SqlFragments
 open MigLib.Codegen.SqlParamBindings
+open MigLib.Codegen.Validation
 
 let validateQueryByAnnotation (table: CreateTable) (annotation: QueryByAnnotation) : Result<unit, string> =
-  let columnNames =
-    table.columns |> List.map (fun col -> col.name.ToLowerInvariant()) |> Set.ofList
+  validateAnnotationColumns "QueryBy" "table" table.name (table.columns |> List.map _.name) annotation.columns
 
-  annotation.columns
-  |> List.tryFind (fun col -> not (columnNames.Contains(col.ToLowerInvariant())))
-  |> function
-    | Some invalidCol ->
-      let availableCols =
-        table.columns |> List.map (fun col -> col.name) |> String.concat ", "
-
-      Error
-        $"QueryBy annotation references non-existent column '{invalidCol}' in table '{table.name}'. Available columns: {availableCols}"
-    | None -> Ok()
+let validateSelectOneByAnnotation (table: CreateTable) (annotation: SelectOneByAnnotation) : Result<unit, string> =
+  validateAnnotationColumns "SelectOneBy" "table" table.name (table.columns |> List.map _.name) annotation.columns
 
 let validateQueryLikeAnnotation (table: CreateTable) (annotation: QueryLikeAnnotation) : Result<unit, string> =
   match annotation.columns with
@@ -46,19 +38,7 @@ let validateQueryLikeAnnotation (table: CreateTable) (annotation: QueryLikeAnnot
     Error $"QueryLike annotation on table '{table.name}' supports exactly one column. Received: {receivedCols}"
 
 let validateQueryWhereAnnotation (table: CreateTable) (annotation: QueryWhereAnnotation) : Result<unit, string> =
-  let columnNames =
-    table.columns |> List.map (fun col -> col.name.ToLowerInvariant()) |> Set.ofList
-
-  annotation.columns
-  |> List.tryFind (fun col -> not (columnNames.Contains(col.ToLowerInvariant())))
-  |> function
-    | Some invalidCol ->
-      let availableCols =
-        table.columns |> List.map (fun col -> col.name) |> String.concat ", "
-
-      Error
-        $"QueryWhere annotation references non-existent column '{invalidCol}' in table '{table.name}'. Available columns: {availableCols}"
-    | None -> Ok()
+  validateAnnotationColumns "QueryWhere" "table" table.name (table.columns |> List.map _.name) annotation.columns
 
 let generateQueryBy (table: CreateTable) (annotation: QueryByAnnotation) =
   let typeName = capitalizeName table.name
@@ -104,6 +84,11 @@ let generateQueryBy (table: CreateTable) (annotation: QueryByAnnotation) =
      |> appendOrderBy annotation.orderBy)
     configureExpr
     fieldMappings
+
+let generateSelectOneBy (table: CreateTable) (annotation: SelectOneByAnnotation) =
+  table.columns
+  |> List.map selectableColumnFromColumnDef
+  |> fun columns -> generateSelectOneByMember table.name (capitalizeName table.name) columns annotation
 
 let generateQueryLike (table: CreateTable) (annotation: QueryLikeAnnotation) =
   let typeName = capitalizeName table.name
@@ -179,21 +164,7 @@ let validateQueryByOrCreateAnnotation
   (table: CreateTable)
   (annotation: QueryByOrCreateAnnotation)
   : Result<unit, string> =
-  let availableColumns =
-    table.columns |> List.map (fun column -> column.name.ToLower())
-
-  let invalidColumns =
-    annotation.columns
-    |> List.filter (fun col -> not (availableColumns |> List.contains (col.ToLower())))
-
-  match invalidColumns with
-  | [] -> Ok()
-  | invalidCol :: _ ->
-    let availableCols =
-      table.columns |> List.map (fun column -> column.name) |> String.concat ", "
-
-    Error
-      $"QueryByOrCreate annotation references non-existent column '{invalidCol}' in table '{table.name}'. Available columns: {availableCols}"
+  validateAnnotationColumns "QueryByOrCreate" "table" table.name (table.columns |> List.map _.name) annotation.columns
 
 let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnnotation) =
   let typeName = capitalizeName table.name
@@ -227,15 +198,13 @@ let generateQueryByOrCreate (table: CreateTable) (annotation: QueryByOrCreateAnn
   let selectExpr =
     AppExpr(
       "querySingle",
-      [
-        ConstantExpr(String($"SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1"))
+      [ ConstantExpr(String($"SELECT {columnNames} FROM {table.name} WHERE {whereClause} LIMIT 1"))
         lambdaStatementsExpr "cmd" paramBindings
         (fieldMappings
          |> List.map (fun (fieldName, expr) -> RecordFieldExpr(fieldName, expr))
          |> RecordExpr
          |> lambdaExpr "reader")
-        rawExpr "tx"
-      ]
+        rawExpr "tx" ]
     )
 
   let body =

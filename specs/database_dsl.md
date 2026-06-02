@@ -622,7 +622,7 @@ type CourseStats = {
 }
 ```
 
-Query attributes (`SelectBy`, `SelectLike`, etc.) work on views the same way as on tables.
+Query attributes (`SelectBy`, `SelectOneBy`, `SelectLike`, etc.) work on views the same way as on tables.
 
 ### Seed data
 

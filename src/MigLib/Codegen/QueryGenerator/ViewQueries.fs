@@ -8,6 +8,7 @@ open MigLib.Codegen.AstExprBuilders
 open MigLib.Codegen.QueryGeneratorCommon
 open MigLib.Codegen.SqlFragments
 open MigLib.Codegen.SqlParamBindings
+open MigLib.Codegen.Validation
 
 let generateViewGetAll (viewName: string) (columns: ViewColumn list) =
   let typeName = capitalizeName viewName
@@ -44,19 +45,14 @@ let validateViewQueryByAnnotation
   (columns: ViewColumn list)
   (annotation: QueryByAnnotation)
   : Result<unit, string> =
-  let columnNames =
-    columns |> List.map (fun column -> column.name.ToLowerInvariant()) |> Set.ofList
+  validateAnnotationColumns "QueryBy" "view" viewName (columns |> List.map _.name) annotation.columns
 
-  annotation.columns
-  |> List.tryFind (fun col -> not (columnNames.Contains(col.ToLowerInvariant())))
-  |> function
-    | Some invalidCol ->
-      let availableCols =
-        columns |> List.map (fun column -> column.name) |> String.concat ", "
-
-      Error
-        $"QueryBy annotation references non-existent column '{invalidCol}' in view '{viewName}'. Available columns: {availableCols}"
-    | None -> Ok()
+let validateViewSelectOneByAnnotation
+  (viewName: string)
+  (columns: ViewColumn list)
+  (annotation: SelectOneByAnnotation)
+  : Result<unit, string> =
+  validateAnnotationColumns "SelectOneBy" "view" viewName (columns |> List.map _.name) annotation.columns
 
 let validateViewQueryLikeAnnotation
   (viewName: string)
@@ -86,19 +82,7 @@ let validateViewQueryWhereAnnotation
   (columns: ViewColumn list)
   (annotation: QueryWhereAnnotation)
   : Result<unit, string> =
-  let columnNames =
-    columns |> List.map (fun column -> column.name.ToLowerInvariant()) |> Set.ofList
-
-  annotation.columns
-  |> List.tryFind (fun col -> not (columnNames.Contains(col.ToLowerInvariant())))
-  |> function
-    | Some invalidCol ->
-      let availableCols =
-        columns |> List.map (fun column -> column.name) |> String.concat ", "
-
-      Error
-        $"QueryWhere annotation references non-existent column '{invalidCol}' in view '{viewName}'. Available columns: {availableCols}"
-    | None -> Ok()
+  validateAnnotationColumns "QueryWhere" "view" viewName (columns |> List.map _.name) annotation.columns
 
 let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotation: QueryByAnnotation) =
   let typeName = capitalizeName viewName
@@ -140,6 +124,11 @@ let generateViewQueryBy (viewName: string) (columns: ViewColumn list) (annotatio
      |> appendOrderBy annotation.orderBy)
     $"(fun cmd ->\n        {asyncParamBindings})"
     fieldMappings
+
+let generateViewSelectOneBy (viewName: string) (columns: ViewColumn list) (annotation: SelectOneByAnnotation) =
+  columns
+  |> List.map selectableColumnFromViewColumn
+  |> fun columns -> generateSelectOneByMember viewName (capitalizeName viewName) columns annotation
 
 let generateViewQueryLike (viewName: string) (columns: ViewColumn list) (annotation: QueryLikeAnnotation) =
   let typeName = capitalizeName viewName

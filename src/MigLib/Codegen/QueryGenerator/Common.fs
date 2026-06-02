@@ -4,6 +4,7 @@ open Fabulous.AST
 open MigLib.Codegen
 open MigLib.Schema.Types
 open MigLib.Codegen.AstExprBuilders
+open MigLib.Codegen.SqlFragments
 open MigLib.Codegen.SqlParamBindings
 
 let getPrimaryKey (table: CreateTable) : ColumnDef list =
@@ -68,6 +69,38 @@ let paramBindingExprForItem (cmdVarName: string) (itemExpr: string) (column: Col
 let paramBindingExprForColumnVar (cmdVarName: string) (column: ColumnDef) (varExpr: string) =
   addColumnBinding cmdVarName column varExpr
 
+type SelectableColumn =
+  { name: string
+    fsharpType: string
+    readExpr: int -> string
+    bindingExpr: string -> string -> string }
+
+let selectableColumnFromColumnDef (column: ColumnDef) : SelectableColumn =
+  { name = column.name
+    fsharpType = TypeGenerator.mapColumnType column
+    readExpr = TypeGenerator.readColumnExpr column
+    bindingExpr = fun cmdVarName valueExpr -> addColumnBinding cmdVarName column valueExpr }
+
+let selectableColumnFromViewColumn (column: ViewColumn) : SelectableColumn =
+  { name = column.name
+    fsharpType = TypeGenerator.mapViewColumnType column
+    readExpr = TypeGenerator.readViewColumnExpr column
+    bindingExpr = fun cmdVarName valueExpr -> addViewBinding cmdVarName column valueExpr }
+
+let private findSelectableColumn (columns: SelectableColumn list) (columnName: string) =
+  columns
+  |> List.find (fun column -> column.name.ToLowerInvariant() = columnName.ToLowerInvariant())
+
+let private orderByMethodSuffix (orderBy: string option) =
+  match orderBy with
+  | Some raw when not (System.String.IsNullOrWhiteSpace raw) ->
+    raw.Replace(",", " ").Split([| ' ' |], System.StringSplitOptions.RemoveEmptyEntries)
+    |> Array.toList
+    |> List.map capitalizeName
+    |> String.concat ""
+    |> fun suffix -> $"OrderBy{suffix}"
+  | _ -> ""
+
 let buildRecordProjection
   (getName: 'a -> string)
   (readExpr: 'a -> int -> string)
@@ -101,12 +134,61 @@ let renderSelectMember
   let body =
     Ast.AppExpr(
       queryHelper,
-      [
-        Ast.ConstantExpr(Ast.String sql)
+      [ Ast.ConstantExpr(Ast.String sql)
         rawExpr configureExpr
         readerLambda
-        rawExpr "tx"
-      ]
+        rawExpr "tx" ]
     )
 
   staticMember memberName parameters body returnType
+
+let generateSelectOneByMember
+  (sourceName: string)
+  (typeName: string)
+  (columns: SelectableColumn list)
+  (annotation: SelectOneByAnnotation)
+  =
+  let methodName =
+    let columnsSuffix =
+      annotation.columns |> List.map capitalizeName |> String.concat ""
+
+    $"SelectOneBy{columnsSuffix}{orderByMethodSuffix annotation.orderBy}"
+
+  let parameters =
+    annotation.columns
+    |> List.map (fun columnName ->
+      let column = findSelectableColumn columns columnName
+      columnName, column.fsharpType)
+
+  let whereClause =
+    annotation.columns
+    |> List.map (fun columnName -> $"{columnName} = @{columnName}")
+    |> String.concat " AND "
+
+  let columnNames, fieldMappings =
+    buildRecordProjection (fun column -> column.name) (fun column index -> column.readExpr index) columns
+
+  let asyncParamBindings =
+    annotation.columns
+    |> List.map (fun columnName ->
+      let column = findSelectableColumn columns columnName
+      column.bindingExpr "cmd" columnName)
+
+  let configureExpr =
+    asyncParamBindings
+    |> joinBindings "        "
+    |> fun bindings -> $"(fun cmd ->\n        {bindings})"
+
+  let sql =
+    $"SELECT {columnNames} FROM {sourceName} WHERE {whereClause}"
+    |> appendOrderBy annotation.orderBy
+    |> fun selectSql -> $"{selectSql} LIMIT 1"
+
+  renderSelectMember
+    methodName
+    [ typedTupledOrSingleParam parameters; txParam ]
+    $"Task<Result<{typeName} option, SqliteException>>"
+    "querySingle"
+    sql
+    configureExpr
+    fieldMappings

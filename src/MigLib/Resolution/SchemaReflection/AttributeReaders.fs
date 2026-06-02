@@ -72,24 +72,20 @@ let resolveFieldByName (fields: PropertyInfo array) (fieldName: string) : Result
 let buildColumnResolver (fieldColumnPairs: (string * string) list) : Map<string, string> =
   fieldColumnPairs
   |> List.collect (fun (fieldName, columnName) ->
-    [
-      fieldName
+    [ fieldName
       toSnakeCase fieldName
       toCamelCaseFromSnake (toSnakeCase fieldName)
       columnName
-      toCamelCaseFromSnake columnName
-    ]
+      toCamelCaseFromSnake columnName ]
     |> List.map (fun key -> key.ToLowerInvariant(), columnName))
   |> Map.ofList
 
 let buildRelationshipResolver (fieldColumns: (string * string list) list) : Map<string, string list> =
   fieldColumns
   |> List.collect (fun (fieldName, columns) ->
-    [
-      fieldName
+    [ fieldName
       toSnakeCase fieldName
-      toCamelCaseFromSnake (toSnakeCase fieldName)
-    ]
+      toCamelCaseFromSnake (toSnakeCase fieldName) ]
     |> List.map (fun key -> key.ToLowerInvariant(), columns))
   |> Map.ofList
 
@@ -181,8 +177,7 @@ let addColumnConstraint
         found <- true
 
         { column with
-            constraints = column.constraints @ [ constraintToAdd ]
-        }
+            constraints = column.constraints @ [ constraintToAdd ] }
       else
         column)
 
@@ -207,13 +202,9 @@ let readPrimaryKeyInfo (recordType: Type) : Result<PrimaryKeyInfo list, MigError
         match mapPrimitiveSqlType field.PropertyType with
         | Some SqlInteger ->
           return
-            [
-              {
-                columnName = toSnakeCase field.Name
+            [ { columnName = toSnakeCase field.Name
                 sqlType = SqlInteger
-                isAutoIncrement = true
-              }
-            ]
+                isAutoIncrement = true } ]
         | Some _ -> return! Error(MigError.Regular $"AutoIncPK on type '{recordType.Name}' must target an int64 field")
         | None ->
           return! Error(MigError.Regular $"AutoIncPK on type '{recordType.Name}' must target a primitive int64 field")
@@ -247,13 +238,9 @@ let readPrimaryKeyInfo (recordType: Type) : Result<PrimaryKeyInfo list, MigError
                 | Some sqlType ->
                   return
                     acc
-                    @ [
-                      {
-                        columnName = toSnakeCase field.Name
-                        sqlType = sqlType
-                        isAutoIncrement = false
-                      }
-                    ]
+                    @ [ { columnName = toSnakeCase field.Name
+                          sqlType = sqlType
+                          isAutoIncrement = false } ]
                 | None ->
                   return!
                     Error(
@@ -432,15 +419,11 @@ let readForeignKeyAttributes
 
         return
           fks
-          @ [
-            {
-              columns = resolvedColumns
-              refTable = attr.RefTable
-              refColumns = refColumns
-              onDelete = onDelete
-              onUpdate = None
-            }
-          ]
+          @ [ { columns = resolvedColumns
+                refTable = attr.RefTable
+                refColumns = refColumns
+                onDelete = onDelete
+                onUpdate = None } ]
       })
     []
 
@@ -471,13 +454,9 @@ let readIndexDefinitions
 
         return
           indexes
-          @ [
-            {
-              name = indexName
-              table = tableName
-              columns = resolvedColumns
-            }
-          ]
+          @ [ { name = indexName
+                table = tableName
+                columns = resolvedColumns } ]
       })
     []
   |> Result.map List.distinct
@@ -491,6 +470,7 @@ let readQueryAnnotations
       QueryWhereAnnotation list *
       QueryByOrCreateAnnotation list *
       SelectOneAnnotation list *
+      SelectOneByAnnotation list *
       InsertOrIgnoreAnnotation list *
       DeleteWhereAnnotation list *
       DeleteAllAnnotation list *
@@ -502,6 +482,7 @@ let readQueryAnnotations
     let selectByAttributes = getTypeAttributes<SelectByAttribute> recordType
     let selectLikeAttributes = getTypeAttributes<SelectLikeAttribute> recordType
     let selectWhereAttributes = getTypeAttributes<SelectWhereAttribute> recordType
+    let selectOneByAttributes = getTypeAttributes<SelectOneByAttribute> recordType
 
     let selectByOrInsertAttributes =
       getTypeAttributes<SelectByOrInsertAttribute> recordType
@@ -556,15 +537,11 @@ let readQueryAnnotations
 
             return
               acc
-              @ [
-                ({
-                  name = attr.Name
-                  whereSql = attr.WhereSql
-                  columns = columns
-                  orderBy = orderBy
-                }
-                : QueryWhereAnnotation)
-              ]
+              @ [ ({ name = attr.Name
+                     whereSql = attr.WhereSql
+                     columns = columns
+                     orderBy = orderBy }
+                  : QueryWhereAnnotation) ]
           })
         []
 
@@ -594,6 +571,28 @@ let readQueryAnnotations
       else
         [ SelectOneAnnotation ]
 
+    let! selectOneBy =
+      selectOneByAttributes
+      |> foldResults
+        (fun acc attr ->
+          result {
+            let! columns =
+              attr.Columns
+              |> Seq.toList
+              |> foldResults
+                (fun names raw ->
+                  result {
+                    let! resolved = resolveColumnName resolver recordType.Name raw
+                    return names @ [ resolved ]
+                  })
+                []
+
+            let! orderBy = resolveOrderBy resolver recordType.Name attr.OrderBy
+
+            return acc @ [ ({ columns = columns; orderBy = orderBy }: SelectOneByAnnotation) ]
+          })
+        []
+
     let insertOrIgnore =
       if insertOrIgnoreAttributes.IsEmpty then
         []
@@ -609,14 +608,10 @@ let readQueryAnnotations
 
             return
               acc
-              @ [
-                ({
-                  name = attr.Name
-                  whereSql = attr.WhereSql
-                  columns = columns
-                }
-                : DeleteWhereAnnotation)
-              ]
+              @ [ ({ name = attr.Name
+                     whereSql = attr.WhereSql
+                     columns = columns }
+                  : DeleteWhereAnnotation) ]
           })
         []
 
@@ -632,5 +627,15 @@ let readQueryAnnotations
       else
         [ UpsertAnnotation ]
 
-    return queryBy, queryLike, queryWhere, queryByOrCreate, selectOne, insertOrIgnore, deleteWhere, deleteAll, upsert
+    return
+      queryBy,
+      queryLike,
+      queryWhere,
+      queryByOrCreate,
+      selectOne,
+      selectOneBy,
+      insertOrIgnore,
+      deleteWhere,
+      deleteAll,
+      upsert
   }

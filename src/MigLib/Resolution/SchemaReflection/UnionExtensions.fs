@@ -57,59 +57,42 @@ let buildUnionExtensionTables
             let fkColumns =
               (fkColumnNames, referencedPk)
               ||> List.map2 (fun fkColumnName referencedPk ->
-                {
-                  name = fkColumnName
+                { name = fkColumnName
                   previousName = None
                   columnType = referencedPk.sqlType
                   constraints = [ NotNull ]
                   enumLikeDu = None
-                  unitOfMeasure = None
-                })
+                  unitOfMeasure = None })
 
             let tableConstraints =
               match fkColumns, referencedPk with
               | [ fkColumn ], [ referencedPkColumn ] ->
-                [
-                  ForeignKey
-                    {
-                      columns = []
+                [ ForeignKey
+                    { columns = []
                       refTable = baseTableName
                       refColumns = [ referencedPkColumn.columnName ]
                       onDelete = None
-                      onUpdate = None
-                    }
+                      onUpdate = None }
                   PrimaryKey
-                    {
-                      constraintName = None
+                    { constraintName = None
                       columns = []
-                      isAutoincrement = false
-                    }
-                ]
+                      isAutoincrement = false } ]
                 |> fun constraints ->
-                  [
-                    { fkColumn with
-                        constraints = fkColumn.constraints @ constraints
-                    }
-                  ],
+                  [ { fkColumn with
+                        constraints = fkColumn.constraints @ constraints } ],
                   []
               | _ ->
                 fkColumns,
-                [
-                  PrimaryKey
-                    {
-                      constraintName = None
+                [ PrimaryKey
+                    { constraintName = None
                       columns = fkColumnNames
-                      isAutoincrement = false
-                    }
+                      isAutoincrement = false }
                   ForeignKey
-                    {
-                      columns = fkColumnNames
+                    { columns = fkColumnNames
                       refTable = baseTableName
                       refColumns = referencedPk |> List.map _.columnName
                       onDelete = None
-                      onUpdate = None
-                    }
-                ]
+                      onUpdate = None } ]
 
             let fkColumns, extensionConstraints = tableConstraints
 
@@ -129,16 +112,12 @@ let buildUnionExtensionTables
 
                     Ok(
                       cols
-                      @ [
-                        {
-                          name = toSnakeCase fieldName
-                          previousName = None
-                          columnType = sqlType
-                          constraints = [ NotNull ]
-                          enumLikeDu = enumLikeDu
-                          unitOfMeasure = None
-                        }
-                      ]
+                      @ [ { name = toSnakeCase fieldName
+                            previousName = None
+                            columnType = sqlType
+                            constraints = [ NotNull ]
+                            enumLikeDu = enumLikeDu
+                            unitOfMeasure = None } ]
                     )
                   | None ->
                     Error(
@@ -148,8 +127,7 @@ let buildUnionExtensionTables
                 []
 
             let extensionTable =
-              {
-                name = extensionTableName
+              { name = extensionTableName
                 previousName = None
                 dropColumns = []
                 columns = fkColumns @ extensionColumns
@@ -159,11 +137,11 @@ let buildUnionExtensionTables
                 queryWhereAnnotations = []
                 queryByOrCreateAnnotations = []
                 selectOneAnnotations = []
+                selectOneByAnnotations = []
                 insertOrIgnoreAnnotations = []
                 deleteWhereAnnotations = []
                 deleteAllAnnotations = []
-                upsertAnnotations = []
-              }
+                upsertAnnotations = [] }
 
             return tables @ [ extensionTable ]
           })

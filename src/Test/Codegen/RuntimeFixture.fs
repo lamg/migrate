@@ -8,82 +8,57 @@ open MigLib.Generated
 type Marker = class end
 
 let Schema: SqlFile =
-  {
-    measureTypes = []
+  { measureTypes = []
     inserts = []
     views = []
     tables =
-      [
-        {
-          name = "student"
+      [ { name = "student"
           previousName = None
           dropColumns = []
           columns =
-            [
-              {
-                name = "id"
+            [ { name = "id"
                 previousName = None
                 columnType = SqlType.SqlInteger
                 constraints =
-                  [
-                    ColumnConstraint.NotNull
+                  [ ColumnConstraint.NotNull
                     ColumnConstraint.PrimaryKey
-                      {
-                        constraintName = None
+                      { constraintName = None
                         columns = []
-                        isAutoincrement = true
-                      }
-                  ]
+                        isAutoincrement = true } ]
                 enumLikeDu = None
-                unitOfMeasure = None
-              }
-              {
-                name = "name"
+                unitOfMeasure = None }
+              { name = "name"
                 previousName = None
                 columnType = SqlType.SqlText
                 constraints = [ ColumnConstraint.NotNull; ColumnConstraint.Unique [] ]
                 enumLikeDu = None
-                unitOfMeasure = None
-              }
-              {
-                name = "age"
+                unitOfMeasure = None }
+              { name = "age"
                 previousName = None
                 columnType = SqlType.SqlInteger
                 constraints = [ ColumnConstraint.NotNull; ColumnConstraint.Default(Expr.Integer 18) ]
                 enumLikeDu = None
-                unitOfMeasure = None
-              }
-            ]
+                unitOfMeasure = None } ]
           constraints = []
           queryByAnnotations = [ { columns = [ "name" ]; orderBy = None } ]
           queryLikeAnnotations = [ { columns = [ "name" ] } ]
           queryWhereAnnotations =
-            [
-              {
-                name = "Adults"
+            [ { name = "Adults"
                 whereSql = "age >= @age AND name LIKE @name OR name LIKE @name"
                 columns = [ "age"; "name" ]
-                orderBy = Some "name ASC"
-              }
-            ]
+                orderBy = Some "name ASC" } ]
           queryByOrCreateAnnotations = [ { columns = [ "name" ] } ]
           selectOneAnnotations = [ SelectOneAnnotation ]
+          selectOneByAnnotations = []
           insertOrIgnoreAnnotations = [ InsertOrIgnoreAnnotation ]
           deleteWhereAnnotations =
-            [
-              {
-                name = "Adults"
+            [ { name = "Adults"
                 whereSql = "age >= @age AND name LIKE @name OR name LIKE @name"
-                columns = [ "age"; "name" ]
-              }
-            ]
+                columns = [ "age"; "name" ] } ]
           deleteAllAnnotations = [ DeleteAllAnnotation ]
-          upsertAnnotations = [ UpsertAnnotation ]
-        }
-      ]
+          upsertAnnotations = [ UpsertAnnotation ] } ]
     indexes = []
-    triggers = []
-  }
+    triggers = [] }
 
 type Student = { Id: int64; Name: string; Age: int64 }
 
@@ -116,11 +91,9 @@ type Student with
       "SELECT id, name, age FROM student WHERE id = @id"
       (fun cmd -> cmd.Parameters.AddWithValue("@id", id) |> ignore)
       (fun reader ->
-        {
-          Id = reader.GetInt64 0
+        { Id = reader.GetInt64 0
           Name = reader.GetString 1
-          Age = reader.GetInt64 2
-        })
+          Age = reader.GetInt64 2 })
       tx
 
   static member SelectAll(tx: SqliteTransaction) : Task<Result<Student list, SqliteException>> =
@@ -128,11 +101,9 @@ type Student with
       "SELECT id, name, age FROM student"
       (fun _ -> ())
       (fun reader ->
-        {
-          Id = reader.GetInt64 0
+        { Id = reader.GetInt64 0
           Name = reader.GetString 1
-          Age = reader.GetInt64 2
-        })
+          Age = reader.GetInt64 2 })
       tx
 
   static member SelectOne(tx: SqliteTransaction) : Task<Result<Student option, SqliteException>> =
@@ -140,11 +111,9 @@ type Student with
       "SELECT id, name, age FROM student LIMIT 1"
       (fun _ -> ())
       (fun reader ->
-        {
-          Id = reader.GetInt64 0
+        { Id = reader.GetInt64 0
           Name = reader.GetString 1
-          Age = reader.GetInt64 2
-        })
+          Age = reader.GetInt64 2 })
       tx
 
   static member Update (item: Student) (tx: SqliteTransaction) : Task<Result<unit, SqliteException>> =
@@ -178,11 +147,9 @@ type Student with
       "SELECT id, name, age FROM student WHERE name = @name"
       (fun cmd -> cmd.Parameters.AddWithValue("@name", name) |> ignore)
       (fun reader ->
-        {
-          Id = reader.GetInt64 0
+        { Id = reader.GetInt64 0
           Name = reader.GetString 1
-          Age = reader.GetInt64 2
-        })
+          Age = reader.GetInt64 2 })
       tx
 
   static member SelectNameLike (name: string) (tx: SqliteTransaction) : Task<Result<Student list, SqliteException>> =
@@ -190,11 +157,9 @@ type Student with
       "SELECT id, name, age FROM student WHERE name LIKE '%' || @name || '%'"
       (fun cmd -> cmd.Parameters.AddWithValue("@name", name) |> ignore)
       (fun reader ->
-        {
-          Id = reader.GetInt64 0
+        { Id = reader.GetInt64 0
           Name = reader.GetString 1
-          Age = reader.GetInt64 2
-        })
+          Age = reader.GetInt64 2 })
       tx
 
   static member SelectAdults
@@ -207,11 +172,9 @@ type Student with
         cmd.Parameters.AddWithValue("@age", age) |> ignore
         cmd.Parameters.AddWithValue("@name", name) |> ignore)
       (fun reader ->
-        {
-          Id = reader.GetInt64 0
+        { Id = reader.GetInt64 0
           Name = reader.GetString 1
-          Age = reader.GetInt64 2
-        })
+          Age = reader.GetInt64 2 })
       tx
 
   static member SelectByNameOrInsert

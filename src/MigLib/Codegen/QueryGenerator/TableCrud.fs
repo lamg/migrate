@@ -7,6 +7,7 @@ open MigLib.Codegen
 open MigLib.Codegen.AstExprBuilders
 open MigLib.Codegen.QueryGeneratorCommon
 open MigLib.Codegen.SqlParamBindings
+open MigLib.Codegen.Validation
 
 let private commandLambda (bindings: string list) =
   match bindings with
@@ -234,19 +235,7 @@ let generateDeleteAll (table: CreateTable) =
   )
 
 let validateDeleteWhereAnnotation (table: CreateTable) (annotation: DeleteWhereAnnotation) : Result<unit, string> =
-  let columnNames =
-    table.columns |> List.map (fun col -> col.name.ToLowerInvariant()) |> Set.ofList
-
-  annotation.columns
-  |> List.tryFind (fun col -> not (columnNames.Contains(col.ToLowerInvariant())))
-  |> function
-    | Some invalidCol ->
-      let availableCols =
-        table.columns |> List.map (fun col -> col.name) |> String.concat ", "
-
-      Error
-        $"DeleteWhere annotation references non-existent column '{invalidCol}' in table '{table.name}'. Available columns: {availableCols}"
-    | None -> Ok()
+  validateAnnotationColumns "DeleteWhere" "table" table.name (table.columns |> List.map _.name) annotation.columns
 
 let generateDeleteWhere (table: CreateTable) (annotation: DeleteWhereAnnotation) =
   let methodName = $"Delete{capitalizeName annotation.name}"
@@ -291,11 +280,9 @@ let generateUpsert (table: CreateTable) =
     let body =
       AppExpr(
         "upsertByExisting",
-        [
-          lambdaRawExpr "()" $"{typeName}.SelectById {selectByIdArgs} tx"
+        [ lambdaRawExpr "()" $"{typeName}.SelectById {selectByIdArgs} tx"
           lambdaRawExpr "()" $"{typeName}.Update item tx"
-          lambdaRawExpr "()" $"{typeName}.Insert item tx"
-        ]
+          lambdaRawExpr "()" $"{typeName}.Insert item tx" ]
       )
 
     Some(staticMember "Upsert" [ typedParenParam "item" typeName; txParam ] body "Task<Result<unit, SqliteException>>")
