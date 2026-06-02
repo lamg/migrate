@@ -178,6 +178,7 @@ dotnet fsi example/build.fsx
 - [Declarative migrations for SQLite](https://david.rothlis.net/declarative-schema-migration-for-sqlite/)
 - [Four different ways to handle SQLite concurrency](https://medium.com/@gwendal.roue/four-different-ways-to-handle-sqlite-concurrency-db3bcc74d00e)
 - [Concurrency Control and Database Recovery in SQLite](https://dev.to/lovestaco/concurrency-control-and-database-recovery-in-sqlite-2pmo)
+- [What Category Theory teaches us about data frames](https://mchav.github.io/what-category-theory-teaches-us-about-dataframes/)
 
 [logo]: https://raw.githubusercontent.com/lamg/migrate/refs/heads/master/images/logo_small.png
 [dotnet]: https://dotnet.microsoft.com/en-us/download/dotnet/10.0
