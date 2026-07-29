@@ -3,6 +3,7 @@ module Mig.Program
 open System
 open System.Reflection
 open MigLib
+open MigLib.Codegen
 
 let private writeOut (s: string) = Console.WriteLine s
 let private writeErr (s: string) = Console.Error.WriteLine s

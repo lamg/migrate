@@ -18,6 +18,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../MigLib/MigLib.fsproj" />
+    <ProjectReference Include="../MigLib.Codegen/MigLib.Codegen.fsproj" />
     <ProjectReference Include="../mig/mig.fsproj" />
   </ItemGroup>
 </Project>

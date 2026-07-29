@@ -2,12 +2,12 @@ namespace MigLib
 
 open System.Threading.Tasks
 
-/// Public surface used by applications, build.fsx, and the mig CLI.
+/// Public surface used by applications and build scripts (runtime only).
+/// Codegen lives in the MigLib.Codegen package.
 [<AutoOpen>]
 module Api =
 
   type MigError = Types.MigError
-  type CodegenResult = Types.CodegenResult
   type SqliteJournalMode = Sqlite.SqliteJournalMode
   type SqliteTransactionMode = Sqlite.SqliteTransactionMode
 
@@ -31,16 +31,9 @@ module Api =
 
   let txn = Types.txn
 
-  let result = TaskResult.result
-  let taskResult = TaskResult.taskResult
-
   module TxnStep =
     let bind = Runtime.TxnStep.bind
     let map = Runtime.TxnStep.map
-
-  /// Generate typed F# from annotated SQL migrations (same as `mig codegen`).
-  let generate (migrationsDir: string) (outputPath: string) (namespaceName: string) : Result<CodegenResult, string> =
-    Codegen.Generate.generate migrationsDir outputPath namespaceName
 
   /// Apply filesystem SQL migration scripts to the database file (ordered by file name).
   let migrateScripts (dbPath: string) (scriptsDirectory: string) : Task<Result<unit, string>> =

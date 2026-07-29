@@ -20,24 +20,17 @@
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Sqlite.fs" />
-    <Compile Include="TaskResult.fs" />
     <Compile Include="Runtime/TxnStep.fs" />
     <Compile Include="Query.fs" />
     <Compile Include="Types.fs" />
     <Compile Include="Migrate.fs" />
-    <Compile Include="Codegen/Types.fs" />
-    <Compile Include="Codegen/Naming.fs" />
-    <Compile Include="Codegen/Annotations.fs" />
-    <Compile Include="Codegen/Introspection.fs" />
-    <Compile Include="Codegen/Validation.fs" />
-    <Compile Include="Codegen/Emit.fs" />
-    <Compile Include="Codegen/Generate.fs" />
     <Compile Include="MigLib.fs" />
     <Content Include="../../README.md" Pack="true" PackagePath="\" />
     <Content Include="../../images/logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />
+    <PackageReference Include="Lamg.Env" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <!-- Direct ref so consumers resolve batteries/lib at the pinned 2.1.12 line (GHSA-2m69-gcr7-jv3q). -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />

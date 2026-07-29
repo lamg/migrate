@@ -6,7 +6,6 @@ module Generate =
   open System.Threading.Tasks
   open MigLib.Migrate
   open MigLib.Codegen
-  open MigLib.Types
 
   let private withTempDb (action: string -> Result<'a, string>) : Result<'a, string> =
     let path =

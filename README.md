@@ -13,8 +13,8 @@ Migrate is a SQLite-first toolkit: **filesystem SQL migrations** are the schema 
 
 1. You write ordered `*.sql` migrations (applied by file name).
 2. You annotate tables/views with `-- mig:` comments for the ops you want.
-3. `mig codegen` (or `MigLib.generate`) applies migrations to a temp DB, introspects schema, and emits **one `.fs` module file per annotated relation** into an output directory.
-4. At runtime you call `MigLib.migrateScripts` and use `dbTxn` with generated helpers on `Microsoft.Data.Sqlite`.
+3. `mig codegen` (or `MigLib.Codegen.generate`) applies migrations to a temp DB, introspects schema, and emits **one `.fs` module file per annotated relation** into an output directory.
+4. At runtime you call `MigLib.migrateScripts` and use `dbTxn` with generated helpers on `Microsoft.Data.Sqlite` (runtime package only — no codegen dependency).
 
 There is no F#-first schema DSL, no SqlProvider, no DbUp dependency, and no automatic normalization.
 
@@ -72,7 +72,7 @@ This writes `Stores/User.fs`, `Stores/ActiveUser.fs`, etc. (`module MyApp.Db.Use
 From `build.fsx` / F#:
 
 ```fsharp
-open MigLib
+open MigLib.Codegen
 
 match generate "./Migrations" "./Stores" "MyApp.Db" with
 | Ok r ->
@@ -117,7 +117,8 @@ let! user =
 | Package | Role |
 |---------|------|
 | **migtool** | CLI (`mig codegen`, `mig version`) |
-| **MigLib** | `dbTxn` / `TxnStep`, `Query` helpers, codegen API, filesystem migrate |
+| **MigLib** | Runtime: `dbTxn` / `TxnStep`, `Query`, filesystem `migrateScripts` (AOT-oriented) |
+| **MigLib.Codegen** | Dev-time `generate` API (used by CLI and `build.fsx`) |
 
 ## Local build
 

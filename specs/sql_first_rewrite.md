@@ -41,11 +41,13 @@ mig codegen  (CLI and MigLib public API)
 MigLib
   - DbTxnBuilder / TxnStep / readOnlyDbTxn (current model)
   - Shared helpers used by generated code (read/map/exec/bind params)
-  - Public codegen function (same behavior as CLI; for build.fsx)
   - Public filesystem migrate: migrateScripts : dbPath -> dir -> Task<Result<unit,string>>
+
+MigLib.Codegen
+  - Public generate (same behavior as `mig codegen`; for build.fsx)
 ```
 
-Package layout: **`migtool` CLI + `MigLib` library** only.
+Package layout: **`migtool` CLI + `MigLib` (runtime) + `MigLib.Codegen` (generate)**.
 
 ## Source of truth split
 

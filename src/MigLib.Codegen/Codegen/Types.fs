@@ -1,5 +1,16 @@
 namespace MigLib.Codegen
 
+/// Result of a successful `generate` run.
+type CodegenResult =
+  {
+    /// Directory that received generated modules.
+    outputDir: string
+    namespaceName: string
+    relationCount: int
+    /// Absolute paths of files written this run.
+    generatedFiles: string list
+  }
+
 module internal Types =
   [<RequireQualifiedAccess>]
   type RelationKind =

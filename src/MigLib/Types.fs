@@ -13,16 +13,6 @@ module Types =
     | Sqlite of SqliteException
     | Other of Exception
 
-  type CodegenResult =
-    {
-      /// Directory that received generated modules.
-      outputDir: string
-      namespaceName: string
-      relationCount: int
-      /// Absolute paths of files written this run.
-      generatedFiles: string list
-    }
-
   let private runTxnStepAsMigError dbPath connectionConfig (step: TxnStep<'a>) : Task<Result<'a, MigError>> =
     runTransactionInternal connectionConfig dbPath MigError.Sqlite (fun tx ->
       task {

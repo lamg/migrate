@@ -5,6 +5,7 @@ open System.IO
 open System.Threading.Tasks
 open Xunit
 open MigLib
+open MigLib.Codegen
 
 let private await (t: Task<'a>) = t.GetAwaiter().GetResult()
 

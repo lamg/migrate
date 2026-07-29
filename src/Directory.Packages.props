@@ -5,7 +5,8 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="FSharp.Core" Version="10.0.104" />
+    <PackageVersion Include="FSharp.Core" Version="10.1.301" />
+    <PackageVersion Include="Lamg.Env" Version="0.6.0" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="9.0.0" />
     <!-- Microsoft.Data.Sqlite still requests 2.1.10; pin the e_sqlite3 stack to the fixed line. -->
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />

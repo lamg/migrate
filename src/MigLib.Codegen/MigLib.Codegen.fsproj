@@ -1,19 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
-    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
-    <RollForward>major</RollForward>
-
-    <PackAsTool>true</PackAsTool>
-    <ToolCommandName>mig</ToolCommandName>
-    <PackageId>migtool</PackageId>
-    <RootNamespace>migrate</RootNamespace>
-    <AssemblyName>migrate</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageId>MigLib.Codegen</PackageId>
     <Version>10.0.0</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
-    <InvariantGlobalization>true</InvariantGlobalization>
-
+    <AssemblyName>MigLib.Codegen</AssemblyName>
     <Authors>Luis Ángel Méndez Gort</Authors>
     <PackageProjectUrl>https://github.com/lamg/migrate</PackageProjectUrl>
     <RepositoryUrl>https://github.com/lamg/migrate</RepositoryUrl>
@@ -23,14 +15,19 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
-    <Compile Include="Program.fs" />
+    <Compile Include="Codegen/Types.fs" />
+    <Compile Include="Codegen/Naming.fs" />
+    <Compile Include="Codegen/Annotations.fs" />
+    <Compile Include="Codegen/Introspection.fs" />
+    <Compile Include="Codegen/Validation.fs" />
+    <Compile Include="Codegen/Emit.fs" />
+    <Compile Include="Codegen/Generate.fs" />
+    <Compile Include="Codegen.fs" />
     <Content Include="../../README.md" Pack="true" PackagePath="\" />
     <Content Include="../../images/logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="../MigLib.Codegen/MigLib.Codegen.fsproj" />
+    <ProjectReference Include="../MigLib/MigLib.fsproj" />
   </ItemGroup>
 </Project>
