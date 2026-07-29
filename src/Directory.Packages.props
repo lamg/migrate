@@ -5,9 +5,6 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="Argu" Version="6.2.4" />
-    <PackageVersion Include="dbup-core" Version="6.0.15" />
-    <PackageVersion Include="dbup-sqlite" Version="6.0.4" />
     <PackageVersion Include="FSharp.Core" Version="10.0.104" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="9.0.0" />
     <!-- Microsoft.Data.Sqlite still requests 2.1.10; pin the e_sqlite3 stack to the fixed line. -->

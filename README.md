@@ -7,16 +7,16 @@
 [![NuGet Downloads][nuget-downloads]][migtool]
 ![Tests][tests]
 
-Migrate is a SQLite-first toolkit: **DbUp SQL migrations** are the schema source of truth, and **`mig codegen`** emits typed F# queries for relations you annotate.
+Migrate is a SQLite-first toolkit: **filesystem SQL migrations** are the schema source of truth, and **`mig codegen`** emits typed F# queries for relations you annotate.
 
 ## What it does
 
-1. You write ordered SQL migrations (DbUp).
+1. You write ordered `*.sql` migrations (applied by file name).
 2. You annotate tables/views with `-- mig:` comments for the ops you want.
 3. `mig codegen` (or `MigLib.generate`) applies migrations to a temp DB, introspects schema, and emits **one `.fs` module file per annotated relation** into an output directory.
-4. At runtime you call `MigLib.migrateScripts` / `migrateEmbedded` and use `dbTxn` with generated helpers on `Microsoft.Data.Sqlite`.
+4. At runtime you call `MigLib.migrateScripts` and use `dbTxn` with generated helpers on `Microsoft.Data.Sqlite`.
 
-There is no F#-first schema DSL, no SqlProvider, and no automatic normalization.
+There is no F#-first schema DSL, no SqlProvider, no DbUp dependency, and no automatic normalization.
 
 ## Annotation example
 
@@ -76,18 +76,23 @@ open MigLib
 
 match generate "./Migrations" "./Stores" "MyApp.Db" with
 | Ok r ->
-    printfn "generated %d relations in %s" r.relationCount r.outputDir
-    r.generatedFiles |> List.iter (printfn "  %s")
+    Console.WriteLine(
+      "generated "
+      + string r.relationCount
+      + " relations in "
+      + r.outputDir)
+    r.generatedFiles |> List.iter (fun p -> Console.WriteLine("  " + p))
 | Error e -> failwith e
 ```
 
 ## Runtime
 
 ```fsharp
+open System
 open MigLib
 open MyApp.Db
 
-// apply migrations
+// apply migrations from a directory of *.sql files
 do!
   migrateScripts dbPath "./Migrations"
   |> Task.map (function Ok () -> () | Error e -> failwith e)
@@ -112,8 +117,7 @@ let! user =
 | Package | Role |
 |---------|------|
 | **migtool** | CLI (`mig codegen`, `mig version`) |
-| **MigLib** | `dbTxn` / `TxnStep`, `Query` helpers, codegen API, DbUp migrate helpers |
-| **MigLib.Web** | ASP.NET Core web helpers built on `TxnStep` |
+| **MigLib** | `dbTxn` / `TxnStep`, `Query` helpers, codegen API, filesystem migrate |
 
 ## Local build
 

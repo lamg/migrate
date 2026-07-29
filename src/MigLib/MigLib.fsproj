@@ -37,9 +37,9 @@
     <Content Include="../../images/logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="dbup-core" />
-    <PackageReference Include="dbup-sqlite" />
     <PackageReference Include="FSharp.Core" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
+    <!-- Direct ref so consumers resolve batteries/lib at the pinned 2.1.12 line (GHSA-2m69-gcr7-jv3q). -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
   </ItemGroup>
 </Project>

@@ -2,76 +2,110 @@ module Mig.Program
 
 open System
 open System.Reflection
-open Argu
 open MigLib
 
-type CodegenArgs =
-  | [<Mandatory; AltCommandLine("-m")>] Migrations of path: string
-  | [<Mandatory; AltCommandLine("-o")>] Output of path: string
-  | [<Mandatory; AltCommandLine("-n")>] Namespace of name: string
-  interface IArgParserTemplate with
-    member this.Usage =
-      match this with
-      | Migrations _ -> "directory containing ordered DbUp *.sql migration scripts"
-      | Output _ -> "directory for generated modules (one .fs file per relation)"
-      | Namespace _ -> "F# namespace prefix for modules (e.g. MyApp.Data.Stores)"
+let private writeOut (s: string) = Console.WriteLine s
+let private writeErr (s: string) = Console.Error.WriteLine s
 
-type Command =
-  | [<CliPrefix(CliPrefix.None)>] Codegen of ParseResults<CodegenArgs>
-  | [<CliPrefix(CliPrefix.None)>] Version
-  interface IArgParserTemplate with
-    member this.Usage =
-      match this with
-      | Codegen _ -> "generate F# types and queries from annotated SQL migrations"
-      | Version -> "print version and exit"
+let private usage () =
+  writeOut "USAGE: mig <command> [options]"
+  writeOut ""
+  writeOut "Commands:"
+  writeOut "  codegen   Generate F# modules from annotated SQL migrations"
+  writeOut "  version   Print version and exit"
+  writeOut "  help      Show this help"
+  writeOut ""
+  writeOut "codegen options:"
+  writeOut "  -m, --migrations <dir>   Directory of ordered *.sql scripts (required)"
+  writeOut "  -o, --output <dir>       Output directory for generated modules (required)"
+  writeOut "  -n, --namespace <name>   F# namespace prefix, e.g. MyApp.Db (required)"
 
 let private getVersionText () =
   let asm = Assembly.GetExecutingAssembly()
 
-  let version =
+  let informational =
     asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
     |> Option.ofObj
     |> Option.map _.InformationalVersion
-    |> Option.defaultValue (
-      let v = asm.GetName().Version
-      if isNull v then "0.0.0" else v.ToString()
-    )
 
-  $"mig {version}"
+  match informational with
+  | Some v when not (String.IsNullOrWhiteSpace v) -> "mig " + v
+  | _ ->
+    let v = asm.GetName().Version
 
-let private runCodegen (args: ParseResults<CodegenArgs>) =
-  let migrations = args.GetResult Migrations
-  let output = args.GetResult Output
-  let ns = args.GetResult Namespace
+    if isNull v then "mig 0.0.0" else "mig " + v.ToString()
 
+let private parseCodegenArgs (args: string list) : Result<string * string * string, string> =
+  let mutable migrations = None
+  let mutable output = None
+  let mutable ns = None
+  let mutable error = None
+  let mutable rest = args
+
+  while error.IsNone && not rest.IsEmpty do
+    match rest with
+    | ("-m" | "--migrations") :: value :: tail when not (value.StartsWith("-", StringComparison.Ordinal)) ->
+      migrations <- Some value
+      rest <- tail
+    | ("-o" | "--output") :: value :: tail when not (value.StartsWith("-", StringComparison.Ordinal)) ->
+      output <- Some value
+      rest <- tail
+    | ("-n" | "--namespace") :: value :: tail when not (value.StartsWith("-", StringComparison.Ordinal)) ->
+      ns <- Some value
+      rest <- tail
+    | unknown :: _ -> error <- Some("unrecognized argument: " + unknown)
+    | [] -> ()
+
+  match error with
+  | Some msg -> Error msg
+  | None ->
+    match migrations, output, ns with
+    | Some m, Some o, Some n -> Ok(m, o, n)
+    | _ -> Error "codegen requires -m|--migrations, -o|--output, and -n|--namespace"
+
+let private executeCodegen (migrations: string) (output: string) (ns: string) =
   match generate migrations output ns with
   | Ok result ->
-    printfn
-      "generated %d relation(s) -> %s (namespace %s)"
-      result.relationCount
-      result.outputDir
-      result.namespaceName
+    writeOut (
+      "generated "
+      + string result.relationCount
+      + " relation(s) -> "
+      + result.outputDir
+      + " (namespace "
+      + result.namespaceName
+      + ")"
+    )
 
     for path in result.generatedFiles do
-      printfn "  %s" path
+      writeOut ("  " + path)
 
     0
   | Error message ->
-    eprintfn "codegen failed: %s" message
+    writeErr ("codegen failed: " + message)
     1
 
 [<EntryPoint>]
 let main argv =
-  let parser = ArgumentParser.Create<Command>(programName = "mig")
+  let args = argv |> Array.toList
 
-  try
-    let results = parser.ParseCommandLine(inputs = argv, raiseOnUsage = true)
-
-    match results.GetSubCommand() with
-    | Codegen args -> runCodegen args
-    | Version ->
-      printfn "%s" (getVersionText ())
-      0
-  with :? ArguParseException as ex ->
-    eprintfn "%s" ex.Message
+  match args with
+  | []
+  | [ "help" ]
+  | [ "--help" ]
+  | [ "-h" ] ->
+    usage ()
+    0
+  | "version" :: _ ->
+    writeOut (getVersionText ())
+    0
+  | "codegen" :: rest ->
+    match parseCodegenArgs rest with
+    | Error msg ->
+      writeErr msg
+      usage ()
+      1
+    | Ok(migrations, output, ns) -> executeCodegen migrations output ns
+  | unknown :: _ ->
+    writeErr ("unrecognized command: " + unknown)
+    usage ()
     1

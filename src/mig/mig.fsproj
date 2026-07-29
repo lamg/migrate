@@ -28,7 +28,6 @@
     <Content Include="../../images/logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Argu" />
     <PackageReference Include="FSharp.Core" />
   </ItemGroup>
   <ItemGroup>

@@ -9,7 +9,8 @@ module Generate =
   open MigLib.Types
 
   let private withTempDb (action: string -> Result<'a, string>) : Result<'a, string> =
-    let path = Path.Combine(Path.GetTempPath(), $"mig-codegen-{Guid.NewGuid():N}.sqlite")
+    let path =
+      Path.Combine(Path.GetTempPath(), "mig-codegen-" + Guid.NewGuid().ToString("N") + ".sqlite")
 
     try
       let result = action path
@@ -91,17 +92,12 @@ module Generate =
                   File.WriteAllText(filePath, source)
                   written.Add(Path.GetFullPath filePath)
 
-                let keep =
-                  relations
-                  |> List.map _.fsName
-                  |> Set.ofList
+                let keep = relations |> List.map _.fsName |> Set.ofList
 
                 deleteStaleGenerated fullDir keep
 
                 Ok
-                  {
-                    outputDir = fullDir
+                  { outputDir = fullDir
                     namespaceName = namespaceName
                     relationCount = relations.Length
-                    generatedFiles = written |> List.ofSeq
-                  })
+                    generatedFiles = written |> List.ofSeq })

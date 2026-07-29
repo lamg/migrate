@@ -6,7 +6,6 @@
   <ItemGroup>
     <Compile Include="Stores/**/*.fs" />
     <Compile Include="Program.fs" />
-    <EmbeddedResource Include="Migrations/*.sql" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../src/MigLib/MigLib.fsproj" />

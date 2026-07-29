@@ -1,6 +1,5 @@
 namespace MigLib
 
-open System.Reflection
 open System.Threading.Tasks
 
 /// Public surface used by applications, build.fsx, and the mig CLI.
@@ -26,7 +25,10 @@ module Api =
   let readOnlyDbRuntime dbPath = Types.readOnlyDbRuntime dbPath
   let withJournalMode journalMode db = Types.withJournalMode journalMode db
   let withBusyTimeout timeout db = Types.withBusyTimeout timeout db
-  let withTransactionMode transactionMode db = Types.withTransactionMode transactionMode db
+
+  let withTransactionMode transactionMode db =
+    Types.withTransactionMode transactionMode db
+
   let txn = Types.txn
 
   let result = TaskResult.result
@@ -40,10 +42,6 @@ module Api =
   let generate (migrationsDir: string) (outputPath: string) (namespaceName: string) : Result<CodegenResult, string> =
     Codegen.Generate.generate migrationsDir outputPath namespaceName
 
-  /// Apply embedded DbUp scripts to the database file.
-  let migrateEmbedded (dbPath: string) (assembly: Assembly) : Task<Result<unit, string>> =
-    Migrate.migrateEmbedded dbPath assembly
-
-  /// Apply filesystem DbUp scripts to the database file.
+  /// Apply filesystem SQL migration scripts to the database file (ordered by file name).
   let migrateScripts (dbPath: string) (scriptsDirectory: string) : Task<Result<unit, string>> =
     Migrate.migrateScripts dbPath scriptsDirectory
