@@ -6,7 +6,7 @@
     <IsTrimmable>true</IsTrimmable>
 
     <PackageId>MigLib</PackageId>
-    <Version>9.1.0</Version>
+    <Version>10.0.0</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <AssemblyName>MigLib</AssemblyName>
 
@@ -19,76 +19,26 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
-
     <Compile Include="Sqlite.fs" />
     <Compile Include="TaskResult.fs" />
-    <Compile Include="Schema/Types.fs" />
-    <Compile Include="Schema/Sql.fs" />
-    <Compile Include="Dsl/Attributes.fs" />
-    <Compile Include="Runtime/Core.fs" />
     <Compile Include="Runtime/TxnStep.fs" />
+    <Compile Include="Query.fs" />
     <Compile Include="Types.fs" />
-
-    <Compile Include="Resolution/SchemaReflection/Types.fs" />
-    <Compile Include="Resolution/SchemaReflection/NamingAndTypeMapping.fs" />
-    <Compile Include="Resolution/SchemaReflection/AttributeReaders.fs" />
-    <Compile Include="Resolution/SchemaReflection/TableReflection.fs" />
-    <Compile Include="Resolution/SchemaReflection/ViewReflection.fs" />
-    <Compile Include="Resolution/SchemaReflection/UnionExtensions.fs" />
-    <Compile Include="Resolution/SchemaReflection/SchemaAssembly.fs" />
-    <Compile Include="Resolution/SchemaReflection/SeedReflection.fs" />
-    <Compile Include="Resolution/Types.fs" />
-    <Compile Include="Resolution/SchemaIntrospection.fs" />
-    <Compile Include="Resolution/Assemblies.fs" />
-    <Compile Include="Resolution/GeneratedSchema.fs" />
-    <Compile Include="Resolution/DatabasePaths.fs" />
-    <Compile Include="Resolution/Projects.fs" />
-    <Compile Include="Codegen/FabulousAstHelpers.fs" />
-    <Compile Include="Codegen/AstExprBuilders.fs" />
-    <Compile Include="Codegen/ViewDependencies.fs" />
-    <Compile Include="Codegen/ViewIntrospection.fs" />
-    <Compile Include="Codegen/TypeGenerator.fs" />
-    <Compile Include="Codegen/SqlParamBindings.fs" />
-    <Compile Include="Codegen/SqlFragments.fs" />
+    <Compile Include="Migrate.fs" />
+    <Compile Include="Codegen/Types.fs" />
+    <Compile Include="Codegen/Naming.fs" />
+    <Compile Include="Codegen/Annotations.fs" />
+    <Compile Include="Codegen/Introspection.fs" />
     <Compile Include="Codegen/Validation.fs" />
-    <Compile Include="Codegen/NormalizedSchema.fs" />
-    <Compile Include="Codegen/NormalizedTypeGenerator.fs" />
-    <Compile Include="Codegen/NormalizedQueryGenerator/Common.fs" />
-    <Compile Include="Codegen/NormalizedQueryGenerator/InsertSelect.fs" />
-    <Compile Include="Codegen/NormalizedQueryGenerator/UpdateDelete.fs" />
-    <Compile Include="Codegen/NormalizedQueryGenerator/QueryExtensions.fs" />
-    <Compile Include="Codegen/NormalizedQueryGenerator/Generate.fs" />
-    <Compile Include="Codegen/NormalizedQueryGenerator.fs" />
-    <Compile Include="Codegen/QueryGenerator/Common.fs" />
-    <Compile Include="Codegen/QueryGenerator/TableCrud.fs" />
-    <Compile Include="Codegen/QueryGenerator/TableQueryExtensions.fs" />
-    <Compile Include="Codegen/QueryGenerator/TableGenerate.fs" />
-    <Compile Include="Codegen/QueryGenerator/ViewQueries.fs" />
-    <Compile Include="Codegen/QueryGenerator/ViewGenerate.fs" />
-    <Compile Include="Codegen/QueryGenerator.fs" />
-    <Compile Include="Codegen/Helpers.fs" />
-    <Compile Include="Generated.fs" />
-    <Compile Include="Codegen/Generation.fs" />
-    <Compile Include="Codegen/Inputs.fs" />
-    <Compile Include="Codegen/Execution.fs" />
-    <Compile Include="Init/SchemaInit.fs" />
-    <Compile Include="Init/Execution.fs" />
-    <Compile Include="Migrate/Discovery.fs" />
-    <Compile Include="Migrate/Planning.fs" />
-    <Compile Include="Migrate/DataCopy.fs" />
-    <Compile Include="Migrate/Archive.fs" />
-    <Compile Include="Migrate/Execution.fs" />
-    <Compile Include="Plan/Discovery.fs" />
-    <Compile Include="Plan/Reporting.fs" />
-    <Compile Include="Status/Execution.fs" />
-    <Compile Include="Reset/Execution.fs" />
-    <Compile Include="MigProject.fs" />
+    <Compile Include="Codegen/Emit.fs" />
+    <Compile Include="Codegen/Generate.fs" />
+    <Compile Include="MigLib.fs" />
     <Content Include="../../README.md" Pack="true" PackagePath="\" />
     <Content Include="../../images/logo.png" Pack="true" PackagePath="\" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Fabulous.AST" />
-    <PackageReference Include="Fantomas.Core" />
+    <PackageReference Include="dbup-core" />
+    <PackageReference Include="dbup-sqlite" />
     <PackageReference Include="FSharp.Core" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
   </ItemGroup>

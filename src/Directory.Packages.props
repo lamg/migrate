@@ -1,14 +1,20 @@
 <Project>
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- Pin transitive SQLitePCLRaw above vulnerable 2.1.10/2.1.11 (GHSA-2m69-gcr7-jv3q). -->
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="Argu" Version="6.2.4" />
-    <PackageVersion Include="Fabulous.AST" Version="2.0.0-pre06" />
-    <PackageVersion Include="Fantomas.Core" Version="7.0.1" />
+    <PackageVersion Include="dbup-core" Version="6.0.15" />
+    <PackageVersion Include="dbup-sqlite" Version="6.0.4" />
     <PackageVersion Include="FSharp.Core" Version="10.0.104" />
-    <PackageVersion Include="FSharp.Compiler.Service" Version="43.10.100" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+    <!-- Microsoft.Data.Sqlite still requests 2.1.10; pin the e_sqlite3 stack to the fixed line. -->
+    <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
+    <PackageVersion Include="SQLitePCLRaw.core" Version="2.1.12" />
+    <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
+    <PackageVersion Include="SQLitePCLRaw.provider.e_sqlite3" Version="2.1.12" />
     <PackageVersion Include="xunit" Version="2.9.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />

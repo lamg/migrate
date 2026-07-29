@@ -1,21 +1,20 @@
 namespace MigLib
 
-open System
-open Microsoft.Data.Sqlite
+module Sqlite =
+  open System
+  open Microsoft.Data.Sqlite
 
-/// Controls whether MigLib changes SQLite's journal mode when opening
-/// transaction connections.
-type SqliteJournalMode =
-  | Preserve
-  | Wal
-  | Delete
+  /// Controls whether MigLib changes SQLite's journal mode when opening
+  /// transaction connections.
+  type SqliteJournalMode =
+    | Preserve
+    | Wal
+    | Delete
 
-/// Controls how MigLib opens SQLite transaction connections.
-type SqliteTransactionMode =
-  | ReadWrite
-  | ReadOnly
-
-module internal Sqlite =
+  /// Controls how MigLib opens SQLite transaction connections.
+  type SqliteTransactionMode =
+    | ReadWrite
+    | ReadOnly
 
   let private sqliteInitialized = lazy (SQLitePCL.Batteries_V2.Init())
 
@@ -49,6 +48,7 @@ module internal Sqlite =
     | Some timeout -> builder.DefaultTimeout <- timeoutSeconds timeout
     | None -> ()
 
+    builder.ForeignKeys <- true
     builder.ConnectionString
 
   let private applyJournalMode (connection: SqliteConnection) journalMode =
@@ -87,4 +87,7 @@ module internal Sqlite =
   let openConnection (dbPath: string) =
     openConnectionWithConfig defaultConnectionConfig dbPath
 
-  let createCommand (connection: SqliteConnection) (tx: SqliteTransaction) sql = new SqliteCommand(sql, connection, tx)
+  /// Connection string suitable for DbUp and app startup (read-write, foreign keys on).
+  let publicConnectionString (dbPath: string) =
+    connectionString defaultConnectionConfig dbPath
+

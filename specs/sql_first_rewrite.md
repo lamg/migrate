@@ -1,6 +1,6 @@
 # SQL-first Migrate Rewrite
 
-Status: design agreed (branch `rewrite/sql-first-dbup`)
+Status: implemented on branch `rewrite/sql-first-dbup` (v10 greenfield)
 
 ## Goal
 
@@ -27,8 +27,8 @@ First dogfood consumer: **marketbot** (replace SqlProvider stores).
 ```
 User app
   Migrations/*.sql          -- DbUp scripts + -- mig: annotations
-  Generated.fs              -- one file from codegen
-  (hand-written stores)     -- domain code using generated modules
+  Stores/*.fs               -- one generated module file per relation
+  (hand-written companions) -- co-located helpers next to generated modules
   startup / build.fsx       -- MigLib.codegen + MigLib.migrate helpers
 
 mig codegen  (CLI and MigLib public API)
@@ -36,7 +36,7 @@ mig codegen  (CLI and MigLib public API)
   2. Apply via DbUp to temporary or in-memory SQLite
   3. Introspect tables/views/columns/PKs (PRAGMA / catalog)
   4. Scan scripts for `-- mig:` annotation lines only
-  5. Emit one Generated.fs depending on MigLib helpers
+  5. Emit one .fs file per annotated relation into --output directory
 
 MigLib
   - DbTxnBuilder / TxnStep / readOnlyDbTxn (current model)
@@ -122,7 +122,7 @@ Overrides (one annotation per column, before the relation):
 
 v1 override set: `bool`, `int`, `uint`, `int64`, `datetime`.
 
-Nullability always comes from the schema (NOT NULL vs NULL), not from the override.
+Nullability comes from the schema (NOT NULL vs NULL) for **tables**. SQLite’s `PRAGMA table_info` always reports view columns as nullable, so **view columns are treated as non-null** in codegen (matching apps that forbid SQL NULLs in projections). Overrides do not change nullability.
 
 ### Ops catalog (v1)
 
@@ -131,13 +131,17 @@ Comma-separated on `-- mig:ops ...`. Only catalogued ops; no free-form SQL.
 | Op | Meaning | Generated shape (illustrative) | Tables | Views |
 |----|---------|--------------------------------|--------|-------|
 | `insert` | INSERT; omit autoincrement columns from input; return rowid when applicable | `Relation.insert : InsertInput -> TxnStep<...>` | yes | **no** |
+| `insert_many` | batch `insert` over a sequence | `Relation.insertMany : InsertInput seq -> TxnStep<unit>` | yes | **no** |
 | `insert_or_ignore` | INSERT OR IGNORE | `Relation.insertOrIgnore : ...` | yes | **no** |
 | `upsert` | INSERT ON CONFLICT DO UPDATE; conflict target = **primary key only** | `Relation.upsert : ...` | yes | **no** |
+| `upsert_many` | batch `upsert` over a sequence | `Relation.upsertMany : Row seq -> TxnStep<unit>` | yes | **no** |
 | `select_all` | SELECT all columns of relation | `Relation.selectAll : TxnStep<Row list>` | yes | yes |
 | `select_by_id` | SELECT by single-column PK | `Relation.selectById : pk -> TxnStep<Row option>` | yes | yes* |
 | `select_by(col,...)` | SELECT WHERE equality on listed columns | `Relation.selectByEmail : ... -> TxnStep<Row list>` | yes | yes |
 | `select_one_by(col,...)` | same, single row option | `Relation.selectOneByEmail : ... -> TxnStep<Row option>` | yes | yes |
 | `select_like(col)` | WHERE col LIKE @pattern | `Relation.selectNameLike : string -> TxnStep<Row list>` | yes | yes |
+| `select_top(col, n)` | ORDER BY col DESC LIMIT n (`n` compile-time positive int) | `Relation.selectTopCreatedAt200 : TxnStep<Row list>` | yes | yes |
+| `select_bottom(col, n)` | ORDER BY col ASC LIMIT n | `Relation.selectBottomCreatedAt200 : TxnStep<Row list>` | yes | yes |
 | `delete_by_id` | DELETE by single-column PK | `Relation.deleteById : pk -> TxnStep<int>` | yes | **no** |
 | `delete_by(col,...)` | DELETE WHERE equality | `Relation.deleteByEmail : ... -> TxnStep<int>` | yes | **no** |
 | `delete_all` | DELETE all rows | `Relation.deleteAll : TxnStep<int>` | yes | **no** |
@@ -150,7 +154,7 @@ Notes:
 - `upsert` conflict target is the **primary key only** in v1 (no `upsert_on` yet).
 - `select_by` returns **list**; use `select_one_by` when a unique row is expected.
 - No custom SQL fragments in v1. Express filtered projections as **views**, then annotate with read ops.
-- Order-by / limit are not in the v1 catalog.
+- `select_top` / `select_bottom` bake the limit into the generated member (`select_top(created_at, 200)` → `selectTopCreatedAt200`); the limit is not a runtime argument.
 
 **Insert inputs:** omit **only autoincrement columns**. Do **not** omit columns that merely have SQL `DEFAULT` values; callers must supply them.
 
@@ -158,7 +162,7 @@ Naming of generated members: PascalCase F# from snake_case columns and op names 
 
 ## Codegen pipeline
 
-1. **Inputs**: migrations directory, output path (`Generated.fs`), root namespace (`--namespace` / API param).
+1. **Inputs**: migrations directory, **output directory**, root namespace (`--namespace` / API param).
 2. **Apply scripts**: DbUp against a temporary file DB or `:memory:` SQLite (whichever works cleanly with DbUp + Microsoft.Data.Sqlite).
 3. **Introspect**: list tables and views; for each, columns, types, nullability, PK columns, autoincrement.
 4. **Annotation scan** (minimal text scan, not a SQL parser):
@@ -167,10 +171,11 @@ Naming of generated members: PascalCase F# from snake_case columns and op names 
    - Associate them with the next `CREATE TABLE` / `CREATE VIEW` relation name (light tokenization of the statement head only).
    - Validate: annotated relation exists; override columns exist; ops allowed for table vs view; PK present where required.
 5. **Emit F#**:
-   - **One file**: `Generated.fs` (path configurable).
-   - Nested modules under the configured root namespace; one module per annotated relation.
+   - **One file per annotated relation**: `{Name}.fs` in the output directory (`module {namespace}.{Name}`).
+   - No monolithic `Generated.fs` and no thin facade that only re-exports generated types.
    - Row type + op functions only for that relation’s ops.
    - Generated code calls **MigLib** shared helpers.
+   - Stale auto-generated `.fs` files (header `// <auto-generated />`) for removed relations are deleted; hand-written files are left alone.
 6. **No Fantomas** in the tool.
 
 Annotation association scans SQL **text for comments and relation names**. Full DDL parsing is avoided by relying on the live schema after DbUp.
@@ -253,12 +258,12 @@ Logging defaults quiet; errors as `Result`.
 
 | Command | Role |
 |---------|------|
-| `mig codegen` | Apply migrations to temp DB, introspect, read annotations, emit one `Generated.fs` |
+| `mig codegen` | Apply migrations to temp DB, introspect, read annotations, emit one `.fs` module per relation |
 
 Flags (minimum):
 
 - migrations directory
-- `--output` path (default or required: `Generated.fs`)
+- `--output` directory (one `{Name}.fs` per relation)
 - `--namespace` root F# namespace
 
 Out of scope for now: `mig migrate`, `mig status`, `mig init`, `mig plan`, `mig reset`. Migration is done from the app or `build.fsx` via MigLib public functions.
@@ -273,7 +278,7 @@ Out of scope for now: `mig migrate`, `mig status`, `mig init`, `mig plan`, `mig 
 ## End-to-end story
 
 1. Author `Migrations/001_....sql` with `CREATE TABLE` / `CREATE VIEW` and `-- mig:` lines.
-2. From CLI or `build.fsx`: run codegen → one `Generated.fs` under the chosen namespace.
+2. From CLI or `build.fsx`: run codegen → one `{Name}.fs` per relation under the output directory / namespace.
 3. At app startup (or script): call MigLib DbUp helper.
 4. Domain code uses `dbTxn` + generated ops; complex filters live as annotated views (read ops only).
 
@@ -294,7 +299,7 @@ Out of scope for now: `mig migrate`, `mig status`, `mig init`, `mig plan`, `mig 
 - Naming: snake_case → PascalCase; SQL ident → type name unless `-- mig:rel Name`.
 - Insert inputs: omit **autoincrement only**; keep columns with defaults.
 - Upsert: **PK-only** conflict target.
-- Output: **one** `Generated.fs`; `--namespace` on CLI; **public codegen + migrate APIs** in MigLib for `build.fsx`.
+- Output: **one file per relation** in an output directory (`module {namespace}.{Name}`); `--namespace` on CLI; **public codegen + migrate APIs** in MigLib for `build.fsx`.
 - Views: **read ops only**; write ops refused at codegen.
 - LINQ deferred.
 - Transactions: current MigLib model.

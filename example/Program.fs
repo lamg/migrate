@@ -1,74 +1,44 @@
-module Program
+module Example.Program
 
 open System
 open System.IO
+open System.Reflection
 open System.Threading.Tasks
-
 open MigLib
-open MigLib.TaskResult
-open MigLib.Types
+open Example.Db
 
-open ExampleApp
-
-let printStudents (label: string) (students: Db.Student list) =
-  printfn $"{label}"
-
-  students
-  |> List.iter (fun student -> printfn $"  id={student.Id} name={student.Name} age={student.Age}")
-
-let reportProgress (message: string) =
-  task {
-    printfn $"{message}"
-    return ()
-  }
-
-let studentOperations (db: DbTxnBuilder) : Task<Result<unit, MigError>> =
-  db {
-    let! existingStudents = Db.Student.SelectAll
-    printStudents "Existing rows in the current database:" existingStudents
-
-    let! insertedId = Db.Student.InsertOrIgnore(Db.NewStudent.Base("Carol", 25L))
-
-    match insertedId with
-    | Some id ->
-      printfn $"Inserted Carol with generated id {id}"
-
-      do! Db.Student.Update(Db.Student.Base(id, "Carol", 26L))
-    | None -> printfn "Carol update: Carol already exists, ignoring"
-
-    let! carol = Db.Student.SelectByName "Carol"
-    let! fuzzyMatch = Db.Student.SelectNameLike "ar"
-
-    let! ensuredStudent =
-      Db.Student.SelectByNameOrInsert(Db.NewStudent.Base("Dora", 19L))
-
-    let! allStudents = Db.Student.SelectAll
-
-    printStudents "Rows returned by generated Student.SelectByName \"Carol\":" carol
-    printStudents "Rows returned by generated Student.SelectNameLike \"ar\":" fuzzyMatch
-
-    printfn $"SelectByNameOrInsert returned: id={ensuredStudent.Id} name={ensuredStudent.Name} age={ensuredStudent.Age}"
-
-    printStudents "All students after generated CRUD operations:" allStudents
-    do! Db.Student.DeleteAdult(21)
-    return ()
-  }
-
+let private await (t: Task<'a>) = t.GetAwaiter().GetResult()
 
 [<EntryPoint>]
 let main _ =
-  let result =
-    taskResult {
-      let! proj =
-        MigProject.Mig.resolveFromGeneratedSchema __SOURCE_DIRECTORY__ None Db.GeneratedSchema
+  let dbPath = Path.Combine(Path.GetTempPath(), $"example-{Guid.NewGuid():N}.sqlite")
 
-      let! migRes = MigProject.Mig.migrate reportProgress proj
-      do! studentOperations migRes.db
-      return ()
-    }
-
-  match result.Result with
-  | Ok() -> 0
+  match await (migrateEmbedded dbPath (Assembly.GetExecutingAssembly())) with
   | Error e ->
-    eprintfn $"failed: {e}"
+    eprintfn "migrate failed: %s" e
     1
+  | Ok() ->
+    match
+      await (
+        dbTxn dbPath {
+          let! id =
+            Student.insert
+              { Name = "Ada"
+                Age = 36L }
+
+          let! byId = Student.selectById id
+          let! byName = Student.selectOneByName "Ada"
+          let! all = Student.selectAll
+          return id, byId, byName, all.Length
+        }
+      )
+    with
+    | Error e ->
+      eprintfn "txn failed: %A" e
+      1
+    | Ok(id, Some row, Some _, count) ->
+      printfn "ok id=%d name=%s age=%d count=%d" id row.Name row.Age count
+      0
+    | Ok _ ->
+      eprintfn "unexpected query result"
+      1
