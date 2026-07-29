@@ -40,6 +40,8 @@ module internal Types =
     | SelectById
     | SelectBy of columns: string list
     | SelectOneBy of columns: string list
+    /// SELECT by columns; INSERT insert-input and re-select when missing. Tables only.
+    | SelectByOrInsert of columns: string list
     | SelectLike of column: string
     /// ORDER BY column DESC LIMIT n
     | SelectTop of column: string * limit: int
@@ -56,6 +58,7 @@ module internal Types =
       | InsertMany
       | Upsert
       | UpsertMany
+      | SelectByOrInsert _
       | DeleteById
       | DeleteBy _
       | DeleteAll -> true

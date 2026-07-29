@@ -67,6 +67,59 @@ CREATE TABLE app_user (
       Assert.Contains("DateTimeOffset", source))
 
 [<Fact>]
+let ``generate emits select_by_or_insert`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+-- mig:ops select_by_or_insert(username), select_by_id
+CREATE TABLE app_user (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Error e -> Assert.Fail e
+    | Ok _ ->
+      let source = File.ReadAllText(Path.Combine(output, "AppUser.fs"))
+      Assert.Contains("let selectByUsernameOrInsert (row: AppUserInsert) : TxnStep<AppUser> =", source)
+      Assert.Contains("type AppUserInsert =", source)
+      Assert.Contains("INSERT INTO [app_user]", source)
+      Assert.Contains("WHERE [username] = @username LIMIT 1", source)
+      Assert.Contains("select_by_or_insert failed to load inserted row", source))
+
+[<Fact>]
+let ``generate refuses select_by_or_insert on views`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+CREATE TABLE app_user (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL
+) STRICT;
+
+-- mig:ops select_by_or_insert(username)
+CREATE VIEW active_user AS SELECT id, username FROM app_user;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Ok _ -> Assert.Fail "expected write op on view to fail"
+    | Error e -> Assert.Contains("write op not allowed on view", e))
+
+[<Fact>]
 let ``generate emits select_top and select_bottom`` () =
   withTempDir (fun dir ->
     let migrations = Path.Combine(dir, "migrations")

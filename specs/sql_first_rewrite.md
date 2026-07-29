@@ -141,6 +141,7 @@ Comma-separated on `-- mig:ops ...`. Only catalogued ops; no free-form SQL.
 | `select_by_id` | SELECT by single-column PK | `Relation.selectById : pk -> TxnStep<Row option>` | yes | yes* |
 | `select_by(col,...)` | SELECT WHERE equality on listed columns | `Relation.selectByEmail : ... -> TxnStep<Row list>` | yes | yes |
 | `select_one_by(col,...)` | same, single row option | `Relation.selectOneByEmail : ... -> TxnStep<Row option>` | yes | yes |
+| `select_by_or_insert(col,...)` | SELECT by equality; if missing INSERT insert-input and re-select | `Relation.selectByEmailOrInsert : InsertInput -> TxnStep<Row>` | yes | **no** |
 | `select_like(col)` | WHERE col LIKE @pattern | `Relation.selectNameLike : string -> TxnStep<Row list>` | yes | yes |
 | `select_top(col, n)` | ORDER BY col DESC LIMIT n (`n` compile-time positive int) | `Relation.selectTopCreatedAt200 : TxnStep<Row list>` | yes | yes |
 | `select_bottom(col, n)` | ORDER BY col ASC LIMIT n | `Relation.selectBottomCreatedAt200 : TxnStep<Row list>` | yes | yes |
@@ -155,6 +156,7 @@ Notes:
 - Composite primary keys: `select_by_id` / `delete_by_id` are invalid; use `select_by(a,b)` / `delete_by(a,b)`.
 - `upsert` conflict target is the **primary key only** in v1 (no `upsert_on` yet).
 - `select_by` returns **list**; use `select_one_by` when a unique row is expected.
+- `select_by_or_insert` takes the same insert input as `insert` (autoincrement columns omitted), selects by the listed columns using values from that input, inserts when no row matches, then re-selects by those columns and returns the full row. Prefer a UNIQUE constraint on the key columns.
 - No custom SQL fragments in v1. Express filtered projections as **views**, then annotate with read ops.
 - `select_top` / `select_bottom` bake the limit into the generated member (`select_top(created_at, 200)` → `selectTopCreatedAt200`); the limit is not a runtime argument.
 

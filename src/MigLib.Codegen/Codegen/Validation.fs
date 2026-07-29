@@ -41,6 +41,7 @@ module internal Validation =
       | _ -> Ok()
     | _, Op.SelectBy cols
     | _, Op.SelectOneBy cols
+    | _, Op.SelectByOrInsert cols
     | _, Op.DeleteBy cols -> requireColumns cols
     | _, Op.SelectLike col -> requireColumns [ col ]
     | _, Op.SelectTop(col, limit)
@@ -93,6 +94,7 @@ module internal Validation =
     match op with
     | Op.SelectBy cols -> mapCols cols |> Result.map Op.SelectBy
     | Op.SelectOneBy cols -> mapCols cols |> Result.map Op.SelectOneBy
+    | Op.SelectByOrInsert cols -> mapCols cols |> Result.map Op.SelectByOrInsert
     | Op.DeleteBy cols -> mapCols cols |> Result.map Op.DeleteBy
     | Op.SelectLike col ->
       match resolveColumnName rel col with

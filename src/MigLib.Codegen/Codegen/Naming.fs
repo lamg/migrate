@@ -133,6 +133,11 @@ module internal Naming =
 
     "selectOneBy" + suffix
 
+  let selectByOrInsertMemberName (columns: string list) =
+    let suffix = columns |> List.map toPascalCase |> String.concat ""
+
+    "selectBy" + suffix + "OrInsert"
+
   let deleteByMemberName (columns: string list) =
     let suffix = columns |> List.map toPascalCase |> String.concat ""
 

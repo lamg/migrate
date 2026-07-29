@@ -97,8 +97,9 @@ module internal Introspection =
         c.pkOrdinal > 0
         && affinity c.declaredType = "INTEGER")
 
-    // SQLite: single INTEGER PRIMARY KEY is a rowid alias; with AUTOINCREMENT keyword treat as autoincrement.
-    // We treat sole INTEGER PK as autoincrement for insert omission (common pattern).
+    // Only omit columns from insert inputs when the CREATE TABLE uses AUTOINCREMENT.
+    // Sole INTEGER PRIMARY KEY without AUTOINCREMENT is still a rowid alias in SQLite,
+    // but apps often supply application-assigned keys (e.g. telegram chat_id).
     let soleIntegerPk =
       match integerPkColumns with
       | [ c ] when cols |> List.filter (fun x -> x.pkOrdinal > 0) |> List.length = 1 -> Some c.name
@@ -108,9 +109,7 @@ module internal Introspection =
     |> List.map (fun c ->
       let isAuto =
         match soleIntegerPk with
-        | Some pkName when c.name = pkName ->
-          // Prefer AUTOINCREMENT when present; still omit sole INTEGER PK either way for insert convenience.
-          true || autoIncInSql
+        | Some pkName when c.name = pkName -> autoIncInSql
         | _ -> false
 
       { c with isAutoIncrement = isAuto })

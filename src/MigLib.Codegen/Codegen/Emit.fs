@@ -319,6 +319,75 @@ module internal Emit =
 
     sb.AppendLine() |> ignore
 
+  /// Select by equality columns; when missing, insert the provided row and re-select.
+  /// Takes the insert input type (autoincrement columns omitted) and returns the full row.
+  let private emitSelectByOrInsert
+    (sb: StringBuilder)
+    (rel: AnnotatedRelation)
+    (rowType: string)
+    (insertType: string)
+    (insertCols: ColumnInfo list)
+    (cols: string list)
+    (fieldBoxMap: Map<string, string * (string -> string)>)
+    =
+    let where =
+      cols
+      |> List.map (fun c -> $"{Naming.quoteSqlIdent c} = {Naming.paramName c}")
+      |> String.concat " AND "
+
+    let selectSql =
+      $"SELECT {columnSelectList rel} FROM {Naming.quoteSqlIdent rel.sqlName} WHERE {where} LIMIT 1"
+
+    let colSql =
+      insertCols
+      |> List.map (fun c -> Naming.quoteSqlIdent c.name)
+      |> String.concat ", "
+
+    let paramSql =
+      insertCols |> List.map (fun c -> Naming.paramName c.name) |> String.concat ", "
+
+    let insertSql =
+      $"INSERT INTO {Naming.quoteSqlIdent rel.sqlName} ({colSql}) VALUES ({paramSql})"
+
+    let memberName = selectByOrInsertMemberName cols
+
+    sb.AppendLine $"let {memberName} (row: {insertType}) : TxnStep<{rowType}> ="
+    |> ignore
+
+    sb.AppendLine "  txn {" |> ignore
+    sb.AppendLine "    let selectParameters =" |> ignore
+    sb.AppendLine "      [" |> ignore
+
+    for c in cols do
+      let fieldName, boxFn = fieldBoxMap[c]
+      let boxed = boxFn $"row.{fieldName}"
+      sb.AppendLine $"        \"{Naming.paramName c}\", {boxed}" |> ignore
+
+    sb.AppendLine "      ]" |> ignore
+    sb.AppendLine $"    match! Query.queryOne {sqlLit selectSql} selectParameters mapRow with"
+    |> ignore
+    sb.AppendLine "    | Some existing -> return existing" |> ignore
+    sb.AppendLine "    | None ->" |> ignore
+    sb.AppendLine "      let insertParameters =" |> ignore
+    sb.AppendLine "        [" |> ignore
+
+    for col in insertCols do
+      let fieldName, boxFn = fieldBoxMap[col.name]
+      let boxed = boxFn $"row.{fieldName}"
+      sb.AppendLine $"          \"{Naming.paramName col.name}\", {boxed}" |> ignore
+
+    sb.AppendLine "        ]" |> ignore
+    sb.AppendLine $"      do! Query.exec {sqlLit insertSql} insertParameters |> TxnStep.map ignore"
+    |> ignore
+    sb.AppendLine $"      match! Query.queryOne {sqlLit selectSql} selectParameters mapRow with"
+    |> ignore
+    sb.AppendLine "      | Some created -> return created" |> ignore
+    sb.AppendLine
+      "      | None -> return! (fun _ -> Task.FromResult(Error(SqliteException(\"select_by_or_insert failed to load inserted row\", 0))))"
+    |> ignore
+    sb.AppendLine "  }" |> ignore
+    sb.AppendLine() |> ignore
+
   let private emitSelectLike (sb: StringBuilder) (rel: AnnotatedRelation) (rowType: string) (column: string) =
     let sql =
       $"SELECT {columnSelectList rel} FROM {Naming.quoteSqlIdent rel.sqlName} WHERE {Naming.quoteSqlIdent column} LIKE {Naming.paramName column}"
@@ -454,7 +523,8 @@ module internal Emit =
       |> List.exists (function
         | Op.Insert
         | Op.InsertOrIgnore
-        | Op.InsertMany -> true
+        | Op.InsertMany
+        | Op.SelectByOrInsert _ -> true
         | _ -> false)
 
     let insertCols = rel.columns |> List.filter (fun c -> not c.isAutoIncrement)
@@ -508,6 +578,8 @@ module internal Emit =
         | _ -> ()
       | Op.SelectBy cols -> emitSelectBy sb rel rowType cols false colTypeMap
       | Op.SelectOneBy cols -> emitSelectBy sb rel rowType cols true colTypeMap
+      | Op.SelectByOrInsert cols ->
+        emitSelectByOrInsert sb rel rowType insertTypeName insertCols cols fieldBoxMap
       | Op.SelectLike col -> emitSelectLike sb rel rowType col
       | Op.SelectTop(col, limit) -> emitSelectTopOrBottom sb rel rowType col limit true
       | Op.SelectBottom(col, limit) -> emitSelectTopOrBottom sb rel rowType col limit false
@@ -547,6 +619,7 @@ module internal Emit =
     sb.AppendLine $"module {moduleName}" |> ignore
     sb.AppendLine() |> ignore
     sb.AppendLine "open System" |> ignore
+    sb.AppendLine "open System.Threading.Tasks" |> ignore
     sb.AppendLine "open Microsoft.Data.Sqlite" |> ignore
     sb.AppendLine "open MigLib" |> ignore
     sb.AppendLine "open MigLib.Query" |> ignore

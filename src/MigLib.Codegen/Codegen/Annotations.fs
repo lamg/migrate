@@ -71,6 +71,10 @@ module internal Annotations =
     | "select_by_id" -> Ok Op.SelectById
     | "delete_by_id" -> Ok Op.DeleteById
     | "delete_all" -> Ok Op.DeleteAll
+    | _ when lower.StartsWith "select_by_or_insert(" ->
+      match parseParenArgs "select_by_or_insert" with
+      | Some cols when cols.Length > 0 -> Ok(Op.SelectByOrInsert cols)
+      | _ -> Error $"invalid select_by_or_insert op: {text}"
     | _ when lower.StartsWith "select_by(" ->
       match parseParenArgs "select_by" with
       | Some cols when cols.Length > 0 -> Ok(Op.SelectBy cols)
