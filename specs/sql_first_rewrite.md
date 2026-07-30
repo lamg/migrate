@@ -145,7 +145,7 @@ Comma-separated on `-- mig:ops ...`. Only catalogued ops; no free-form SQL.
 | `select_like(col)` | WHERE col LIKE @pattern | `Relation.selectNameLike : string -> TxnStep<Row list>` | yes | yes |
 | `select_top(col, n)` | ORDER BY col DESC LIMIT n (`n` compile-time positive int) | `Relation.selectTopCreatedAt200 : TxnStep<Row list>` | yes | yes |
 | `select_bottom(col, n)` | ORDER BY col ASC LIMIT n | `Relation.selectBottomCreatedAt200 : TxnStep<Row list>` | yes | yes |
-| `select_range(col [asc\|desc], …)` | ORDER BY listed columns; slice `[start, end_exclusive)` at runtime | `Relation.selectRangeCreatedAtDescId : int -> int -> TxnStep<Row list>` | yes | yes |
+| `select_range(col [asc\|desc], …)` | ORDER BY listed columns; runtime `skip`/`take` (OFFSET/LIMIT) | `Relation.selectRangeCreatedAtDescId : int -> int -> TxnStep<Row list>` | yes | yes |
 | `select_with(arg, …)` | Parameterized view SELECT; markers `/*@arg*/literal` in view body rewritten to bind params | `Relation.selectWith : … -> TxnStep<Row list>` | **no** | yes |
 | `delete_by_id` | DELETE by single-column PK | `Relation.deleteById : pk -> TxnStep<int>` | yes | **no** |
 | `delete_by(col,...)` | DELETE WHERE equality | `Relation.deleteByEmail : ... -> TxnStep<int>` | yes | **no** |
@@ -161,7 +161,7 @@ Notes:
 - `select_by_or_insert` takes the same insert input as `insert` (autoincrement columns omitted), selects by the listed columns using values from that input, inserts when no row matches, then re-selects by those columns and returns the full row. Prefer a UNIQUE constraint on the key columns.
 - No custom SQL fragments in v1. Express filtered projections as **views**, then annotate with read ops.
 - `select_top` / `select_bottom` bake the limit into the generated member (`select_top(created_at, 200)` → `selectTopCreatedAt200`); the limit is not a runtime argument.
-- `select_range` takes order columns (and optional `asc`/`desc` per column; default `asc`) in the annotation; `start` and `end_exclusive` are runtime `int` args. Generated SQL uses `LIMIT @limit OFFSET @offset` with `limit = max 0 (endExclusive - start)`. Member names include `Desc` only for descending columns (`select_range(created_at desc, id)` → `selectRangeCreatedAtDescId`).
+- `select_range` takes order columns (and optional `asc`/`desc` per column; default `asc`) in the annotation; `skip` and `take` are runtime `int` args mapped to `OFFSET` / `LIMIT` (`limit = max 0 take`). Member names include `Desc` only for descending columns (`select_range(created_at desc, id)` → `selectRangeCreatedAtDescId`).
 - `select_with` is **views only**. SQLite forbids bind parameters in `CREATE VIEW`, so arguments are authored as markers plus dummy literals: `/*@min_age*/0`. Codegen rewrites the view’s SELECT body to `@min_age` and emits `selectWith` with those F# parameters (not `SELECT * FROM the_view`). Arg types: `-- mig:int64 min_age` (etc.) on the annotation block, or inferred from the dummy literal (`0` → `int64`, `1.0` → `float`, `'…'` → `string`). Raw SQL against the physical view uses the dummy literals. At most one `select_with` per relation.
 
 **Insert inputs:** omit **only autoincrement columns**. Do **not** omit columns that merely have SQL `DEFAULT` values; callers must supply them.

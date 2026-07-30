@@ -171,12 +171,10 @@ CREATE TABLE event_log (
     | Ok _ ->
       let source = File.ReadAllText(Path.Combine(output, "EventLog.fs"))
 
-      Assert.Contains(
-        "let selectRangeCreatedAtDescId (start: int) (endExclusive: int) : TxnStep<EventLog list> =",
-        source
-      )
+      Assert.Contains("let selectRangeCreatedAtDescId (skip: int) (take: int) : TxnStep<EventLog list> =", source)
 
-      Assert.Contains("let limit = max 0 (endExclusive - start)", source)
+      Assert.Contains("let limit = max 0 take", source)
+      Assert.Contains("\"@offset\", box skip", source)
 
       Assert.Contains("ORDER BY [created_at] DESC, [id] ASC LIMIT @limit OFFSET @offset", source))
 
@@ -207,10 +205,7 @@ CREATE VIEW recent_event AS
     | Ok _ ->
       let source = File.ReadAllText(Path.Combine(output, "RecentEvent.fs"))
 
-      Assert.Contains(
-        "let selectRangeCreatedAt (start: int) (endExclusive: int) : TxnStep<RecentEvent list> =",
-        source
-      )
+      Assert.Contains("let selectRangeCreatedAt (skip: int) (take: int) : TxnStep<RecentEvent list> =", source)
 
       Assert.Contains("ORDER BY [created_at] ASC LIMIT @limit OFFSET @offset", source))
 

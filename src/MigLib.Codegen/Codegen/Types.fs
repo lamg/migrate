@@ -74,7 +74,7 @@ module internal Types =
     | SelectTop of column: string * limit: int
     /// ORDER BY column ASC LIMIT n
     | SelectBottom of column: string * limit: int
-    /// ORDER BY listed columns; runtime slice [start, end_exclusive)
+    /// ORDER BY listed columns; runtime skip/take (OFFSET/LIMIT)
     | SelectRange of orderBy: (string * SortDirection) list
     /// Parameterized view SELECT; names declared here, markers /*@name*/lit in view body.
     | SelectWith of args: string list

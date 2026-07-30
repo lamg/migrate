@@ -455,12 +455,12 @@ module internal Emit =
 
     let memberName = selectRangeMemberName orderBy
 
-    sb.AppendLine $"let {memberName} (start: int) (endExclusive: int) : TxnStep<{rowType} list> ="
+    sb.AppendLine $"let {memberName} (skip: int) (take: int) : TxnStep<{rowType} list> ="
     |> ignore
 
-    sb.AppendLine "  let limit = max 0 (endExclusive - start)" |> ignore
+    sb.AppendLine "  let limit = max 0 take" |> ignore
 
-    sb.AppendLine "  let parameters = [ \"@offset\", box start; \"@limit\", box limit ]"
+    sb.AppendLine "  let parameters = [ \"@offset\", box skip; \"@limit\", box limit ]"
     |> ignore
 
     sb.AppendLine $"  Query.queryList {sqlLit sql} parameters mapRow" |> ignore
