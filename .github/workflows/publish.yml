@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-          
+
       - name: publish migtool
         run: |
           dotnet publish -c Release
@@ -21,7 +21,7 @@ jobs:
         working-directory: ./src/mig
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-      
+
       - name: publish MigLib
         run: |
           dotnet publish -c Release
@@ -31,12 +31,11 @@ jobs:
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
 
-      - name: publish MigLib.Web
+      - name: publish MigLib.Codegen
         run: |
           dotnet publish -c Release
           dotnet pack
           dotnet nuget push --skip-duplicate nupkg/*.nupkg -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json
-        working-directory: ./src/MigLib.Web
+        working-directory: ./src/MigLib.Codegen
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-          
