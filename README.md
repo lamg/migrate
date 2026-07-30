@@ -22,7 +22,8 @@ There is no F#-first schema DSL, no SqlProvider, no DbUp dependency, and no auto
 
 ```sql
 -- mig:rel User
--- mig:ops insert, select_by(email), select_by_id, upsert
+-- mig:ops insert, select_by(email), select_by_id
+-- mig:ops upsert
 -- mig:bool active
 -- mig:datetime created_at
 CREATE TABLE app_user (
@@ -41,6 +42,7 @@ Rules:
 
 - Unannotated relations generate no F#.
 - Ops are explicit; no ops means no type.
+- Multiple `-- mig:ops` lines on one relation are merged in order (handy for long lists).
 - Views only allow read ops (`select_*`); write ops fail at codegen.
 - `-- mig:rel Name` is optional; otherwise the F# name is derived from the SQL identifier.
 

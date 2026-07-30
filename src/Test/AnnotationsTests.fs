@@ -64,6 +64,37 @@ CREATE VIEW active_user AS SELECT 1 AS id;
         Assert.True anns.Head.fsNameOverride.IsNone)
 
 [<Fact>]
+let ``merges multiple mig ops lines in order`` () =
+  withTempMigrations
+    [ "001.sql",
+      """
+-- mig:rel User
+-- mig:ops insert, select_by_id
+-- mig:ops select_one_by(email), upsert
+-- mig:ops delete_by_id
+-- mig:bool active
+CREATE TABLE app_user (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL,
+  active INTEGER NOT NULL
+) STRICT;
+""" ]
+    (fun dir ->
+      match parseMigrationsDirectory dir with
+      | Error e -> Assert.Fail e
+      | Ok anns ->
+        Assert.Equal(1, anns.Length)
+        let a = anns.Head
+        Assert.Equal(Some "User", a.fsNameOverride)
+        Assert.Equal(5, a.ops.Length)
+
+        match a.ops with
+        | [ Op.Insert; Op.SelectById; Op.SelectOneBy [ "email" ]; Op.Upsert; Op.DeleteById ] -> ()
+        | other -> Assert.Fail $"unexpected ops order: {other}"
+
+        Assert.Contains(a.overrides, fun o -> o.column = "active" && o.kind = ColumnOverrideKind.Bool))
+
+[<Fact>]
 let ``rejects unknown op`` () =
   withTempMigrations
     [ "001.sql",

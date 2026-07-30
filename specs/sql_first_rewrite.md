@@ -67,7 +67,8 @@ One-line SQL comments immediately before a `CREATE TABLE` / `CREATE VIEW` (or th
 
 ```sql
 -- mig:rel User
--- mig:ops insert, select_by(email), select_by_id, upsert
+-- mig:ops insert, select_by(email), select_by_id
+-- mig:ops upsert
 -- mig:bool active
 -- mig:datetime created_at
 CREATE TABLE app_user (
@@ -129,6 +130,8 @@ Nullability comes from the schema (NOT NULL vs NULL) for **tables**. SQLite’s 
 ### Ops catalog (v1)
 
 Comma-separated on `-- mig:ops ...`. Only catalogued ops; no free-form SQL.
+
+**Multiple `-- mig:ops` lines** before the same `CREATE` are allowed and **concatenated in order** (each line is its own non-empty comma-separated list). Use this to keep long op lists readable.
 
 | Op | Meaning | Generated shape (illustrative) | Tables | Views |
 |----|---------|--------------------------------|--------|-------|
