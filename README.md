@@ -134,6 +134,10 @@ cd src && dotnet test
 
 Major version **10** is a greenfield rewrite (SQL-first). Older MigSchema / attribute-based workflows are not supported.
 
+## Further reading
+
+See [documentation/interesting-links.md](documentation/interesting-links.md) for SQLite concurrency, migrations, and related theory links.
+
 [logo]: images/logo_small.png
 [migtool]: https://www.nuget.org/packages/migtool/
 [dotnet-badge]: https://img.shields.io/badge/.NET-10.0-blue
