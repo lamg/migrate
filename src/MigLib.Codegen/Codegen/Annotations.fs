@@ -101,6 +101,58 @@ module internal Annotations =
         | true, limit when limit > 0 -> Ok(Op.SelectBottom(col, limit))
         | _ -> Error $"invalid select_bottom limit (must be positive int): {text}"
       | _ -> Error $"invalid select_bottom op (expected select_bottom(column, n)): {text}"
+    | _ when lower.StartsWith "select_range(" ->
+      let prefix = "select_range("
+
+      if not (text.EndsWith ")") then
+        Error $"invalid select_range op (expected select_range(col [asc|desc], ...)): {text}"
+      else
+        let inner = text.Substring(prefix.Length, text.Length - prefix.Length - 1).Trim()
+
+        if String.IsNullOrWhiteSpace inner then
+          Error $"invalid select_range op (at least one order column required): {text}"
+        else
+          // Split on commas only so "created_at desc" stays one segment.
+          let segments =
+            inner.Split([| ',' |], StringSplitOptions.RemoveEmptyEntries)
+            |> Array.map _.Trim()
+            |> Array.filter (fun s -> s.Length > 0)
+            |> Array.toList
+
+          let parseSegment (seg: string) =
+            let tokens =
+              seg.Split([| ' '; '\t' |], StringSplitOptions.RemoveEmptyEntries)
+              |> Array.toList
+
+            match tokens with
+            | [ col ] -> Ok(col, SortDirection.Asc)
+            | [ col; dir ] ->
+              match dir.ToLowerInvariant() with
+              | "asc" -> Ok(col, SortDirection.Asc)
+              | "desc" -> Ok(col, SortDirection.Desc)
+              | _ -> Error $"invalid select_range direction '{dir}' (expected asc|desc): {text}"
+            | _ -> Error $"invalid select_range order key '{seg}' (expected col [asc|desc]): {text}"
+
+          let parsed = segments |> List.map parseSegment
+
+          let errors =
+            parsed
+            |> List.choose (function
+              | Error e -> Some e
+              | Ok _ -> None)
+
+          if not errors.IsEmpty then
+            Error(String.concat "; " errors)
+          elif parsed.IsEmpty then
+            Error $"invalid select_range op (at least one order column required): {text}"
+          else
+            let orderBy =
+              parsed
+              |> List.choose (function
+                | Ok o -> Some o
+                | Error _ -> None)
+
+            Ok(Op.SelectRange orderBy)
     | _ when lower.StartsWith "delete_by(" ->
       match parseParenArgs "delete_by" with
       | Some cols when cols.Length > 0 -> Ok(Op.DeleteBy cols)

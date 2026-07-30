@@ -30,6 +30,11 @@ module internal Types =
       kind: ColumnOverrideKind }
 
   [<RequireQualifiedAccess>]
+  type SortDirection =
+    | Asc
+    | Desc
+
+  [<RequireQualifiedAccess>]
   type Op =
     | Insert
     | InsertOrIgnore
@@ -47,6 +52,8 @@ module internal Types =
     | SelectTop of column: string * limit: int
     /// ORDER BY column ASC LIMIT n
     | SelectBottom of column: string * limit: int
+    /// ORDER BY listed columns; runtime slice [start, end_exclusive)
+    | SelectRange of orderBy: (string * SortDirection) list
     | DeleteById
     | DeleteBy of columns: string list
     | DeleteAll
@@ -68,7 +75,8 @@ module internal Types =
       | SelectOneBy _
       | SelectLike _
       | SelectTop _
-      | SelectBottom _ -> false
+      | SelectBottom _
+      | SelectRange _ -> false
 
   type RelationAnnotation =
     {

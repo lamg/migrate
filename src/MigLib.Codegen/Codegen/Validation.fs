@@ -50,6 +50,11 @@ module internal Validation =
         Error $"select_top/select_bottom limit must be positive (got {limit}) on '{rel.name}'"
       else
         requireColumns [ col ]
+    | _, Op.SelectRange orderBy ->
+      if orderBy.IsEmpty then
+        Error $"select_range requires at least one order column on '{rel.name}'"
+      else
+        requireColumns (orderBy |> List.map fst)
     | _ -> Ok()
 
   /// Ensure bulk ops also emit their single-row companions.
@@ -108,6 +113,32 @@ module internal Validation =
       match resolveColumnName rel col with
       | Some name -> Ok(Op.SelectBottom(name, limit))
       | None -> Error $"unknown column on '{rel.name}': {col}"
+    | Op.SelectRange orderBy ->
+      let results =
+        orderBy
+        |> List.map (fun (col, dir) ->
+          match resolveColumnName rel col with
+          | Some name -> Ok(name, dir)
+          | None -> Error col)
+
+      let errors =
+        results
+        |> List.choose (function
+          | Error e -> Some e
+          | Ok _ -> None)
+
+      if not errors.IsEmpty then
+        let errorList = String.concat ", " errors
+        Error $"unknown column(s) on '{rel.name}': {errorList}"
+      else
+        Ok(
+          Op.SelectRange(
+            results
+            |> List.choose (function
+              | Ok o -> Some o
+              | Error _ -> None)
+          )
+        )
     | other -> Ok other
 
   let private processAnnotation

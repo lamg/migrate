@@ -148,6 +148,95 @@ CREATE TABLE event_log (
       Assert.Contains("ORDER BY [created_at] ASC LIMIT 10", source))
 
 [<Fact>]
+let ``generate emits select_range`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+-- mig:ops select_range(created_at desc, id)
+CREATE TABLE event_log (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL,
+  body TEXT NOT NULL
+) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Error e -> Assert.Fail e
+    | Ok _ ->
+      let source = File.ReadAllText(Path.Combine(output, "EventLog.fs"))
+
+      Assert.Contains(
+        "let selectRangeCreatedAtDescId (start: int) (endExclusive: int) : TxnStep<EventLog list> =",
+        source
+      )
+
+      Assert.Contains("let limit = max 0 (endExclusive - start)", source)
+
+      Assert.Contains("ORDER BY [created_at] DESC, [id] ASC LIMIT @limit OFFSET @offset", source))
+
+[<Fact>]
+let ``generate emits select_range on views`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+CREATE TABLE event_log (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL,
+  body TEXT NOT NULL
+) STRICT;
+
+-- mig:ops select_range(created_at)
+CREATE VIEW recent_event AS
+  SELECT id, created_at, body FROM event_log;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Error e -> Assert.Fail e
+    | Ok _ ->
+      let source = File.ReadAllText(Path.Combine(output, "RecentEvent.fs"))
+
+      Assert.Contains(
+        "let selectRangeCreatedAt (start: int) (endExclusive: int) : TxnStep<RecentEvent list> =",
+        source
+      )
+
+      Assert.Contains("ORDER BY [created_at] ASC LIMIT @limit OFFSET @offset", source))
+
+[<Fact>]
+let ``generate refuses select_range unknown column`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+-- mig:ops select_range(missing_col)
+CREATE TABLE event_log (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  body TEXT NOT NULL
+) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Ok _ -> Assert.Fail "expected error"
+    | Error e -> Assert.Contains("unknown column", e))
+
+[<Fact>]
 let ``view columns generate non-option field types`` () =
   withTempDir (fun dir ->
     let migrations = Path.Combine(dir, "migrations")

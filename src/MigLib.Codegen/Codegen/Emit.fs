@@ -364,8 +364,10 @@ module internal Emit =
       sb.AppendLine $"        \"{Naming.paramName c}\", {boxed}" |> ignore
 
     sb.AppendLine "      ]" |> ignore
+
     sb.AppendLine $"    match! Query.queryOne {sqlLit selectSql} selectParameters mapRow with"
     |> ignore
+
     sb.AppendLine "    | Some existing -> return existing" |> ignore
     sb.AppendLine "    | None ->" |> ignore
     sb.AppendLine "      let insertParameters =" |> ignore
@@ -377,14 +379,19 @@ module internal Emit =
       sb.AppendLine $"          \"{Naming.paramName col.name}\", {boxed}" |> ignore
 
     sb.AppendLine "        ]" |> ignore
+
     sb.AppendLine $"      do! Query.exec {sqlLit insertSql} insertParameters |> TxnStep.map ignore"
     |> ignore
+
     sb.AppendLine $"      match! Query.queryOne {sqlLit selectSql} selectParameters mapRow with"
     |> ignore
+
     sb.AppendLine "      | Some created -> return created" |> ignore
+
     sb.AppendLine
       "      | None -> return! (fun _ -> Task.FromResult(Error(SqliteException(\"select_by_or_insert failed to load inserted row\", 0))))"
     |> ignore
+
     sb.AppendLine "  }" |> ignore
     sb.AppendLine() |> ignore
 
@@ -424,6 +431,39 @@ module internal Emit =
 
     sb.AppendLine $"let {memberName} : TxnStep<{rowType} list> =" |> ignore
     sb.AppendLine $"  Query.queryList {sqlLit sql} [] mapRow" |> ignore
+    sb.AppendLine() |> ignore
+
+  let private emitSelectRange
+    (sb: StringBuilder)
+    (rel: AnnotatedRelation)
+    (rowType: string)
+    (orderBy: (string * SortDirection) list)
+    =
+    let orderSql =
+      orderBy
+      |> List.map (fun (col, dir) ->
+        let order =
+          match dir with
+          | SortDirection.Desc -> "DESC"
+          | SortDirection.Asc -> "ASC"
+
+        $"{Naming.quoteSqlIdent col} {order}")
+      |> String.concat ", "
+
+    let sql =
+      $"SELECT {columnSelectList rel} FROM {Naming.quoteSqlIdent rel.sqlName} ORDER BY {orderSql} LIMIT @limit OFFSET @offset"
+
+    let memberName = selectRangeMemberName orderBy
+
+    sb.AppendLine $"let {memberName} (start: int) (endExclusive: int) : TxnStep<{rowType} list> ="
+    |> ignore
+
+    sb.AppendLine "  let limit = max 0 (endExclusive - start)" |> ignore
+
+    sb.AppendLine "  let parameters = [ \"@offset\", box start; \"@limit\", box limit ]"
+    |> ignore
+
+    sb.AppendLine $"  Query.queryList {sqlLit sql} parameters mapRow" |> ignore
     sb.AppendLine() |> ignore
 
   let private emitDeleteById
@@ -578,11 +618,11 @@ module internal Emit =
         | _ -> ()
       | Op.SelectBy cols -> emitSelectBy sb rel rowType cols false colTypeMap
       | Op.SelectOneBy cols -> emitSelectBy sb rel rowType cols true colTypeMap
-      | Op.SelectByOrInsert cols ->
-        emitSelectByOrInsert sb rel rowType insertTypeName insertCols cols fieldBoxMap
+      | Op.SelectByOrInsert cols -> emitSelectByOrInsert sb rel rowType insertTypeName insertCols cols fieldBoxMap
       | Op.SelectLike col -> emitSelectLike sb rel rowType col
       | Op.SelectTop(col, limit) -> emitSelectTopOrBottom sb rel rowType col limit true
       | Op.SelectBottom(col, limit) -> emitSelectTopOrBottom sb rel rowType col limit false
+      | Op.SelectRange orderBy -> emitSelectRange sb rel rowType orderBy
       | Op.DeleteById ->
         match rel.PrimaryKeyColumns with
         | [ pk ] ->

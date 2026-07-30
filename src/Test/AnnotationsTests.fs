@@ -23,8 +23,7 @@ let private withTempMigrations (files: (string * string) list) (action: string -
 [<Fact>]
 let ``parses mig ops and overrides`` () =
   withTempMigrations
-    [
-      "001_users.sql",
+    [ "001_users.sql",
       """
 -- mig:rel User
 -- mig:ops insert, select_by(email), select_by_id, upsert
@@ -36,8 +35,7 @@ CREATE TABLE app_user (
   active INTEGER NOT NULL,
   created_at TEXT NOT NULL
 ) STRICT;
-"""
-    ]
+""" ]
     (fun dir ->
       match parseMigrationsDirectory dir with
       | Error e -> Assert.Fail e
@@ -53,13 +51,11 @@ CREATE TABLE app_user (
 [<Fact>]
 let ``derived name when mig rel omitted`` () =
   withTempMigrations
-    [
-      "001.sql",
+    [ "001.sql",
       """
 -- mig:ops select_all
 CREATE VIEW active_user AS SELECT 1 AS id;
-"""
-    ]
+""" ]
     (fun dir ->
       match parseMigrationsDirectory dir with
       | Error e -> Assert.Fail e
@@ -70,14 +66,67 @@ CREATE VIEW active_user AS SELECT 1 AS id;
 [<Fact>]
 let ``rejects unknown op`` () =
   withTempMigrations
-    [
-      "001.sql",
+    [ "001.sql",
       """
 -- mig:ops no_such_op
 CREATE TABLE t (id INTEGER PRIMARY KEY);
-"""
-    ]
+""" ]
     (fun dir ->
       match parseMigrationsDirectory dir with
       | Ok _ -> Assert.Fail "expected error"
       | Error msg -> Assert.Contains("unknown op", msg))
+
+[<Fact>]
+let ``parses select_range with directions and defaults`` () =
+  withTempMigrations
+    [ "001.sql",
+      """
+-- mig:ops select_range(created_at desc, id), select_range(name)
+CREATE TABLE event_log (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL,
+  name TEXT NOT NULL
+) STRICT;
+""" ]
+    (fun dir ->
+      match parseMigrationsDirectory dir with
+      | Error e -> Assert.Fail e
+      | Ok anns ->
+        Assert.Equal(2, anns.Head.ops.Length)
+
+        match anns.Head.ops with
+        | [ Op.SelectRange order1; Op.SelectRange order2 ] ->
+          match order1 with
+          | [ "created_at", SortDirection.Desc; "id", SortDirection.Asc ] -> ()
+          | _ -> Assert.Fail $"unexpected order1: {order1}"
+
+          match order2 with
+          | [ "name", SortDirection.Asc ] -> ()
+          | _ -> Assert.Fail $"unexpected order2: {order2}"
+        | other -> Assert.Fail $"unexpected ops: {other}")
+
+[<Fact>]
+let ``rejects invalid select_range direction`` () =
+  withTempMigrations
+    [ "001.sql",
+      """
+-- mig:ops select_range(created_at sideways)
+CREATE TABLE t (id INTEGER PRIMARY KEY, created_at TEXT NOT NULL);
+""" ]
+    (fun dir ->
+      match parseMigrationsDirectory dir with
+      | Ok _ -> Assert.Fail "expected error"
+      | Error msg -> Assert.Contains("invalid select_range direction", msg))
+
+[<Fact>]
+let ``rejects empty select_range`` () =
+  withTempMigrations
+    [ "001.sql",
+      """
+-- mig:ops select_range()
+CREATE TABLE t (id INTEGER PRIMARY KEY);
+""" ]
+    (fun dir ->
+      match parseMigrationsDirectory dir with
+      | Ok _ -> Assert.Fail "expected error"
+      | Error msg -> Assert.Contains("at least one order column", msg))

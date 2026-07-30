@@ -150,3 +150,15 @@ module internal Naming =
 
   let selectBottomMemberName (column: string) (limit: int) =
     $"selectBottom{toPascalCase column}{limit}"
+
+  let selectRangeMemberName (orderBy: (string * Types.SortDirection) list) =
+    let parts =
+      orderBy
+      |> List.map (fun (col, dir) ->
+        let name = toPascalCase col
+
+        match dir with
+        | Types.SortDirection.Desc -> name + "Desc"
+        | Types.SortDirection.Asc -> name)
+
+    "selectRange" + String.concat "" parts
