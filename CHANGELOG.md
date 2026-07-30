@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [10.0.0] - 2026-07-30
+
+Breaking rewrite: SQL-first migrations and annotation-driven codegen.
+
+### Added
+
+- **MigLib**: filesystem SQL migrations as schema source of truth (`migrateScripts`, `SchemaVersions` journal)
+- **MigLib.Codegen**: `mig codegen` / `generate` emits one typed F# module per annotated relation
+- **Ops catalog**: `insert`, `insert_many`, `insert_or_ignore`, `upsert`, `upsert_many`, `select_all`, `select_by_id`, `select_by`, `select_one_by`, `select_by_or_insert`, `select_like`, `select_top`, `select_bottom`, `select_range` (skip/take), `select_with` (view markers `/*@arg*/literal`), `delete_by_id`, `delete_by`, `delete_all`
+- **Annotations**: multi-line `-- mig:ops` (merged in order), `-- mig:rel`, column type overrides
+- **Runtime**: thin `Query` helpers + `TxnStep` model on `Microsoft.Data.Sqlite` (no codegen dependency at runtime)
+
+### Removed
+
+- F#-first schema DSL, SqlProvider coupling, DbUp, declarative hot-migrate pipeline, MigLib.Web package surface from this line
+- Custom free-form SQL ops (use views + read ops / `select_with` instead)
+
+### Changed
+
+- **mig CLI**: version aligned with MigLib and MigLib.Codegen at `10.0.0`
+- Package layout: **migtool** + **MigLib** (runtime) + **MigLib.Codegen** (generate)
+
 ## [9.1.0] - 2026-06-02
 
 Added:
