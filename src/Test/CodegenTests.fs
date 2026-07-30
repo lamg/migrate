@@ -237,6 +237,126 @@ CREATE TABLE event_log (
     | Error e -> Assert.Contains("unknown column", e))
 
 [<Fact>]
+let ``generate emits select_with with rewritten markers`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+CREATE TABLE student (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  age INTEGER NOT NULL
+) STRICT;
+
+-- mig:ops select_with(min_age, max_age)
+-- mig:int64 min_age
+-- mig:int64 max_age
+CREATE VIEW student_age_range AS
+  SELECT id, name, age
+  FROM student
+  WHERE age >= /*@min_age*/0
+    AND age < /*@max_age*/999;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Error e -> Assert.Fail e
+    | Ok _ ->
+      let source = File.ReadAllText(Path.Combine(output, "StudentAgeRange.fs"))
+
+      Assert.Contains("let selectWith (minAge: int64) (maxAge: int64) : TxnStep<StudentAgeRange list> =", source)
+
+      Assert.Contains("\"@min_age\", box (minAge)", source)
+      Assert.Contains("\"@max_age\", box (maxAge)", source)
+      Assert.Contains("@min_age", source)
+      Assert.Contains("@max_age", source)
+      Assert.DoesNotContain("/*@min_age*/", source)
+      Assert.DoesNotContain("FROM [student_age_range]", source))
+
+[<Fact>]
+let ``generate select_with infers types from literals`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+CREATE TABLE item (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  price REAL NOT NULL
+) STRICT;
+
+-- mig:ops select_with(pattern, min_price)
+CREATE VIEW item_search AS
+  SELECT id, name, price
+  FROM item
+  WHERE name LIKE /*@pattern*/'%'
+    AND price >= /*@min_price*/0.0;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Error e -> Assert.Fail e
+    | Ok _ ->
+      let source = File.ReadAllText(Path.Combine(output, "ItemSearch.fs"))
+
+      Assert.Contains("let selectWith (pattern: string) (minPrice: float) : TxnStep<ItemSearch list> =", source))
+
+[<Fact>]
+let ``generate refuses select_with on tables`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+-- mig:ops select_with(x)
+CREATE TABLE t (
+  id INTEGER NOT NULL PRIMARY KEY,
+  x INTEGER NOT NULL
+) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Ok _ -> Assert.Fail "expected error"
+    | Error e -> Assert.Contains("select_with is only allowed on views", e))
+
+[<Fact>]
+let ``generate refuses select_with missing marker`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+CREATE TABLE student (
+  id INTEGER NOT NULL PRIMARY KEY,
+  age INTEGER NOT NULL
+) STRICT;
+
+-- mig:ops select_with(min_age, max_age)
+CREATE VIEW student_age_range AS
+  SELECT id, age FROM student WHERE age >= /*@min_age*/0;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Ok _ -> Assert.Fail "expected error"
+    | Error e -> Assert.Contains("missing from view markers", e))
+
+[<Fact>]
 let ``view columns generate non-option field types`` () =
   withTempDir (fun dir ->
     let migrations = Path.Combine(dir, "migrations")

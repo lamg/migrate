@@ -466,6 +466,40 @@ module internal Emit =
     sb.AppendLine $"  Query.queryList {sqlLit sql} parameters mapRow" |> ignore
     sb.AppendLine() |> ignore
 
+  let private selectWithArgFs (argType: SelectWithArgType) : string * (string -> string) =
+    match argType with
+    | SelectWithArgType.Bool -> "bool", fun e -> $"Query.boxBool ({e})"
+    | SelectWithArgType.Int -> "int", fun e -> $"box ({e})"
+    | SelectWithArgType.UInt -> "uint32", fun e -> $"box (int64 ({e}))"
+    | SelectWithArgType.Int64 -> "int64", fun e -> $"box ({e})"
+    | SelectWithArgType.Float -> "float", fun e -> $"box ({e})"
+    | SelectWithArgType.String -> "string", fun e -> $"box ({e})"
+    | SelectWithArgType.DateTime -> "DateTimeOffset", fun e -> $"Query.boxDateTimeOffset ({e})"
+
+  let private emitSelectWith (sb: StringBuilder) (rel: AnnotatedRelation) (rowType: string) (plan: SelectWithPlan) =
+    let paramList =
+      plan.args
+      |> List.map (fun a ->
+        let ty, _ = selectWithArgFs a.argType
+        $"({toCamelCase a.name}: {ty})")
+      |> String.concat " "
+
+    sb.AppendLine $"let selectWith {paramList} : TxnStep<{rowType} list> ="
+    |> ignore
+
+    sb.AppendLine "  let parameters =" |> ignore
+    sb.AppendLine "    [" |> ignore
+
+    for a in plan.args do
+      let _, boxFn = selectWithArgFs a.argType
+      let param = Naming.paramName a.name
+      let camel = toCamelCase a.name
+      sb.AppendLine $"      \"{param}\", {boxFn camel}" |> ignore
+
+    sb.AppendLine "    ]" |> ignore
+    sb.AppendLine $"  Query.queryList {sqlLit plan.sql} parameters mapRow" |> ignore
+    sb.AppendLine() |> ignore
+
   let private emitDeleteById
     (sb: StringBuilder)
     (rel: AnnotatedRelation)
@@ -623,6 +657,10 @@ module internal Emit =
       | Op.SelectTop(col, limit) -> emitSelectTopOrBottom sb rel rowType col limit true
       | Op.SelectBottom(col, limit) -> emitSelectTopOrBottom sb rel rowType col limit false
       | Op.SelectRange orderBy -> emitSelectRange sb rel rowType orderBy
+      | Op.SelectWith _ ->
+        match rel.selectWith with
+        | Some plan -> emitSelectWith sb rel rowType plan
+        | None -> ()
       | Op.DeleteById ->
         match rel.PrimaryKeyColumns with
         | [ pk ] ->

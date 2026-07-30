@@ -130,3 +130,29 @@ CREATE TABLE t (id INTEGER PRIMARY KEY);
       match parseMigrationsDirectory dir with
       | Ok _ -> Assert.Fail "expected error"
       | Error msg -> Assert.Contains("at least one order column", msg))
+
+[<Fact>]
+let ``parses select_with and captures create SQL`` () =
+  withTempMigrations
+    [ "001.sql",
+      """
+-- mig:ops select_with(min_age, max_age)
+CREATE VIEW student_age_range AS
+  SELECT id, age FROM student
+  WHERE age >= /*@min_age*/0 AND age < /*@max_age*/999;
+""" ]
+    (fun dir ->
+      match parseMigrationsDirectory dir with
+      | Error e -> Assert.Fail e
+      | Ok anns ->
+        Assert.Equal(1, anns.Length)
+
+        match anns.Head.ops with
+        | [ Op.SelectWith args ] -> Assert.Equal<string list>([ "min_age"; "max_age" ], args)
+        | other -> Assert.Fail $"unexpected ops: {other}"
+
+        match anns.Head.createSql with
+        | None -> Assert.Fail "expected createSql"
+        | Some sql ->
+          Assert.Contains("/*@min_age*/0", sql)
+          Assert.Contains("/*@max_age*/999", sql))

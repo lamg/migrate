@@ -34,6 +34,28 @@ module internal Types =
     | Asc
     | Desc
 
+  /// F# type for a select_with argument (from override or literal inference).
+  [<RequireQualifiedAccess>]
+  type SelectWithArgType =
+    | Bool
+    | Int
+    | UInt
+    | Int64
+    | Float
+    | String
+    | DateTime
+
+  type SelectWithArg =
+    { name: string
+      argType: SelectWithArgType }
+
+  type SelectWithPlan =
+    {
+      args: SelectWithArg list
+      /// View SELECT body with /*@name*/literal markers rewritten to @name.
+      sql: string
+    }
+
   [<RequireQualifiedAccess>]
   type Op =
     | Insert
@@ -54,6 +76,8 @@ module internal Types =
     | SelectBottom of column: string * limit: int
     /// ORDER BY listed columns; runtime slice [start, end_exclusive)
     | SelectRange of orderBy: (string * SortDirection) list
+    /// Parameterized view SELECT; names declared here, markers /*@name*/lit in view body.
+    | SelectWith of args: string list
     | DeleteById
     | DeleteBy of columns: string list
     | DeleteAll
@@ -76,7 +100,8 @@ module internal Types =
       | SelectLike _
       | SelectTop _
       | SelectBottom _
-      | SelectRange _ -> false
+      | SelectRange _
+      | SelectWith _ -> false
 
   type RelationAnnotation =
     {
@@ -87,6 +112,8 @@ module internal Types =
       overrides: ColumnOverride list
       sourceFile: string
       sourceLine: int
+      /// Full CREATE TABLE/VIEW statement text from the migration source (when captured).
+      createSql: string option
     }
 
   type ColumnInfo =
@@ -110,12 +137,16 @@ module internal Types =
       |> List.sortBy _.pkOrdinal
 
   type AnnotatedRelation =
-    { sqlName: string
+    {
+      sqlName: string
       fsName: string
       kind: RelationKind
       columns: ColumnInfo list
       ops: Op list
-      overrides: Map<string, ColumnOverrideKind> }
+      overrides: Map<string, ColumnOverrideKind>
+      /// Present when ops include SelectWith; rewritten SELECT + typed args.
+      selectWith: SelectWithPlan option
+    }
 
     member this.PrimaryKeyColumns =
       this.columns

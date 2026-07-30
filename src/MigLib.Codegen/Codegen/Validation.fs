@@ -55,6 +55,12 @@ module internal Validation =
         Error $"select_range requires at least one order column on '{rel.name}'"
       else
         requireColumns (orderBy |> List.map fst)
+    | RelationKind.Table, Op.SelectWith _ -> Error $"select_with is only allowed on views (got table '{rel.name}')"
+    | RelationKind.View, Op.SelectWith args ->
+      if args.IsEmpty then
+        Error $"select_with requires at least one argument on '{rel.name}'"
+      else
+        Ok()
     | _ -> Ok()
 
   /// Ensure bulk ops also emit their single-row companions.
@@ -175,41 +181,89 @@ module internal Validation =
             | Error _ -> None)
           |> expandOps
 
-        let overrideMap =
-          System.Collections.Generic.Dictionary<string, ColumnOverrideKind>(StringComparer.OrdinalIgnoreCase)
+        let selectWithArgNames =
+          ops
+          |> List.choose (function
+            | Op.SelectWith args -> Some args
+            | _ -> None)
+          |> List.concat
+          |> List.map (fun a -> a.ToLowerInvariant())
+          |> Set.ofList
 
-        let mutable overrideOk = true
+        let selectWithCount =
+          ops
+          |> List.filter (function
+            | Op.SelectWith _ -> true
+            | _ -> false)
+          |> List.length
 
-        for ov in ann.overrides do
-          match resolveColumnName rel ov.column with
-          | None ->
-            errors.Add $"{ann.sourceFile}:{ann.sourceLine}: override column '{ov.column}' not found on '{rel.name}'"
-            overrideOk <- false
-          | Some realName ->
-            if overrideMap.ContainsKey realName then
-              errors.Add $"{ann.sourceFile}:{ann.sourceLine}: duplicate override for column '{realName}'"
+        if selectWithCount > 1 then
+          errors.Add $"{ann.sourceFile}:{ann.sourceLine}: at most one select_with op is allowed on '{rel.name}'"
+        else
+          let overrideMap =
+            System.Collections.Generic.Dictionary<string, ColumnOverrideKind>(StringComparer.OrdinalIgnoreCase)
+
+          let mutable overrideOk = true
+
+          for ov in ann.overrides do
+            match resolveColumnName rel ov.column with
+            | Some realName ->
+              if overrideMap.ContainsKey realName then
+                errors.Add $"{ann.sourceFile}:{ann.sourceLine}: duplicate override for column '{realName}'"
+                overrideOk <- false
+              else
+                overrideMap[realName] <- ov.kind
+            | None when selectWithArgNames.Contains(ov.column.ToLowerInvariant()) ->
+              if overrideMap.ContainsKey ov.column then
+                errors.Add $"{ann.sourceFile}:{ann.sourceLine}: duplicate override for '{ov.column}'"
+                overrideOk <- false
+              else
+                overrideMap[ov.column] <- ov.kind
+            | None ->
+              errors.Add
+                $"{ann.sourceFile}:{ann.sourceLine}: override column '{ov.column}' not found on '{rel.name}' (and not a select_with arg)"
+
               overrideOk <- false
+
+          if overrideOk then
+            let fsName =
+              match ann.fsNameOverride with
+              | Some name -> sanitizeFsIdent name
+              | None -> sanitizeFsIdent (toPascalCase rel.name)
+
+            if not (usedFsNames.Add fsName) then
+              errors.Add $"{ann.sourceFile}:{ann.sourceLine}: duplicate F# relation name '{fsName}'"
             else
-              overrideMap[realName] <- ov.kind
+              let overrides = overrideMap |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
 
-        if overrideOk then
-          let fsName =
-            match ann.fsNameOverride with
-            | Some name -> sanitizeFsIdent name
-            | None -> sanitizeFsIdent (toPascalCase rel.name)
+              let selectWithPlanResult =
+                match
+                  ops
+                  |> List.tryPick (function
+                    | Op.SelectWith args -> Some args
+                    | _ -> None)
+                with
+                | None -> Ok None
+                | Some args ->
+                  match ann.createSql with
+                  | None
+                  | Some "" -> Error $"{ann.sourceFile}:{ann.sourceLine}: select_with requires CREATE VIEW source SQL"
+                  | Some createSql ->
+                    match SelectWith.buildPlan args createSql overrides with
+                    | Error e -> Error $"{ann.sourceFile}:{ann.sourceLine}: {e}"
+                    | Ok plan -> Ok(Some plan)
 
-          if not (usedFsNames.Add fsName) then
-            errors.Add $"{ann.sourceFile}:{ann.sourceLine}: duplicate F# relation name '{fsName}'"
-          else
-            let overrides = overrideMap |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
-
-            results.Add
-              { sqlName = rel.name
-                fsName = fsName
-                kind = rel.kind
-                columns = rel.columns
-                ops = ops
-                overrides = overrides }
+              match selectWithPlanResult with
+              | Error e -> errors.Add e
+              | Ok selectWith ->
+                results.Add
+                  { sqlName = rel.name
+                    fsName = fsName
+                    kind = rel.kind
+                    columns = rel.columns
+                    ops = ops
+                    overrides = overrides
+                    selectWith = selectWith }
 
   let merge
     (schema: Map<string, RelationInfo>)

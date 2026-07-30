@@ -17,6 +17,7 @@
     <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Codegen/Types.fs" />
     <Compile Include="Codegen/Naming.fs" />
+    <Compile Include="Codegen/SelectWith.fs" />
     <Compile Include="Codegen/Annotations.fs" />
     <Compile Include="Codegen/Introspection.fs" />
     <Compile Include="Codegen/Validation.fs" />
@@ -28,6 +29,7 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
     <ProjectReference Include="../MigLib/MigLib.fsproj" />
   </ItemGroup>
 </Project>

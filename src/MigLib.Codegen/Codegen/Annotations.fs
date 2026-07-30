@@ -153,6 +153,10 @@ module internal Annotations =
                 | Error _ -> None)
 
             Ok(Op.SelectRange orderBy)
+    | _ when lower.StartsWith "select_with(" ->
+      match parseParenArgs "select_with" with
+      | Some args when args.Length > 0 -> Ok(Op.SelectWith args)
+      | _ -> Error $"invalid select_with op (expected select_with(arg, ...)): {text}"
     | _ when lower.StartsWith "delete_by(" ->
       match parseParenArgs "delete_by" with
       | Some cols when cols.Length > 0 -> Ok(Op.DeleteBy cols)
@@ -266,7 +270,7 @@ module internal Annotations =
 
           let flushPending () = pending.Clear()
 
-          let commitForRelation (sqlName: string) (lineNo: int) =
+          let commitForRelation (sqlName: string) (lineNo: int) (createSql: string option) =
             if pending.Count = 0 then
               ()
             else
@@ -287,7 +291,8 @@ module internal Annotations =
                     ops = ops |> List.ofSeq
                     overrides = overrides |> List.ofSeq
                     sourceFile = file
-                    sourceLine = lineNo }
+                    sourceLine = lineNo
+                    createSql = createSql }
 
               flushPending ()
 
@@ -300,7 +305,14 @@ module internal Annotations =
             | Some(Ok item) -> pending.Add(line, lineNo, item)
             | None ->
               match extractRelationName line with
-              | Some(_, sqlName) -> commitForRelation sqlName lineNo
+              | Some(_, sqlName) ->
+                let createSql =
+                  if pending.Count > 0 then
+                    Some(SelectWith.extractStatement lines i)
+                  else
+                    None
+
+                commitForRelation sqlName lineNo createSql
               | None ->
                 // Non-mig, non-create line: if we have pending annotations and hit blank-ish content that's not another mig,
                 // keep pending until CREATE. Blank lines are fine.
