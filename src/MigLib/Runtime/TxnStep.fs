@@ -23,6 +23,10 @@ module TxnStep =
   let internal result (x: 'a) : TxnStep<'a> = fun _ -> Task.FromResult(Ok x)
   let internal returnFrom (m: TxnStep<'a>) : TxnStep<'a> = m
 
+  /// Immediately fail this step with a SqliteException (error code 0). Used by generated code.
+  let fail (message: string) : TxnStep<'a> =
+    fun _ -> Task.FromResult(Error(SqliteException(message, 0)))
+
   let private continueAsync (next: unit -> Task<Result<'a, SqliteException>>) =
     task {
       do! Task.Yield()
@@ -95,11 +99,9 @@ module TxnStep =
     transactionGates.GetOrAdd(resolvedDbPath, fun _ -> new SemaphoreSlim(1, 1))
 
   type private ActiveTransaction =
-    {
-      resolvedDbPath: string
+    { resolvedDbPath: string
       transactionMode: SqliteTransactionMode
-      transaction: SqliteTransaction
-    }
+      transaction: SqliteTransaction }
 
   let private activeTransaction = AsyncLocal<ActiveTransaction option>()
 
@@ -128,11 +130,9 @@ module TxnStep =
 
       activeTransaction.Value <-
         Some
-          {
-            resolvedDbPath = resolvedDbPath
+          { resolvedDbPath = resolvedDbPath
             transactionMode = connectionConfig.transactionMode
-            transaction = transaction
-          }
+            transaction = transaction }
 
       try
         return! body transaction
@@ -194,4 +194,3 @@ module TxnStep =
                     })
               })
     }
-

@@ -3,7 +3,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>MigLib.Codegen</PackageId>
-    <Version>10.0.0</Version>
+    <Version>11.0.0</Version>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <AssemblyName>MigLib.Codegen</AssemblyName>
     <Authors>Luis Ángel Méndez Gort</Authors>

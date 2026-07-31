@@ -48,7 +48,7 @@ CREATE TABLE app_user (
     | Error e -> Assert.Fail e
     | Ok result ->
       Assert.Equal(1, result.relationCount)
-      Assert.Single result.generatedFiles |> ignore
+      Assert.Equal(2, result.generatedFiles.Length)
       let userPath = Path.Combine(output, "User.fs")
       Assert.True(File.Exists userPath)
       let source = File.ReadAllText userPath
@@ -64,7 +64,13 @@ CREATE TABLE app_user (
       Assert.Contains("let upsertMany ", source)
       Assert.Contains("let deleteById ", source)
       Assert.Contains("bool", source)
-      Assert.Contains("DateTimeOffset", source))
+      Assert.Contains("DateTimeOffset", source)
+      let migrationsPath = Path.Combine(output, "Migrations.fs")
+      Assert.True(File.Exists migrationsPath)
+      let migSource = File.ReadAllText migrationsPath
+      Assert.Contains("module TestApp.Data.Stores.Migrations", migSource)
+      Assert.Contains("001_users.sql", migSource)
+      Assert.Contains("CREATE TABLE app_user", migSource))
 
 [<Fact>]
 let ``generate emits select_by_or_insert`` () =
@@ -93,7 +99,9 @@ CREATE TABLE app_user (
       Assert.Contains("type AppUserInsert =", source)
       Assert.Contains("INSERT INTO [app_user]", source)
       Assert.Contains("WHERE [username] = @username LIMIT 1", source)
-      Assert.Contains("select_by_or_insert failed to load inserted row", source))
+      Assert.Contains("TxnStep.fail \"select_by_or_insert failed to load inserted row\"", source)
+      Assert.DoesNotContain("open System.Threading.Tasks", source)
+      Assert.DoesNotContain("Task.FromResult", source))
 
 [<Fact>]
 let ``generate refuses select_by_or_insert on views`` () =
@@ -429,8 +437,13 @@ CREATE TABLE orphan (
     | Error e -> Assert.Fail e
     | Ok result ->
       Assert.Equal(0, result.relationCount)
-      Assert.Empty result.generatedFiles
-      Assert.Empty(Directory.GetFiles(output, "*.fs")))
+      Assert.Equal(1, result.generatedFiles.Length)
+      let migrationsPath = Path.Combine(output, "Migrations.fs")
+      Assert.True(File.Exists migrationsPath)
+      Assert.False(File.Exists(Path.Combine(output, "Orphan.fs")))
+      let migSource = File.ReadAllText migrationsPath
+      Assert.True(migSource.Contains "CREATE TABLE orphan")
+      Assert.Equal(1, Directory.GetFiles(output, "*.fs").Length))
 
 [<Fact>]
 let ``deletes stale auto-generated files only`` () =
@@ -468,6 +481,7 @@ CREATE TABLE keep_me (id INTEGER NOT NULL PRIMARY KEY) STRICT;
     | Ok result ->
       Assert.Equal(1, result.relationCount)
       Assert.True(File.Exists(Path.Combine(output, "KeepMe.fs")))
+      Assert.True(File.Exists(Path.Combine(output, "Migrations.fs")))
       Assert.False(File.Exists(Path.Combine(output, "Stale.fs")))
       Assert.True(File.Exists(Path.Combine(output, "HandWritten.fs"))))
 
@@ -491,32 +505,133 @@ CREATE TABLE note (
 
     let dbPath = Path.Combine(dir, "app.sqlite")
 
-    match await (migrateScripts dbPath migrations) with
+    match MigLib.Migrate.loadScriptsFromDirectory migrations with
     | Error e -> Assert.Fail e
-    | Ok() ->
-      let insertSql = "INSERT INTO [note] ([email], [body]) VALUES (@email, @body)"
+    | Ok scripts ->
+      match await (migrateScripts dbPath scripts) with
+      | Error e -> Assert.Fail e
+      | Ok() ->
+        let insertSql = "INSERT INTO [note] ([email], [body]) VALUES (@email, @body)"
 
-      let selectSql = "SELECT [id], [email], [body] FROM [note] WHERE [id] = @id LIMIT 1"
+        let selectSql = "SELECT [id], [email], [body] FROM [note] WHERE [id] = @id LIMIT 1"
 
-      let run =
-        dbTxn dbPath {
-          do!
-            Query.exec insertSql [ "@email", box "a@b.c"; "@body", box "hello" ]
-            |> TxnStep.map ignore
+        let run =
+          dbTxn dbPath {
+            do!
+              Query.exec insertSql [ "@email", box "a@b.c"; "@body", box "hello" ]
+              |> TxnStep.map ignore
 
-          let! id = Query.lastInsertRowId
+            let! id = Query.lastInsertRowId
 
-          let! row =
-            Query.queryOne selectSql [ "@id", box id ] (fun r -> r.GetInt64 0, r.GetString 1, r.GetString 2)
+            let! row =
+              Query.queryOne selectSql [ "@id", box id ] (fun r -> r.GetInt64 0, r.GetString 1, r.GetString 2)
 
-          return id, row
-        }
+            return id, row
+          }
 
-      match await run with
-      | Error e -> Assert.Fail(string e)
-      | Ok(id, Some(rowId, email, body)) ->
-        Assert.True(id > 0L)
-        Assert.Equal(id, rowId)
-        Assert.Equal("a@b.c", email)
-        Assert.Equal("hello", body)
-      | Ok(_, None) -> Assert.Fail "row not found")
+        match await run with
+        | Error e -> Assert.Fail(string e)
+        | Ok(id, Some(rowId, email, body)) ->
+          Assert.True(id > 0L)
+          Assert.Equal(id, rowId)
+          Assert.Equal("a@b.c", email)
+          Assert.Equal("hello", body)
+        | Ok(_, None) -> Assert.Fail "row not found")
+
+[<Fact>]
+let ``generate refuses relation named Migrations`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+-- mig:rel Migrations
+-- mig:ops select_all
+CREATE TABLE migrations_table (id INTEGER NOT NULL PRIMARY KEY) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Ok _ -> Assert.Fail "expected reserved name error"
+    | Error msg -> Assert.Contains("reserved", msg))
+
+[<Fact>]
+let ``stale cleanup keeps Migrations.fs when relations change`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+-- mig:ops select_all
+CREATE TABLE alpha (id INTEGER NOT NULL PRIMARY KEY) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Error e -> Assert.Fail e
+    | Ok _ -> ()
+
+    Assert.True(File.Exists(Path.Combine(output, "Alpha.fs")))
+    Assert.True(File.Exists(Path.Combine(output, "Migrations.fs")))
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+-- mig:ops select_all
+CREATE TABLE beta (id INTEGER NOT NULL PRIMARY KEY) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Error e -> Assert.Fail e
+    | Ok _ ->
+      Assert.False(File.Exists(Path.Combine(output, "Alpha.fs")))
+      Assert.True(File.Exists(Path.Combine(output, "Beta.fs")))
+      Assert.True(File.Exists(Path.Combine(output, "Migrations.fs")))
+      let migSource = File.ReadAllText(Path.Combine(output, "Migrations.fs"))
+      Assert.Contains("CREATE TABLE beta", migSource))
+
+[<Fact>]
+let ``embedded Migrations.scripts apply via migrateScripts`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001_init.sql"),
+      """
+CREATE TABLE widget (
+  id INTEGER NOT NULL PRIMARY KEY,
+  name TEXT NOT NULL
+) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Error e -> Assert.Fail e
+    | Ok _ ->
+      match MigLib.Migrate.loadScriptsFromDirectory migrations with
+      | Error e -> Assert.Fail e
+      | Ok scripts ->
+        // Same list shape as generated Migrations.scripts
+        let dbPath = Path.Combine(dir, "app.sqlite")
+
+        match await (migrateScripts dbPath scripts) with
+        | Error e -> Assert.Fail e
+        | Ok() ->
+          match
+            await (
+              dbTxn dbPath {
+                return! Query.scalar "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='widget'" []
+              }
+            )
+          with
+          | Error e -> Assert.Fail(string e)
+          | Ok count -> Assert.Equal(1L, Convert.ToInt64 count))

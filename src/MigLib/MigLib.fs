@@ -34,7 +34,11 @@ module Api =
   module TxnStep =
     let bind = Runtime.TxnStep.bind
     let map = Runtime.TxnStep.map
+    let fail = Runtime.TxnStep.fail
 
-  /// Apply filesystem SQL migration scripts to the database file (ordered by file name).
-  let migrateScripts (dbPath: string) (scriptsDirectory: string) : Task<Result<unit, string>> =
-    Migrate.migrateScripts dbPath scriptsDirectory
+  /// Apply ordered named migration scripts to the database file.
+  /// Script names are SchemaVersions keys; list order is apply order.
+  /// Prefer the list generated into `{namespace}.Migrations.scripts` by `mig codegen`
+  /// (ordinary F# string constants compiled into the app — AOT-friendly; no resources or reflection).
+  let migrateScripts (dbPath: string) (scripts: (string * string) list) : Task<Result<unit, string>> =
+    Migrate.migrateScripts dbPath scripts

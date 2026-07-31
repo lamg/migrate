@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.0.0] - 2026-07-31
+
+### Changed
+
+- **Breaking (MigLib)**: `migrateScripts` now takes `(string * string) list` (script name, SQL body) instead of a filesystem directory. Apps pass codegen’s `Migrations.scripts` so migrations ship inside the executable as ordinary F# string constants (AOT-friendly: no loose `*.sql`, no `EmbeddedResource`, no reflection).
+- **MigLib.Codegen / `mig codegen`**: always emits `{output}/Migrations.fs` (`module {namespace}.Migrations` with `scripts`) alongside relation modules. Module name `Migrations` is reserved.
+- **MigLib**: add `TxnStep.fail` for immediate step errors; codegen uses it for `select_by_or_insert` and no longer emits `open System.Threading.Tasks` in store modules.
+- **mig CLI / package versions**: MigLib, MigLib.Codegen, and migtool aligned at `11.0.0`.
+
 ## [10.0.0] - 2026-07-30
 
 Breaking rewrite: SQL-first migrations and annotation-driven codegen.
