@@ -567,6 +567,19 @@ module internal Emit =
     sb.AppendLine $"  Query.exec {sqlLit sql} []" |> ignore
     sb.AppendLine() |> ignore
 
+  let private emitDeleteMatching
+    (sb: StringBuilder)
+    (rel: AnnotatedRelation)
+    (targetTable: string)
+    (keyColumn: string)
+    =
+    let sql =
+      $"DELETE FROM {Naming.quoteSqlIdent targetTable} WHERE {Naming.quoteSqlIdent keyColumn} IN (SELECT {Naming.quoteSqlIdent keyColumn} FROM {Naming.quoteSqlIdent rel.sqlName})"
+
+    sb.AppendLine "let deleteMatching : TxnStep<int> =" |> ignore
+    sb.AppendLine $"  Query.exec {sqlLit sql} []" |> ignore
+    sb.AppendLine() |> ignore
+
   let private emitMany (sb: StringBuilder) (fnName: string) (elemType: string) (singleFn: string) =
     sb.AppendLine $"let {fnName} (rows: {elemType} seq) : TxnStep<unit> =" |> ignore
     sb.AppendLine "  txn {" |> ignore
@@ -678,6 +691,7 @@ module internal Emit =
         | _ -> ()
       | Op.DeleteBy cols -> emitDeleteBy sb rel cols colTypeMap
       | Op.DeleteAll -> emitDeleteAll sb rel
+      | Op.DeleteMatching(targetTable, keyColumn) -> emitDeleteMatching sb rel targetTable keyColumn
       | Op.InsertMany
       | Op.UpsertMany -> ()
 

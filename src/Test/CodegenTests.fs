@@ -416,6 +416,148 @@ CREATE VIEW active_user AS SELECT id, email FROM app_user;
     | Error msg -> Assert.Contains("write op not allowed on view", msg))
 
 [<Fact>]
+let ``generate emits delete_matching on views`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+CREATE TABLE user_invitation (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE redeemed_invitation (
+  invitation_id INTEGER NOT NULL PRIMARY KEY
+) STRICT;
+
+-- mig:ops select_all, delete_matching(user_invitation, id)
+CREATE VIEW expired_unredeemed_invitation AS
+SELECT ui.id, ui.code, ui.expires_at
+FROM user_invitation ui
+LEFT JOIN redeemed_invitation ri ON ri.invitation_id = ui.id
+WHERE ri.invitation_id IS NULL
+  AND ui.expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now');
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Error e -> Assert.Fail e
+    | Ok _ ->
+      let source =
+        File.ReadAllText(Path.Combine(output, "ExpiredUnredeemedInvitation.fs"))
+
+      Assert.Contains("let deleteMatching : TxnStep<int> =", source)
+
+      Assert.Contains(
+        "DELETE FROM [user_invitation] WHERE [id] IN (SELECT [id] FROM [expired_unredeemed_invitation])",
+        source
+      )
+
+      Assert.Contains("let selectAll", source)
+      Assert.Contains("FROM [expired_unredeemed_invitation]", source)
+      Assert.DoesNotContain("LEFT JOIN redeemed_invitation", source))
+
+[<Fact>]
+let ``generate refuses delete_matching on tables`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+-- mig:ops delete_matching(user_invitation, id)
+CREATE TABLE user_invitation (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL
+) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Ok _ -> Assert.Fail "expected error"
+    | Error e -> Assert.Contains("delete_matching is only allowed on views", e))
+
+[<Fact>]
+let ``generate refuses delete_matching unknown target table`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+CREATE TABLE user_invitation (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL
+) STRICT;
+
+-- mig:ops delete_matching(missing_table, id)
+CREATE VIEW expired_invitation AS SELECT id, code FROM user_invitation;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Ok _ -> Assert.Fail "expected error"
+    | Error e -> Assert.Contains("target table 'missing_table' not found", e))
+
+[<Fact>]
+let ``generate refuses delete_matching unknown key on view`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+CREATE TABLE user_invitation (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL
+) STRICT;
+
+-- mig:ops delete_matching(user_invitation, missing_col)
+CREATE VIEW expired_invitation AS SELECT id, code FROM user_invitation;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Ok _ -> Assert.Fail "expected error"
+    | Error e -> Assert.Contains("unknown column", e))
+
+[<Fact>]
+let ``generate refuses delete_matching with select_with`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+CREATE TABLE user_invitation (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  expires_at TEXT NOT NULL
+) STRICT;
+
+-- mig:ops select_with(now), delete_matching(user_invitation, id)
+CREATE VIEW expired_invitation AS
+SELECT id, expires_at FROM user_invitation WHERE expires_at < /*@now*/'';
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Ok _ -> Assert.Fail "expected error"
+    | Error e -> Assert.Contains("delete_matching cannot be combined with select_with", e))
+
+[<Fact>]
 let ``unannotated tables produce no files`` () =
   withTempDir (fun dir ->
     let migrations = Path.Combine(dir, "migrations")

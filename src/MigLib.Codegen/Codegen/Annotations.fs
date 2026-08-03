@@ -161,6 +161,10 @@ module internal Annotations =
       match parseParenArgs "delete_by" with
       | Some cols when cols.Length > 0 -> Ok(Op.DeleteBy cols)
       | _ -> Error $"invalid delete_by op: {text}"
+    | _ when lower.StartsWith "delete_matching(" ->
+      match parseParenArgs "delete_matching" with
+      | Some [ table; key ] -> Ok(Op.DeleteMatching(table, key))
+      | _ -> Error $"invalid delete_matching op (expected delete_matching(table, key)): {text}"
     | _ -> Error $"unknown op: {text}"
 
   let private parseMigLine (line: string) : Result<Choice<string, Op list, ColumnOverride>, string> option =

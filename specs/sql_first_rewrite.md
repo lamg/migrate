@@ -96,7 +96,7 @@ Rules:
 - `-- mig:rel Name` optionally overrides the F# type/module name. If omitted, derive from the SQL relation identifier (`app_user` → `AppUser`, `active_user` → `ActiveUser`).
 - Use `-- mig:rel` for both tables and views (no separate `mig:table` / `mig:view`).
 - Tables and views are both **relations**: same generation rules for a given column signature and **allowed** ops.
-- **Write ops on views are refused at codegen** (`insert`, `insert_or_ignore`, `upsert`, `delete_*`). Views may only use read ops (`select_*`).
+- **Most write ops on views are refused at codegen** (`insert`, `insert_or_ignore`, `upsert`, `delete_by*`, `delete_all`). Exception: **`delete_matching(table, key)`** (set-delete against a base table via the catalog view). Other ops on views are read ops (`select_*`).
 
 ### Column type overrides
 
@@ -156,6 +156,7 @@ Comma-separated on `-- mig:ops ...`. Only catalogued ops; no free-form SQL.
 | `delete_by_id` | DELETE by single-column PK | `Relation.deleteById : pk -> TxnStep<int>` | yes | **no** |
 | `delete_by(col,...)` | DELETE WHERE equality | `Relation.deleteByEmail : ... -> TxnStep<int>` | yes | **no** |
 | `delete_all` | DELETE all rows | `Relation.deleteAll : TxnStep<int>` | yes | **no** |
+| `delete_matching(table, key)` | DELETE from base table where `key` is in this view’s projection | `Relation.deleteMatching : TxnStep<int>` | **no** | yes |
 
 \* `select_by_id` on a view requires a single-column primary key to be discoverable; if the view has no PK in SQLite’s catalog, refuse `select_by_id` and require `select_by` / `select_one_by` instead.
 
@@ -169,6 +170,7 @@ Notes:
 - `select_top` / `select_bottom` bake the limit into the generated member (`select_top(created_at, 200)` → `selectTopCreatedAt200`); the limit is not a runtime argument.
 - `select_range` takes order columns (and optional `asc`/`desc` per column; default `asc`) in the annotation; `skip` and `take` are runtime `int` args mapped to `OFFSET` / `LIMIT` (`limit = max 0 take`). Member names include `Desc` only for descending columns (`select_range(created_at desc, id)` → `selectRangeCreatedAtDescId`).
 - `select_with` is **views only**. SQLite forbids bind parameters in `CREATE VIEW`, so arguments are authored as markers plus dummy literals: `/*@min_age*/0`. Codegen rewrites the view’s SELECT body to `@min_age` and emits `selectWith` with those F# parameters (not `SELECT * FROM the_view`). Arg types: `-- mig:int64 min_age` (etc.) on the annotation block, or inferred from the dummy literal (`0` → `int64`, `1.0` → `float`, `'…'` → `string`). Raw SQL against the physical view uses the dummy literals. At most one `select_with` per relation.
+- `delete_matching(table, key)` is **views only**. Emits `DELETE FROM [table] WHERE [key] IN (SELECT [key] FROM [view])` against the **catalog view** (no SELECT-body rewrite). Target must be a table; `key` must exist on both the view projection and the target table. Cannot be combined with `select_with` on the same relation (physical view cannot accept bind params). For fixed filters (e.g. SQLite `strftime('…','now')` inside the view), prefer this over select-then-`delete_by_id` loops.
 
 **Insert inputs:** omit **only autoincrement columns**. Do **not** omit columns that merely have SQL `DEFAULT` values; callers must supply them.
 
@@ -309,7 +311,7 @@ Out of scope for now: `mig migrate`, `mig status`, `mig init`, `mig plan`, `mig 
 - Insert inputs: omit **autoincrement only**; keep columns with defaults.
 - Upsert: **PK-only** conflict target.
 - Output: **one file per relation** in an output directory (`module {namespace}.{Name}`); `--namespace` on CLI; **public codegen + migrate APIs** in MigLib for `build.fsx`.
-- Views: **read ops only**; write ops refused at codegen.
+- Views: read ops plus optional `delete_matching`; other write ops refused at codegen.
 - LINQ deferred.
 - Transactions: current MigLib model.
 - CLI migrate/status out of scope; library filesystem migrate helper yes.

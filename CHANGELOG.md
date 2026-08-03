@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.1.0] - 2026-08-03
+
+### Added
+
+- **MigLib.Codegen / `mig codegen`**: view op `delete_matching(target_table, key)` emits
+  `DELETE FROM [table] WHERE [key] IN (SELECT [key] FROM [view])` as `deleteMatching : TxnStep<int>`.
+  Uses the catalog view (no body rewrite). Incompatible with `select_with` on the same relation.
+  Target must be a table; key must exist on both the view projection and the target table.
+
+### Changed
+
+- **mig CLI / package versions**: MigLib, MigLib.Codegen, and migtool aligned at `11.1.0`.
+
 ## [11.0.0] - 2026-07-31
 
 ### Changed

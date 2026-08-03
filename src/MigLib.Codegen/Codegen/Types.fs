@@ -81,6 +81,8 @@ module internal Types =
     | DeleteById
     | DeleteBy of columns: string list
     | DeleteAll
+    /// DELETE FROM target_table WHERE key IN (SELECT key FROM this view). Views only; uses catalog view.
+    | DeleteMatching of targetTable: string * keyColumn: string
 
     member this.IsWrite =
       match this with
@@ -92,7 +94,8 @@ module internal Types =
       | SelectByOrInsert _
       | DeleteById
       | DeleteBy _
-      | DeleteAll -> true
+      | DeleteAll
+      | DeleteMatching _ -> true
       | SelectAll
       | SelectById
       | SelectBy _

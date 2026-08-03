@@ -45,7 +45,7 @@ Rules:
 - Unannotated relations generate no F#.
 - Ops are explicit; no ops means no type.
 - Multiple `-- mig:ops` lines on one relation are merged in order (handy for long lists).
-- Views only allow read ops (`select_*`); write ops fail at codegen.
+- Views allow read ops (`select_*`) plus optional `delete_matching(table, key)`; other write ops fail at codegen.
 - `-- mig:rel Name` is optional; otherwise the F# name is derived from the SQL identifier.
 
 See [specs/sql_first_rewrite.md](specs/sql_first_rewrite.md) for the full design.
