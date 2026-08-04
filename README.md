@@ -24,7 +24,7 @@ There is no F#-first schema DSL, no SqlProvider, no DbUp dependency, and no auto
 
 ```sql
 -- mig:rel User
--- mig:ops insert, select_by(email), select_by_id
+-- mig:ops insert, select_by(email), select_by_id, count
 -- mig:ops upsert
 -- mig:bool active
 -- mig:datetime created_at
@@ -35,9 +35,22 @@ CREATE TABLE app_user (
   created_at TEXT NOT NULL
 ) STRICT;
 
--- mig:ops select_all, select_one_by(email)
+-- mig:ops select_all, select_one_by(email), count
 CREATE VIEW active_user AS
   SELECT id, email, created_at FROM app_user WHERE active = 1;
+
+-- Optional AND filters (filter catalog):
+-- mig:ops filter_search(created_at desc, id), filter_count
+-- mig:filter status eq status
+-- mig:filter label_prefix like_prefix label
+-- mig:filter text_any eq_any label, notes
+CREATE TABLE item (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  status TEXT NOT NULL,
+  label TEXT NOT NULL,
+  notes TEXT NOT NULL,
+  created_at TEXT NOT NULL
+) STRICT;
 ```
 
 Rules:
@@ -45,7 +58,13 @@ Rules:
 - Unannotated relations generate no F#.
 - Ops are explicit; no ops means no type.
 - Multiple `-- mig:ops` lines on one relation are merged in order (handy for long lists).
-- Views allow read ops (`select_*`) plus optional `delete_matching(table, key)`; other write ops fail at codegen.
+- Views allow read ops (`select_*`, `count`, `filter_search`, `filter_count`) plus optional `delete_matching(table, key)`; other write ops fail at codegen.
+- `count` emits unfiltered `SELECT COUNT(*) FROM [relation]` as `let count : TxnStep<int64>` (tables and views).
+- **Filter catalog** (`-- mig:filter name kind column[, column…]` plus `filter_search` / `filter_count`):
+  - Emits `{Rel}Filter` (each field `T option`), `emptyFilter`, public `applyFilter` (WHERE + params for hand SQL), `search filter skip take`, and/or `countByFilter filter`.
+  - Kinds: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like_prefix` (binds `v + "%"`), `eq_any` (OR across 2+ columns, one bind).
+  - Present `Some` values become AND clauses; all-`None` uses `WHERE 1=1`.
+  - Requires at least one `-- mig:filter` with `filter_search` and/or `filter_count` (and vice versa). At most one of each filter op per relation.
 - `-- mig:rel Name` is optional; otherwise the F# name is derived from the SQL identifier.
 
 See [specs/sql_first_rewrite.md](specs/sql_first_rewrite.md) for the full design.

@@ -68,6 +68,8 @@ module internal Annotations =
     | "upsert" -> Ok Op.Upsert
     | "upsert_many" -> Ok Op.UpsertMany
     | "select_all" -> Ok Op.SelectAll
+    | "count" -> Ok Op.Count
+    | "filter_count" -> Ok Op.FilterCount
     | "select_by_id" -> Ok Op.SelectById
     | "delete_by_id" -> Ok Op.DeleteById
     | "delete_all" -> Ok Op.DeleteAll
@@ -101,16 +103,18 @@ module internal Annotations =
         | true, limit when limit > 0 -> Ok(Op.SelectBottom(col, limit))
         | _ -> Error $"invalid select_bottom limit (must be positive int): {text}"
       | _ -> Error $"invalid select_bottom op (expected select_bottom(column, n)): {text}"
-    | _ when lower.StartsWith "select_range(" ->
-      let prefix = "select_range("
+    | _ when lower.StartsWith "select_range(" || lower.StartsWith "filter_search(" ->
+      let isFilterSearch = lower.StartsWith "filter_search("
+      let keyword = if isFilterSearch then "filter_search" else "select_range"
+      let prefix = keyword + "("
 
       if not (text.EndsWith ")") then
-        Error $"invalid select_range op (expected select_range(col [asc|desc], ...)): {text}"
+        Error $"invalid {keyword} op (expected {keyword}(col [asc|desc], ...)): {text}"
       else
         let inner = text.Substring(prefix.Length, text.Length - prefix.Length - 1).Trim()
 
         if String.IsNullOrWhiteSpace inner then
-          Error $"invalid select_range op (at least one order column required): {text}"
+          Error $"invalid {keyword} op (at least one order column required): {text}"
         else
           // Split on commas only so "created_at desc" stays one segment.
           let segments =
@@ -130,8 +134,8 @@ module internal Annotations =
               match dir.ToLowerInvariant() with
               | "asc" -> Ok(col, SortDirection.Asc)
               | "desc" -> Ok(col, SortDirection.Desc)
-              | _ -> Error $"invalid select_range direction '{dir}' (expected asc|desc): {text}"
-            | _ -> Error $"invalid select_range order key '{seg}' (expected col [asc|desc]): {text}"
+              | _ -> Error $"invalid {keyword} direction '{dir}' (expected asc|desc): {text}"
+            | _ -> Error $"invalid {keyword} order key '{seg}' (expected col [asc|desc]): {text}"
 
           let parsed = segments |> List.map parseSegment
 
@@ -144,7 +148,7 @@ module internal Annotations =
           if not errors.IsEmpty then
             Error(String.concat "; " errors)
           elif parsed.IsEmpty then
-            Error $"invalid select_range op (at least one order column required): {text}"
+            Error $"invalid {keyword} op (at least one order column required): {text}"
           else
             let orderBy =
               parsed
@@ -152,7 +156,10 @@ module internal Annotations =
                 | Ok o -> Some o
                 | Error _ -> None)
 
-            Ok(Op.SelectRange orderBy)
+            if isFilterSearch then
+              Ok(Op.FilterSearch orderBy)
+            else
+              Ok(Op.SelectRange orderBy)
     | _ when lower.StartsWith "select_with(" ->
       match parseParenArgs "select_with" with
       | Some args when args.Length > 0 -> Ok(Op.SelectWith args)
@@ -167,7 +174,54 @@ module internal Annotations =
       | _ -> Error $"invalid delete_matching op (expected delete_matching(table, key)): {text}"
     | _ -> Error $"unknown op: {text}"
 
-  let private parseMigLine (line: string) : Result<Choice<string, Op list, ColumnOverride>, string> option =
+  [<RequireQualifiedAccess>]
+  type private MigDirective =
+    | Rel of string
+    | Ops of Op list
+    | Override of ColumnOverride
+    | Filter of FilterDef
+
+  let private parseFilterKind (raw: string) : Result<FilterKind, string> =
+    match raw.Trim().ToLowerInvariant() with
+    | "eq" -> Ok FilterKind.Eq
+    | "neq" -> Ok FilterKind.Neq
+    | "gt" -> Ok FilterKind.Gt
+    | "gte" -> Ok FilterKind.Gte
+    | "lt" -> Ok FilterKind.Lt
+    | "lte" -> Ok FilterKind.Lte
+    | "like_prefix" -> Ok FilterKind.LikePrefix
+    | "eq_any" -> Ok FilterKind.EqAny
+    | other -> Error $"unknown filter kind '{other}' (expected eq, neq, gt, gte, lt, lte, like_prefix, eq_any)"
+
+  /// Parse: name kind col[, col…]
+  let private parseFilterBody (rest: string) : Result<FilterDef, string> =
+    let tokens =
+      rest.Split([| ' '; '\t'; ',' |], StringSplitOptions.RemoveEmptyEntries)
+      |> Array.map _.Trim()
+      |> Array.filter (fun t -> t.Length > 0)
+      |> Array.toList
+
+    match tokens with
+    | name :: kindRaw :: cols when cols.Length > 0 ->
+      match parseFilterKind kindRaw with
+      | Error e -> Error e
+      | Ok kind ->
+        match kind, cols with
+        | FilterKind.EqAny, cs when cs.Length >= 2 ->
+          Ok
+            { name = name
+              kind = kind
+              columns = cs }
+        | FilterKind.EqAny, _ -> Error "filter kind eq_any requires at least two columns"
+        | _, [ col ] ->
+          Ok
+            { name = name
+              kind = kind
+              columns = [ col ] }
+        | _, _ -> Error $"filter kind {kindRaw} requires exactly one column"
+    | _ -> Error "mig:filter requires: name kind column[, column…] (e.g. status eq or label_prefix like_prefix label)"
+
+  let private parseMigLine (line: string) : Result<MigDirective, string> option =
     let trimmed = line.Trim()
 
     if not (trimmed.StartsWith migPrefix) then
@@ -187,7 +241,7 @@ module internal Annotations =
         if String.IsNullOrWhiteSpace rest then
           Some(Error "mig:rel requires a name")
         else
-          Some(Ok(Choice1Of3 rest))
+          Some(Ok(MigDirective.Rel rest))
       | "ops" ->
         if String.IsNullOrWhiteSpace rest then
           Some(Error "mig:ops requires at least one op")
@@ -210,7 +264,14 @@ module internal Annotations =
                 | Ok o -> Some o
                 | Error _ -> None)
 
-            Some(Ok(Choice2Of3 ops))
+            Some(Ok(MigDirective.Ops ops))
+      | "filter" ->
+        if String.IsNullOrWhiteSpace rest then
+          Some(Error "mig:filter requires: name kind column[, column…]")
+        else
+          match parseFilterBody rest with
+          | Error e -> Some(Error e)
+          | Ok def -> Some(Ok(MigDirective.Filter def))
       | "bool"
       | "int"
       | "uint"
@@ -228,7 +289,7 @@ module internal Annotations =
             | "datetime" -> ColumnOverrideKind.DateTime
             | _ -> ColumnOverrideKind.Int64
 
-          Some(Ok(Choice3Of3 { column = rest; kind = kind }))
+          Some(Ok(MigDirective.Override { column = rest; kind = kind }))
       | _ -> Some(Error $"unknown mig annotation: {key}")
 
   let private extractRelationName (line: string) =
@@ -269,8 +330,7 @@ module internal Annotations =
 
         for file in files do
           let lines = File.ReadAllLines file
-          let pending = ResizeArray<string * int * Choice<string, Op list, ColumnOverride>>()
-          // each entry: raw already parsed as Choice
+          let pending = ResizeArray<string * int * MigDirective>()
 
           let flushPending () = pending.Clear()
 
@@ -280,19 +340,22 @@ module internal Annotations =
             else
               let mutable fsName = None
               let ops = ResizeArray<Op>()
+              let filters = ResizeArray<FilterDef>()
               let overrides = ResizeArray<ColumnOverride>()
 
               for _, _, item in pending do
                 match item with
-                | Choice1Of3 name -> fsName <- Some name
-                | Choice2Of3 opList -> ops.AddRange opList
-                | Choice3Of3 ov -> overrides.Add ov
+                | MigDirective.Rel name -> fsName <- Some name
+                | MigDirective.Ops opList -> ops.AddRange opList
+                | MigDirective.Filter f -> filters.Add f
+                | MigDirective.Override ov -> overrides.Add ov
 
               if ops.Count > 0 then
                 annotations.Add
                   { sqlName = Some sqlName
                     fsNameOverride = fsName
                     ops = ops |> List.ofSeq
+                    filters = filters |> List.ofSeq
                     overrides = overrides |> List.ofSeq
                     sourceFile = file
                     sourceLine = lineNo
@@ -318,8 +381,7 @@ module internal Annotations =
 
                 commitForRelation sqlName lineNo createSql
               | None ->
-                // Non-mig, non-create line: if we have pending annotations and hit blank-ish content that's not another mig,
-                // keep pending until CREATE. Blank lines are fine.
+                // Non-mig, non-create line: keep pending until CREATE.
                 ()
 
           if pending.Count > 0 then

@@ -416,6 +416,233 @@ CREATE VIEW active_user AS SELECT id, email FROM app_user;
     | Error msg -> Assert.Contains("write op not allowed on view", msg))
 
 [<Fact>]
+let ``generate emits count on tables`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+-- mig:ops count
+CREATE TABLE transfer (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  external_id TEXT NOT NULL
+) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Error e -> Assert.Fail e
+    | Ok _ ->
+      let source = File.ReadAllText(Path.Combine(output, "Transfer.fs"))
+      Assert.Contains("let count : TxnStep<int64> =", source)
+      Assert.Contains("SELECT COUNT(*) FROM [transfer]", source)
+      Assert.Contains("Convert.ToInt64", source))
+
+[<Fact>]
+let ``generate emits count on views`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+CREATE TABLE app_user (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL
+) STRICT;
+
+-- mig:ops count, select_all
+CREATE VIEW active_user AS SELECT id, email FROM app_user WHERE id > 0;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Error e -> Assert.Fail e
+    | Ok _ ->
+      let source = File.ReadAllText(Path.Combine(output, "ActiveUser.fs"))
+      Assert.Contains("let count : TxnStep<int64> =", source)
+      Assert.Contains("SELECT COUNT(*) FROM [active_user]", source)
+      Assert.Contains("let selectAll : TxnStep<ActiveUser list> =", source))
+
+[<Fact>]
+let ``generate emits filter_search and filter_count surface`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+-- mig:ops insert, filter_search(created_at desc, id), filter_count
+-- mig:filter status eq status
+-- mig:filter label_prefix like_prefix label
+-- mig:filter text_any eq_any label, notes
+-- mig:filter min_score gte score
+CREATE TABLE item (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  status TEXT NOT NULL,
+  label TEXT NOT NULL,
+  notes TEXT NOT NULL,
+  score REAL NOT NULL,
+  created_at TEXT NOT NULL
+) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Error e -> Assert.Fail e
+    | Ok _ ->
+      let source = File.ReadAllText(Path.Combine(output, "Item.fs"))
+      Assert.Contains("type ItemFilter =", source)
+      Assert.Contains("Status: string option", source)
+      Assert.Contains("LabelPrefix: string option", source)
+      Assert.Contains("TextAny: string option", source)
+      Assert.Contains("MinScore: float option", source)
+      Assert.Contains("let emptyFilter : ItemFilter =", source)
+      Assert.Contains("let applyFilter (f: ItemFilter) : string * (string * obj) list =", source)
+      Assert.Contains("let search (filter: ItemFilter) (skip: int) (take: int) : TxnStep<Item list> =", source)
+      Assert.Contains("let countByFilter (filter: ItemFilter) : TxnStep<int64> =", source)
+      Assert.Contains("[status] = @f_status", source)
+      Assert.Contains("[label] LIKE @f_label_prefix", source)
+      Assert.Contains("([label] = @f_text_any OR [notes] = @f_text_any)", source)
+      Assert.Contains("[score] >= @f_min_score", source)
+      Assert.Contains("ORDER BY [created_at] DESC, [id] ASC", source)
+      Assert.Contains("v + \"%\"", source)
+      Assert.Contains("SELECT COUNT(*) FROM [item] WHERE \" + where", source))
+
+[<Fact>]
+let ``generate emits filter ops on views`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+CREATE TABLE item (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  status TEXT NOT NULL,
+  label TEXT NOT NULL,
+  created_at TEXT NOT NULL
+) STRICT;
+
+-- mig:ops filter_search(created_at desc), filter_count
+-- mig:filter status eq status
+-- mig:filter label_prefix like_prefix label
+CREATE VIEW open_item AS
+  SELECT id, status, label, created_at FROM item WHERE status = 'open';
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Error e -> Assert.Fail e
+    | Ok _ ->
+      let source = File.ReadAllText(Path.Combine(output, "OpenItem.fs"))
+      Assert.Contains("type OpenItemFilter =", source)
+      Assert.Contains("let search (filter: OpenItemFilter)", source)
+      Assert.Contains("let countByFilter (filter: OpenItemFilter)", source)
+      Assert.Contains("FROM [open_item] WHERE", source))
+
+[<Fact>]
+let ``generate refuses filter_search without filters`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+-- mig:ops filter_search(id)
+CREATE TABLE item (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  label TEXT NOT NULL
+) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Ok _ -> Assert.Fail "expected error"
+    | Error msg -> Assert.Contains("filter_search/filter_count require at least one -- mig:filter", msg))
+
+[<Fact>]
+let ``generate refuses filters without filter ops`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+-- mig:ops select_all
+-- mig:filter status eq status
+CREATE TABLE item (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  status TEXT NOT NULL
+) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Ok _ -> Assert.Fail "expected error"
+    | Error msg -> Assert.Contains("-- mig:filter requires filter_search and/or filter_count", msg))
+
+[<Fact>]
+let ``generate refuses unknown filter column`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+-- mig:ops filter_count
+-- mig:filter status eq missing_col
+CREATE TABLE item (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  status TEXT NOT NULL
+) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Ok _ -> Assert.Fail "expected error"
+    | Error msg -> Assert.Contains("unknown column", msg))
+
+[<Fact>]
+let ``generate refuses duplicate filter names`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+-- mig:ops filter_count
+-- mig:filter status eq status
+-- mig:filter status neq status
+CREATE TABLE item (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  status TEXT NOT NULL
+) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Ok _ -> Assert.Fail "expected error"
+    | Error msg -> Assert.Contains("duplicate filter name", msg))
+
+[<Fact>]
 let ``generate emits delete_matching on views`` () =
   withTempDir (fun dir ->
     let migrations = Path.Combine(dir, "migrations")

@@ -53,9 +53,10 @@ module internal Validation =
         Error $"select_top/select_bottom limit must be positive (got {limit}) on '{rel.name}'"
       else
         requireColumns [ col ]
-    | _, Op.SelectRange orderBy ->
+    | _, Op.SelectRange orderBy
+    | _, Op.FilterSearch orderBy ->
       if orderBy.IsEmpty then
-        Error $"select_range requires at least one order column on '{rel.name}'"
+        Error $"order list requires at least one column on '{rel.name}'"
       else
         requireColumns (orderBy |> List.map fst)
     | RelationKind.Table, Op.SelectWith _ -> Error $"select_with is only allowed on views (got table '{rel.name}')"
@@ -64,6 +65,7 @@ module internal Validation =
         Error $"select_with requires at least one argument on '{rel.name}'"
       else
         Ok()
+    | _, Op.FilterCount -> Ok()
     | _ -> Ok()
 
   /// Ensure bulk ops also emit their single-row companions.
@@ -122,7 +124,8 @@ module internal Validation =
       match resolveColumnName rel col with
       | Some name -> Ok(Op.SelectBottom(name, limit))
       | None -> Error $"unknown column on '{rel.name}': {col}"
-    | Op.SelectRange orderBy ->
+    | Op.SelectRange orderBy
+    | Op.FilterSearch orderBy ->
       let results =
         orderBy
         |> List.map (fun (col, dir) ->
@@ -140,14 +143,15 @@ module internal Validation =
         let errorList = String.concat ", " errors
         Error $"unknown column(s) on '{rel.name}': {errorList}"
       else
-        Ok(
-          Op.SelectRange(
-            results
-            |> List.choose (function
-              | Ok o -> Some o
-              | Error _ -> None)
-          )
-        )
+        let orderByResolved =
+          results
+          |> List.choose (function
+            | Ok o -> Some o
+            | Error _ -> None)
+
+        match op with
+        | Op.FilterSearch _ -> Ok(Op.FilterSearch orderByResolved)
+        | _ -> Ok(Op.SelectRange orderByResolved)
     | Op.DeleteMatching(table, key) ->
       match resolveColumnName rel key with
       | Some name -> Ok(Op.DeleteMatching(table, name))
@@ -215,6 +219,69 @@ module internal Validation =
             | Error _ -> None)
         )
 
+  let private resolveFilters (rel: RelationInfo) (filters: FilterDef list) : Result<FilterDef list, string list> =
+    let errors = ResizeArray<string>()
+
+    let seenNames =
+      System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
+
+    let resolved = ResizeArray<FilterDef>()
+
+    for f in filters do
+      if not (seenNames.Add f.name) then
+        errors.Add $"duplicate filter name '{f.name}' on '{rel.name}'"
+      else
+        let colResults =
+          f.columns
+          |> List.map (fun c ->
+            match resolveColumnName rel c with
+            | Some name -> Ok name
+            | None -> Error c)
+
+        let missing =
+          colResults
+          |> List.choose (function
+            | Error e -> Some e
+            | Ok _ -> None)
+
+        if not missing.IsEmpty then
+          let missingList = String.concat ", " missing
+          errors.Add $"filter '{f.name}' unknown column(s) on '{rel.name}': {missingList}"
+        else
+          let cols =
+            colResults
+            |> List.choose (function
+              | Ok n -> Some n
+              | Error _ -> None)
+
+          match f.kind, cols with
+          | FilterKind.EqAny, cs when cs.Length < 2 ->
+            errors.Add $"filter '{f.name}' kind eq_any requires at least two columns on '{rel.name}'"
+          | FilterKind.EqAny, _ ->
+            resolved.Add
+              { name = f.name
+                kind = f.kind
+                columns = cols }
+          | _, [ _ ] ->
+            resolved.Add
+              { name = f.name
+                kind = f.kind
+                columns = cols }
+          | _, _ -> errors.Add $"filter '{f.name}' requires exactly one column on '{rel.name}'"
+
+    if errors.Count > 0 then
+      Error(errors |> Seq.toList)
+    else
+      Ok(resolved |> List.ofSeq)
+
+  let private hasFilterSearch (ops: Op list) =
+    ops
+    |> List.exists (function
+      | Op.FilterSearch _ -> true
+      | _ -> false)
+
+  let private hasFilterCount (ops: Op list) = ops |> List.contains Op.FilterCount
+
   let private processAnnotation
     (schema: Map<string, RelationInfo>)
     (ann: RelationAnnotation)
@@ -274,70 +341,98 @@ module internal Validation =
           if selectWithCount > 1 then
             errors.Add $"{ann.sourceFile}:{ann.sourceLine}: at most one select_with op is allowed on '{rel.name}'"
           else
-            let overrideMap =
-              System.Collections.Generic.Dictionary<string, ColumnOverrideKind>(StringComparer.OrdinalIgnoreCase)
+            let filterSearchCount =
+              ops
+              |> List.filter (function
+                | Op.FilterSearch _ -> true
+                | _ -> false)
+              |> List.length
 
-            let mutable overrideOk = true
+            let filterCountOpCount = ops |> List.filter ((=) Op.FilterCount) |> List.length
 
-            for ov in ann.overrides do
-              match resolveColumnName rel ov.column with
-              | Some realName ->
-                if overrideMap.ContainsKey realName then
-                  errors.Add $"{ann.sourceFile}:{ann.sourceLine}: duplicate override for column '{realName}'"
-                  overrideOk <- false
+            if filterSearchCount > 1 then
+              errors.Add $"{ann.sourceFile}:{ann.sourceLine}: at most one filter_search op is allowed on '{rel.name}'"
+            elif filterCountOpCount > 1 then
+              errors.Add $"{ann.sourceFile}:{ann.sourceLine}: at most one filter_count op is allowed on '{rel.name}'"
+            else
+              match resolveFilters rel ann.filters with
+              | Error filterErrors ->
+                for e in filterErrors do
+                  errors.Add $"{ann.sourceFile}:{ann.sourceLine}: {e}"
+              | Ok resolvedFilters ->
+                if (hasFilterSearch ops || hasFilterCount ops) && resolvedFilters.IsEmpty then
+                  errors.Add
+                    $"{ann.sourceFile}:{ann.sourceLine}: filter_search/filter_count require at least one -- mig:filter on '{rel.name}'"
+                elif not (hasFilterSearch ops || hasFilterCount ops) && not resolvedFilters.IsEmpty then
+                  errors.Add
+                    $"{ann.sourceFile}:{ann.sourceLine}: -- mig:filter requires filter_search and/or filter_count on '{rel.name}'"
                 else
-                  overrideMap[realName] <- ov.kind
-              | None when selectWithArgNames.Contains(ov.column.ToLowerInvariant()) ->
-                if overrideMap.ContainsKey ov.column then
-                  errors.Add $"{ann.sourceFile}:{ann.sourceLine}: duplicate override for '{ov.column}'"
-                  overrideOk <- false
-                else
-                  overrideMap[ov.column] <- ov.kind
-              | None ->
-                errors.Add
-                  $"{ann.sourceFile}:{ann.sourceLine}: override column '{ov.column}' not found on '{rel.name}' (and not a select_with arg)"
+                  let overrideMap =
+                    System.Collections.Generic.Dictionary<string, ColumnOverrideKind>(StringComparer.OrdinalIgnoreCase)
 
-                overrideOk <- false
+                  let mutable overrideOk = true
 
-            if overrideOk then
-              let fsName =
-                match ann.fsNameOverride with
-                | Some name -> sanitizeFsIdent name
-                | None -> sanitizeFsIdent (toPascalCase rel.name)
+                  for ov in ann.overrides do
+                    match resolveColumnName rel ov.column with
+                    | Some realName ->
+                      if overrideMap.ContainsKey realName then
+                        errors.Add $"{ann.sourceFile}:{ann.sourceLine}: duplicate override for column '{realName}'"
+                        overrideOk <- false
+                      else
+                        overrideMap[realName] <- ov.kind
+                    | None when selectWithArgNames.Contains(ov.column.ToLowerInvariant()) ->
+                      if overrideMap.ContainsKey ov.column then
+                        errors.Add $"{ann.sourceFile}:{ann.sourceLine}: duplicate override for '{ov.column}'"
+                        overrideOk <- false
+                      else
+                        overrideMap[ov.column] <- ov.kind
+                    | None ->
+                      errors.Add
+                        $"{ann.sourceFile}:{ann.sourceLine}: override column '{ov.column}' not found on '{rel.name}' (and not a select_with arg)"
 
-              if not (usedFsNames.Add fsName) then
-                errors.Add $"{ann.sourceFile}:{ann.sourceLine}: duplicate F# relation name '{fsName}'"
-              else
-                let overrides = overrideMap |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
+                      overrideOk <- false
 
-                let selectWithPlanResult =
-                  match
-                    ops
-                    |> List.tryPick (function
-                      | Op.SelectWith args -> Some args
-                      | _ -> None)
-                  with
-                  | None -> Ok None
-                  | Some args ->
-                    match ann.createSql with
-                    | None
-                    | Some "" -> Error $"{ann.sourceFile}:{ann.sourceLine}: select_with requires CREATE VIEW source SQL"
-                    | Some createSql ->
-                      match SelectWith.buildPlan args createSql overrides with
-                      | Error e -> Error $"{ann.sourceFile}:{ann.sourceLine}: {e}"
-                      | Ok plan -> Ok(Some plan)
+                  if overrideOk then
+                    let fsName =
+                      match ann.fsNameOverride with
+                      | Some name -> sanitizeFsIdent name
+                      | None -> sanitizeFsIdent (toPascalCase rel.name)
 
-                match selectWithPlanResult with
-                | Error e -> errors.Add e
-                | Ok selectWith ->
-                  results.Add
-                    { sqlName = rel.name
-                      fsName = fsName
-                      kind = rel.kind
-                      columns = rel.columns
-                      ops = ops
-                      overrides = overrides
-                      selectWith = selectWith }
+                    if not (usedFsNames.Add fsName) then
+                      errors.Add $"{ann.sourceFile}:{ann.sourceLine}: duplicate F# relation name '{fsName}'"
+                    else
+                      let overrides = overrideMap |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
+
+                      let selectWithPlanResult =
+                        match
+                          ops
+                          |> List.tryPick (function
+                            | Op.SelectWith args -> Some args
+                            | _ -> None)
+                        with
+                        | None -> Ok None
+                        | Some args ->
+                          match ann.createSql with
+                          | None
+                          | Some "" ->
+                            Error $"{ann.sourceFile}:{ann.sourceLine}: select_with requires CREATE VIEW source SQL"
+                          | Some createSql ->
+                            match SelectWith.buildPlan args createSql overrides with
+                            | Error e -> Error $"{ann.sourceFile}:{ann.sourceLine}: {e}"
+                            | Ok plan -> Ok(Some plan)
+
+                      match selectWithPlanResult with
+                      | Error e -> errors.Add e
+                      | Ok selectWith ->
+                        results.Add
+                          { sqlName = rel.name
+                            fsName = fsName
+                            kind = rel.kind
+                            columns = rel.columns
+                            ops = ops
+                            filters = resolvedFilters
+                            overrides = overrides
+                            selectWith = selectWith }
 
   let merge
     (schema: Map<string, RelationInfo>)

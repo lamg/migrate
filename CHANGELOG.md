@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [11.2.0] - 2026-08-04
+
+### Added
+
+- **MigLib.Codegen / `mig codegen`**: read op `count` on tables and views emits
+  `let count : TxnStep<int64>` as unfiltered `SELECT COUNT(*) FROM [relation]`.
+  Does not accept filter arguments (use hand SQL or a filtered view for predicates).
+- **MigLib.Codegen / `mig codegen`**: optional **filter catalog** for dynamic AND predicates:
+  - `-- mig:filter name kind column[, column…]` with kinds `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like_prefix`, `eq_any`
+  - ops `filter_search(col [asc|desc], …)` and `filter_count`
+  - Emits `{Rel}Filter`, `emptyFilter`, `applyFilter` (public WHERE builder), `search`, and/or `countByFilter`
+  - Coexists with unfiltered `count` / `select_range` (separate members)
+
+### Changed
+
+- **mig CLI / package versions**: MigLib, MigLib.Codegen, and migtool aligned at `11.2.0`.
+
 ## [11.1.0] - 2026-08-03
 
 ### Added

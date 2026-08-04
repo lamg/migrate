@@ -108,6 +108,113 @@ CREATE TABLE t (id INTEGER PRIMARY KEY);
       | Error msg -> Assert.Contains("unknown op", msg))
 
 [<Fact>]
+let ``parses count op on table`` () =
+  withTempMigrations
+    [ "001.sql",
+      """
+-- mig:ops count, select_all
+CREATE TABLE item (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL
+) STRICT;
+""" ]
+    (fun dir ->
+      match parseMigrationsDirectory dir with
+      | Error e -> Assert.Fail e
+      | Ok anns ->
+        match anns.Head.ops with
+        | [ Op.Count; Op.SelectAll ] -> ()
+        | other -> Assert.Fail $"unexpected ops: {other}")
+
+[<Fact>]
+let ``parses filter catalog and filter ops`` () =
+  withTempMigrations
+    [ "001.sql",
+      """
+-- mig:ops filter_search(created_at desc, id), filter_count, select_all
+-- mig:filter status eq status
+-- mig:filter label_prefix like_prefix label
+-- mig:filter text_any eq_any label, notes
+-- mig:filter min_score gte score
+CREATE TABLE item (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  status TEXT NOT NULL,
+  label TEXT NOT NULL,
+  notes TEXT NOT NULL,
+  score REAL NOT NULL,
+  created_at TEXT NOT NULL
+) STRICT;
+""" ]
+    (fun dir ->
+      match parseMigrationsDirectory dir with
+      | Error e -> Assert.Fail e
+      | Ok anns ->
+        let a = anns.Head
+
+        match a.ops with
+        | [ Op.FilterSearch orderBy; Op.FilterCount; Op.SelectAll ] ->
+          match orderBy with
+          | [ "created_at", SortDirection.Desc; "id", SortDirection.Asc ] -> ()
+          | _ -> Assert.Fail $"unexpected orderBy: {orderBy}"
+        | other -> Assert.Fail $"unexpected ops: {other}"
+
+        Assert.Equal(4, a.filters.Length)
+
+        Assert.Contains(a.filters, fun f -> f.name = "status" && f.kind = FilterKind.Eq && f.columns = [ "status" ])
+
+        Assert.Contains(
+          a.filters,
+          fun f ->
+            f.name = "label_prefix"
+            && f.kind = FilterKind.LikePrefix
+            && f.columns = [ "label" ]
+        )
+
+        Assert.Contains(
+          a.filters,
+          fun f ->
+            f.name = "text_any"
+            && f.kind = FilterKind.EqAny
+            && f.columns = [ "label"; "notes" ]
+        )
+
+        Assert.Contains(a.filters, fun f -> f.name = "min_score" && f.kind = FilterKind.Gte && f.columns = [ "score" ]))
+
+[<Fact>]
+let ``rejects unknown filter kind`` () =
+  withTempMigrations
+    [ "001.sql",
+      """
+-- mig:ops filter_count
+-- mig:filter status fuzzy status
+CREATE TABLE item (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  status TEXT NOT NULL
+) STRICT;
+""" ]
+    (fun dir ->
+      match parseMigrationsDirectory dir with
+      | Ok _ -> Assert.Fail "expected error"
+      | Error msg -> Assert.Contains("unknown filter kind", msg))
+
+[<Fact>]
+let ``rejects eq_any with one column`` () =
+  withTempMigrations
+    [ "001.sql",
+      """
+-- mig:ops filter_count
+-- mig:filter text_any eq_any label
+CREATE TABLE item (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  label TEXT NOT NULL
+) STRICT;
+""" ]
+    (fun dir ->
+      match parseMigrationsDirectory dir with
+      | Ok _ -> Assert.Fail "expected error"
+      | Error msg -> Assert.Contains("eq_any requires at least two columns", msg))
+
+[<Fact>]
 let ``parses select_range with directions and defaults`` () =
   withTempMigrations
     [ "001.sql",

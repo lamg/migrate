@@ -56,6 +56,26 @@ module internal Types =
       sql: string
     }
 
+  /// Predicate kind for optional AND filters (declared via -- mig:filter).
+  [<RequireQualifiedAccess>]
+  type FilterKind =
+    | Eq
+    | Neq
+    | Gt
+    | Gte
+    | Lt
+    | Lte
+    /// [col] LIKE @p with value bound as (v + "%")
+    | LikePrefix
+    /// ([c1] = @p OR [c2] = @p OR …) — single bind value, 2+ columns
+    | EqAny
+
+  /// One optional filter field on a relation (columns resolved during validation).
+  type FilterDef =
+    { name: string
+      kind: FilterKind
+      columns: string list }
+
   [<RequireQualifiedAccess>]
   type Op =
     | Insert
@@ -64,6 +84,8 @@ module internal Types =
     | Upsert
     | UpsertMany
     | SelectAll
+    /// Unfiltered SELECT COUNT(*) FROM relation (tables and views).
+    | Count
     | SelectById
     | SelectBy of columns: string list
     | SelectOneBy of columns: string list
@@ -78,6 +100,10 @@ module internal Types =
     | SelectRange of orderBy: (string * SortDirection) list
     /// Parameterized view SELECT; names declared here, markers /*@name*/lit in view body.
     | SelectWith of args: string list
+    /// Filtered search: AND of optional mig:filter predicates + ORDER BY + LIMIT/OFFSET.
+    | FilterSearch of orderBy: (string * SortDirection) list
+    /// Filtered COUNT(*) using the same mig:filter catalog as FilterSearch.
+    | FilterCount
     | DeleteById
     | DeleteBy of columns: string list
     | DeleteAll
@@ -97,6 +123,7 @@ module internal Types =
       | DeleteAll
       | DeleteMatching _ -> true
       | SelectAll
+      | Count
       | SelectById
       | SelectBy _
       | SelectOneBy _
@@ -104,7 +131,9 @@ module internal Types =
       | SelectTop _
       | SelectBottom _
       | SelectRange _
-      | SelectWith _ -> false
+      | SelectWith _
+      | FilterSearch _
+      | FilterCount -> false
 
   type RelationAnnotation =
     {
@@ -112,6 +141,8 @@ module internal Types =
       sqlName: string option
       fsNameOverride: string option
       ops: Op list
+      /// Unresolved filter definitions from -- mig:filter (column names as authored).
+      filters: FilterDef list
       overrides: ColumnOverride list
       sourceFile: string
       sourceLine: int
@@ -146,6 +177,8 @@ module internal Types =
       kind: RelationKind
       columns: ColumnInfo list
       ops: Op list
+      /// Resolved filter catalog (empty if none).
+      filters: FilterDef list
       overrides: Map<string, ColumnOverrideKind>
       /// Present when ops include SelectWith; rewritten SELECT + typed args.
       selectWith: SelectWithPlan option

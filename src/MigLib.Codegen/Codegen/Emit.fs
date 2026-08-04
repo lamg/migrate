@@ -255,6 +255,158 @@ module internal Emit =
     sb.AppendLine $"  Query.queryList {sqlLit sql} [] mapRow" |> ignore
     sb.AppendLine() |> ignore
 
+  /// Unfiltered row count: SELECT COUNT(*) FROM relation (tables and views).
+  let private emitCount (sb: StringBuilder) (rel: AnnotatedRelation) =
+    let sql = $"SELECT COUNT(*) FROM {Naming.quoteSqlIdent rel.sqlName}"
+    sb.AppendLine "let count : TxnStep<int64> =" |> ignore
+    sb.AppendLine $"  Query.scalar {sqlLit sql} []" |> ignore
+    sb.AppendLine "  |> TxnStep.map (fun o -> Convert.ToInt64 o)" |> ignore
+    sb.AppendLine() |> ignore
+
+  let private filterParamName (filterName: string) =
+    "@f_" + filterName.Replace('-', '_').ToLowerInvariant()
+
+  /// Filter arg types are always non-null option wrappers (Some = apply predicate).
+  let private filterFieldFsType (rel: AnnotatedRelation) (filter: FilterDef) : string * (string -> string) =
+    let colName = filter.columns.Head
+
+    let col =
+      rel.columns
+      |> List.find (fun c -> c.name.Equals(colName, StringComparison.OrdinalIgnoreCase))
+
+    let notNullCol = { col with notNull = true }
+    let ty, _, boxFn = resolveFsType notNullCol rel.overrides
+    ty + " option", boxFn
+
+  let private emitFilterSqlClause (filter: FilterDef) (param: string) : string =
+    match filter.kind, filter.columns with
+    | FilterKind.Eq, [ col ] -> $"{Naming.quoteSqlIdent col} = {param}"
+    | FilterKind.Neq, [ col ] -> $"{Naming.quoteSqlIdent col} <> {param}"
+    | FilterKind.Gt, [ col ] -> $"{Naming.quoteSqlIdent col} > {param}"
+    | FilterKind.Gte, [ col ] -> $"{Naming.quoteSqlIdent col} >= {param}"
+    | FilterKind.Lt, [ col ] -> $"{Naming.quoteSqlIdent col} < {param}"
+    | FilterKind.Lte, [ col ] -> $"{Naming.quoteSqlIdent col} <= {param}"
+    | FilterKind.LikePrefix, [ col ] -> $"{Naming.quoteSqlIdent col} LIKE {param}"
+    | FilterKind.EqAny, cols ->
+      cols
+      |> List.map (fun c -> $"{Naming.quoteSqlIdent c} = {param}")
+      |> String.concat " OR "
+      |> fun body -> $"({body})"
+    | _ -> failwith $"invalid filter shape for '{filter.name}'"
+
+  /// Emit Filter record, emptyFilter, applyFilter, search, countByFilter when filter ops present.
+  let private emitFilterSurface
+    (sb: StringBuilder)
+    (rel: AnnotatedRelation)
+    (rowType: string)
+    (orderBy: (string * SortDirection) list option)
+    (emitSearch: bool)
+    (emitCountByFilter: bool)
+    =
+    if rel.filters.IsEmpty then
+      ()
+    else
+      let filterType = rowType + "Filter"
+
+      let fieldMeta =
+        rel.filters
+        |> List.map (fun f ->
+          let fieldName = sanitizeFsIdent (toPascalCase f.name)
+          let fsType, boxFn = filterFieldFsType rel f
+          f, fieldName, fsType, boxFn)
+
+      sb.AppendLine $"type {filterType} =" |> ignore
+      sb.AppendLine "  {" |> ignore
+
+      for _, fieldName, fsType, _ in fieldMeta do
+        sb.AppendLine $"    {fieldName}: {fsType}" |> ignore
+
+      sb.AppendLine "  }" |> ignore
+      sb.AppendLine() |> ignore
+
+      sb.AppendLine $"let emptyFilter : {filterType} =" |> ignore
+      sb.AppendLine "  {" |> ignore
+
+      for _, fieldName, _, _ in fieldMeta do
+        sb.AppendLine $"    {fieldName} = None" |> ignore
+
+      sb.AppendLine "  }" |> ignore
+      sb.AppendLine() |> ignore
+
+      // Public: hand queries (stats, optional-column maps) reuse the same WHERE catalog.
+      sb.AppendLine $"let applyFilter (f: {filterType}) : string * (string * obj) list ="
+      |> ignore
+
+      sb.AppendLine "  let clauses = ResizeArray<string>()" |> ignore
+      sb.AppendLine "  let pars = ResizeArray<string * obj>()" |> ignore
+
+      for filter, fieldName, _, boxFn in fieldMeta do
+        let param = filterParamName filter.name
+        let clause = emitFilterSqlClause filter param
+        let clauseLit = clause.Replace("\"", "\\\"")
+        let boxedV = boxFn "v"
+        let boxedLike = boxFn "(v + \"%\")"
+        sb.AppendLine $"  match f.{fieldName} with" |> ignore
+        sb.AppendLine "  | None -> ()" |> ignore
+        sb.AppendLine "  | Some v ->" |> ignore
+        sb.AppendLine $"      clauses.Add \"{clauseLit}\"" |> ignore
+
+        match filter.kind with
+        | FilterKind.LikePrefix -> sb.AppendLine $"      pars.Add(\"{param}\", {boxedLike})" |> ignore
+        | _ -> sb.AppendLine $"      pars.Add(\"{param}\", {boxedV})" |> ignore
+
+      sb.AppendLine "  let where =" |> ignore
+      sb.AppendLine "    if clauses.Count = 0 then \"1=1\"" |> ignore
+      sb.AppendLine "    else String.Join(\" AND \", clauses)" |> ignore
+      sb.AppendLine "  where, List.ofSeq pars" |> ignore
+      sb.AppendLine() |> ignore
+
+      if emitSearch then
+        let orderBy = orderBy |> Option.defaultValue [ ("rowid", SortDirection.Asc) ]
+
+        let orderSql =
+          orderBy
+          |> List.map (fun (col, dir) ->
+            let order =
+              match dir with
+              | SortDirection.Desc -> "DESC"
+              | SortDirection.Asc -> "ASC"
+
+            $"{Naming.quoteSqlIdent col} {order}")
+          |> String.concat ", "
+
+        sb.AppendLine $"let search (filter: {filterType}) (skip: int) (take: int) : TxnStep<{rowType} list> ="
+        |> ignore
+
+        sb.AppendLine "  let where, filterPars = applyFilter filter" |> ignore
+        sb.AppendLine "  let limit = max 0 take" |> ignore
+        sb.AppendLine "  let offset = max 0 skip" |> ignore
+
+        sb.AppendLine $"  let sql =" |> ignore
+
+        sb.AppendLine
+          $"    \"SELECT {columnSelectList rel} FROM {Naming.quoteSqlIdent rel.sqlName} WHERE \" + where + \" ORDER BY {orderSql} LIMIT @take OFFSET @skip\""
+        |> ignore
+
+        sb.AppendLine "  let parameters = filterPars @ [ \"@skip\", box offset; \"@take\", box limit ]"
+        |> ignore
+
+        sb.AppendLine "  Query.queryList sql parameters mapRow" |> ignore
+        sb.AppendLine() |> ignore
+
+      if emitCountByFilter then
+        sb.AppendLine $"let countByFilter (filter: {filterType}) : TxnStep<int64> ="
+        |> ignore
+
+        sb.AppendLine "  let where, filterPars = applyFilter filter" |> ignore
+
+        sb.AppendLine $"  let sql = \"SELECT COUNT(*) FROM {Naming.quoteSqlIdent rel.sqlName} WHERE \" + where"
+        |> ignore
+
+        sb.AppendLine "  Query.scalar sql filterPars" |> ignore
+        sb.AppendLine "  |> TxnStep.map (fun o -> Convert.ToInt64 o)" |> ignore
+        sb.AppendLine() |> ignore
+
   let private emitSelectById
     (sb: StringBuilder)
     (rel: AnnotatedRelation)
@@ -652,12 +804,26 @@ module internal Emit =
 
     emitMapRow sb rel rowType mapMeta
 
+    let filterSearchOrder =
+      rel.ops
+      |> List.tryPick (function
+        | Op.FilterSearch orderBy -> Some orderBy
+        | _ -> None)
+
+    let emitFilterSearch = filterSearchOrder.IsSome
+    let emitFilterCount = rel.ops |> List.contains Op.FilterCount
+
+    if not rel.filters.IsEmpty && (emitFilterSearch || emitFilterCount) then
+      emitFilterSurface sb rel rowType filterSearchOrder emitFilterSearch emitFilterCount
+
     // Emit single-row ops first, then bulk wrappers that call them
     let orderedOps =
       rel.ops
       |> List.filter (function
         | Op.InsertMany
-        | Op.UpsertMany -> false
+        | Op.UpsertMany
+        | Op.FilterSearch _
+        | Op.FilterCount -> false
         | _ -> true)
 
     for op in orderedOps do
@@ -666,6 +832,7 @@ module internal Emit =
       | Op.InsertOrIgnore -> emitInsertOrIgnore sb rel insertTypeName insertCols fieldBoxMap
       | Op.Upsert -> emitUpsert sb rel rowType rel.columns fieldBoxMap
       | Op.SelectAll -> emitSelectAll sb rel rowType
+      | Op.Count -> emitCount sb rel
       | Op.SelectById ->
         match rel.PrimaryKeyColumns with
         | [ pk ] ->
@@ -693,7 +860,9 @@ module internal Emit =
       | Op.DeleteAll -> emitDeleteAll sb rel
       | Op.DeleteMatching(targetTable, keyColumn) -> emitDeleteMatching sb rel targetTable keyColumn
       | Op.InsertMany
-      | Op.UpsertMany -> ()
+      | Op.UpsertMany
+      | Op.FilterSearch _
+      | Op.FilterCount -> ()
 
     if rel.ops |> List.contains Op.InsertMany then
       let single =
