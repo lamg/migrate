@@ -76,7 +76,6 @@ end SchemaMig
 
 /--
   A versioned path: ordered abstract migrations along a chain of schemas.
-  Concrete migrate SQL scripts are one *presentation* of such a path.
 -/
 inductive MigPath : Schema → Schema → Type where
   | nil {s : Schema} : MigPath s s

@@ -5,13 +5,13 @@
   * base **tables** (stored)
   * **views** (derived: name, exposed columns, dependency names)
 
-  View bodies are not modeled as SQL yet — only dependency edges for
-  well-formedness and acyclicity (Phase 1).
+  View dependencies are name-level edges for well-formedness and
+  acyclicity (Phase 1). No query bodies in this model.
 -/
 
 namespace MigrationAlgebra
 
-/-- Minimal SQL type vocabulary (extend as needed). -/
+/-- Minimal column type vocabulary (extend as needed). -/
 inductive SqlType where
   | integer
   | text
@@ -92,7 +92,7 @@ def tableNames (s : Schema) : List String :=
 def viewNames (s : Schema) : List String :=
   s.views.map (·.name)
 
-/-- Shared relation namespace (SQLite-style): tables and views together. -/
+/-- Shared relation namespace: tables and views together. -/
 def relationNames (s : Schema) : List String :=
   s.tableNames ++ s.viewNames
 
@@ -181,7 +181,7 @@ end Schema
   No view in the catalog lists `n` as a dependency.
 
   Required to **drop** relation `n` (table or view): nothing may still point at it.
-  This is the algebraic gate; dropping many views in SQL is only one way to
+  This is the algebraic gate; a path may drop several views in order to
   discharge a chain of such gates.
 -/
 def NoDependentView (s : Schema) (n : String) : Prop :=

@@ -8,3 +8,4 @@ import MigrationAlgebra.SchemaMig
 import MigrationAlgebra.Semantics
 import MigrationAlgebra.Coupling
 import MigrationAlgebra.Laws
+import MigrationAlgebra.Policy

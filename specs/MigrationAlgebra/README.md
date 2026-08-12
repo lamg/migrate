@@ -3,9 +3,8 @@
 Lean 4 exploration of an **algebra of database migrations**: schemas as objects,
 migrations as morphisms, application as a semantics on database instances.
 
-This is a design / formalization workspace under `specs/`. It is **not** wired
-into the F# `migrate` runtime; the goal is to make the algebra precise before
-(or while) shaping tooling.
+This package states **algebraic contracts** a future MigLib-style runner can
+follow. It is not a runtime, not codegen, and not a full schema engine.
 
 ## Build
 
@@ -21,12 +20,13 @@ lake build
 
 | Module | Role |
 |--------|------|
-| `MigrationAlgebra.Schema` | `SqlType`, `Column`, `Table`, `View`, `Schema` |
+| `MigrationAlgebra.Schema` | `SqlType`, `Column`, `Table`, `View`, `Schema`, gates |
 | `MigrationAlgebra.TableMig` | Table-level morphisms |
-| `MigrationAlgebra.SchemaMig` | Schema-level morphisms + composition |
+| `MigrationAlgebra.SchemaMig` | Schema-level morphisms + `MigPath` |
 | `MigrationAlgebra.Semantics` | Instances and `applyMig` |
-| `MigrationAlgebra.Coupling` | Phase 2: dep-gated drops preserve resolved deps |
-| `MigrationAlgebra.Laws` | Identity / composition / view data-preservation / examples |
+| `MigrationAlgebra.Coupling` | Dependency preservation under gated drops/creates |
+| `MigrationAlgebra.Laws` | Functoriality, examples |
+| `MigrationAlgebra.Policy` | Phase 3 law pack / admissibility |
 
 ## Design sketch
 
@@ -39,20 +39,33 @@ id        : Mig S S
 (∘)       : Mig S₁ S₂ → Mig S₀ S₁ → Mig S₀ S₂
 ```
 
-**Views (Phase 1):** catalog objects with `name`, `cols`, `deps`. Morphisms
-`createView` / `dropView` / `recreateView`. `applyMig` is **identity on stored
-rows** for pure view ops. Well-formedness: shared name space, resolved deps,
-topo-ordered view list (acyclicity witness).
+### Phase 1 — Vocabulary
 
-**Coupling (Phase 2):** destructive drops are **dependency-gated**, not
-“drop all views”:
+Views are catalog objects with `name`, `cols`, `deps` (name-level). Morphisms
+`createView` / `dropView` / `recreateView`. Pure view ops are identity on
+stored rows. Well-formedness: shared name space, resolved deps, topo-ordered
+view list.
+
+### Phase 2 — Dependency gates
+
+Destructive drops are **dependency-gated**, not a global “drop every view”
+primitive:
 
 - `NoDependentView s n` — no view lists `n` in `deps`
 - `dropView` / `dropTable` require that proof
 - `CanCreateView` / `CanRecreateView` gate create/recreate
-- SQL “drop many views then alter” is only one *path* that discharges gates
+- Multi-view teardown is a **path** of local gates
 
-Ordered SQL scripts (as in migrate) are a *presentation* of such morphisms;
-many script lists may denote the same abstract migration.
+### Phase 3 — Policy (laws for implementors)
 
-Codegen annotations (`select_with`, etc.) stay outside this algebra.
+Module `Policy` packages the contracts:
+
+1. **Functoriality** of `applyMig` (see also `Laws`)
+2. **`DataPreserving`** — view-catalog morphisms do not change instances  
+   (`DataPreserving_of_isViewCatalog`)
+3. **Gated drops/creates** — constructors carry `NoDependentView` / `Can*`
+4. **`PreservesResolvedDeps`** — gated create/drop keep view deps resolved
+5. **`DepSafePath`** — path-level policy on resolved deps along `MigPath`
+6. **Catalog vs data** — `conforms` is about tables; view steps leave rows alone
+
+Out of scope here: query bodies, column-level reads, codegen annotations.

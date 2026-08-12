@@ -13,6 +13,7 @@
 import MigrationAlgebra.SchemaMig
 import MigrationAlgebra.Semantics
 import MigrationAlgebra.Coupling
+import MigrationAlgebra.Policy
 
 namespace MigrationAlgebra
 
@@ -219,5 +220,28 @@ theorem noDep_active_after_vip : NoDependentView s3vip_mid "active_users" := by 
 def s3vip_base : Schema := s3vip_mid.dropView "active_users"
 def migDropActiveAfterVip : SchemaMig s3vip_mid s3vip_base :=
   .dropView "active_users" noDep_active_after_vip
+
+/-! ### Phase 3: policy examples on concrete paths -/
+
+/-- Teardown path: drop view then drop table — dep-safe when start is resolved. -/
+def teardownPath : MigPath s3 s_emptyish :=
+  .cons migDropActive (.cons migDropUsers .nil)
+
+theorem teardownPath_depSafe (h0 : Schema.ViewDepsResolved s3) :
+    DepSafePath teardownPath := by
+  have h1 : Schema.ViewDepsResolved s3_noView :=
+    PreservesResolvedDeps_dropView "active_users" noDep_on_activeUsers h0
+  have h2 : Schema.ViewDepsResolved s_emptyish :=
+    PreservesResolvedDeps_dropTable "users" noDep_on_users_after_view_drop h1
+  exact
+    DepSafePath.cons migDropActive (.cons migDropUsers .nil) h0
+      (PreservesResolvedDeps_dropView _ noDep_on_activeUsers)
+      (DepSafePath.cons migDropUsers .nil h1
+        (PreservesResolvedDeps_dropTable _ noDep_on_users_after_view_drop)
+        (DepSafePath.nil h2))
+
+/-- Pure view-catalog create is data-preserving (policy). -/
+example : DataPreserving migCreateView :=
+  DataPreserving_createView activeUsers canCreate_activeUsers
 
 end MigrationAlgebra

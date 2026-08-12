@@ -2,9 +2,8 @@
   Denotational sketch: schemas classify *instances* (databases), and a
   migration denotes a function on instances.
 
-  This is intentionally simplified (stringly-typed rows, no FK graph, no SQL
-  evaluation). It is enough to state soundness shapes and prove them for the
-  atomic constructors.
+  Intentionally simplified (stringly-typed rows, no FK graph). Enough to
+  state soundness shapes for the atomic constructors.
 -/
 
 import MigrationAlgebra.Schema
