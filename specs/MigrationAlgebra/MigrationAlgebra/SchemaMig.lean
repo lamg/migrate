@@ -5,6 +5,8 @@
   Arrows   = SchemaMig S₀ S₁
   Identity = SchemaMig.id
   Compose  = SchemaMig.seq  (apply first morphism, then second)
+
+  Phase 1 view ops: createView / dropView / recreateView (catalog only).
 -/
 
 import MigrationAlgebra.Schema
@@ -16,26 +18,26 @@ namespace MigrationAlgebra
 inductive SchemaMig : Schema → Schema → Type where
   /-- Empty migration. -/
   | id {s : Schema} : SchemaMig s s
-  /-- Create a new table. -/
+  /-- Create a new base table. -/
   | createTable {s : Schema} (t : Table) : SchemaMig s (s.addTable t)
-  /-- Drop a table by name. -/
+  /-- Drop a base table by name. -/
   | dropTable {s : Schema} (n : String) : SchemaMig s (s.dropTable n)
-  /-- Rename a table. -/
+  /-- Rename a base table. -/
   | renameTable {s : Schema} (fromName toName : String) :
       SchemaMig s (s.renameTable fromName toName)
-  /-- Apply a table morphism to the table currently named `tableName`.
-
-      The target schema is obtained by updating that table with the
-      *syntactic* image of a few common constructors. For a fully general
-      `TableMig`, use `onTable'` with an explicit target table, or flatten
-      to atomic steps later.
-  -/
+  /-- Add a column on a base table. -/
   | addColumn {s : Schema} (tableName : String) (c : Column) :
       SchemaMig s (s.updateTable tableName (·.addColumn c))
   | dropColumn {s : Schema} (tableName : String) (colName : String) :
       SchemaMig s (s.updateTable tableName (·.dropColumn colName))
   | renameColumn {s : Schema} (tableName fromName toName : String) :
       SchemaMig s (s.updateTable tableName (·.renameColumn fromName toName))
+  /-- Create a view in the catalog (no stored rows). -/
+  | createView {s : Schema} (v : View) : SchemaMig s (s.addView v)
+  /-- Drop a view by name. -/
+  | dropView {s : Schema} (n : String) : SchemaMig s (s.dropView n)
+  /-- Replace body/shape of a view (insert-or-replace by name). -/
+  | recreateView {s : Schema} (v : View) : SchemaMig s (s.upsertView v)
   /-- Sequential composition: `seq m₂ m₁` means apply `m₁` then `m₂`. -/
   | seq {s₀ s₁ s₂ : Schema} :
       SchemaMig s₁ s₂ → SchemaMig s₀ s₁ → SchemaMig s₀ s₂
@@ -53,6 +55,15 @@ infixr:90 " ∘ₛ " => SchemaMig.comp
 /-- Lift a pure table identity as a no-op schema migration (same schema). -/
 def onTableId {s : Schema} (_tableName : String) : SchemaMig s s :=
   .id
+
+/-- True when the morphism only touches the view catalog (syntactic class). -/
+def isViewCatalog : {s₀ s₁ : Schema} → SchemaMig s₀ s₁ → Bool
+  | _, _, .id => true
+  | _, _, .createView _ => true
+  | _, _, .dropView _ => true
+  | _, _, .recreateView _ => true
+  | _, _, .seq m₂ m₁ => isViewCatalog m₂ && isViewCatalog m₁
+  | _, _, _ => false
 
 end SchemaMig
 

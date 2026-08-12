@@ -1,8 +1,12 @@
 /-
   Schema objects for the migration algebra.
 
-  A schema is a finite collection of named tables; each table is a finite
-  collection of named columns with a SQL-ish type and nullability.
+  A schema has two kinds of relations:
+  * base **tables** (stored)
+  * **views** (derived: name, exposed columns, dependency names)
+
+  View bodies are not modeled as SQL yet — only dependency edges for
+  well-formedness and acyclicity (Phase 1).
 -/
 
 namespace MigrationAlgebra
@@ -23,7 +27,7 @@ structure Column where
   nullable : Bool := true
   deriving DecidableEq, Repr, Inhabited
 
-/-- A table declaration (name + ordered columns). -/
+/-- A base table declaration (name + ordered columns). -/
 structure Table where
   name : String
   cols : List Column
@@ -53,44 +57,121 @@ def renameColumn (t : Table) (fromName toName : String) : Table :=
 
 end Table
 
-/-- A schema: named tables (list; uniqueness is a well-formedness predicate). -/
+/--
+  A view: derived relation.
+
+  * `cols` — exposed shape (what clients / codegen see)
+  * `deps` — names of tables or views this view reads (Phase 1; not column-level)
+-/
+structure View where
+  name : String
+  cols : List Column
+  deps : List String := []
+  deriving DecidableEq, Repr, Inhabited
+
+namespace View
+
+def colNames (v : View) : List String :=
+  v.cols.map (·.name)
+
+end View
+
+/-- Schema: base tables plus catalog views. -/
 structure Schema where
-  tables : List Table
+  tables : List Table := []
+  views  : List View := []
   deriving DecidableEq, Repr, Inhabited
 
 namespace Schema
 
-def empty : Schema := ⟨[]⟩
+def empty : Schema := {}
 
 def tableNames (s : Schema) : List String :=
   s.tables.map (·.name)
 
+def viewNames (s : Schema) : List String :=
+  s.views.map (·.name)
+
+/-- Shared relation namespace (SQLite-style): tables and views together. -/
+def relationNames (s : Schema) : List String :=
+  s.tableNames ++ s.viewNames
+
 def hasTable (s : Schema) (n : String) : Bool :=
   s.tables.any (·.name == n)
+
+def hasView (s : Schema) (n : String) : Bool :=
+  s.views.any (·.name == n)
+
+def hasRelation (s : Schema) (n : String) : Bool :=
+  s.hasTable n || s.hasView n
 
 def findTable (s : Schema) (n : String) : Option Table :=
   s.tables.find? (·.name == n)
 
+def findView (s : Schema) (n : String) : Option View :=
+  s.views.find? (·.name == n)
+
 def addTable (s : Schema) (t : Table) : Schema :=
-  { tables := s.tables ++ [t] }
+  { s with tables := s.tables ++ [t] }
 
 def dropTable (s : Schema) (n : String) : Schema :=
-  { tables := s.tables.filter (·.name != n) }
+  { s with tables := s.tables.filter (·.name != n) }
 
 def renameTable (s : Schema) (fromName toName : String) : Schema :=
-  { tables := s.tables.map fun t =>
+  { s with
+    tables := s.tables.map fun t =>
       if t.name == fromName then { t with name := toName } else t }
 
-/-- Replace the table named `n` if present; otherwise leave the schema unchanged. -/
+/-- Replace the table named `n` if present; otherwise leave tables unchanged. -/
 def updateTable (s : Schema) (n : String) (f : Table → Table) : Schema :=
-  { tables := s.tables.map fun t => if t.name == n then f t else t }
+  { s with
+    tables := s.tables.map fun t => if t.name == n then f t else t }
+
+def addView (s : Schema) (v : View) : Schema :=
+  { s with views := s.views ++ [v] }
+
+def dropView (s : Schema) (n : String) : Schema :=
+  { s with views := s.views.filter (·.name != n) }
+
+/-- Insert or replace a view by name (used for `recreateView`). -/
+def upsertView (s : Schema) (v : View) : Schema :=
+  if s.hasView v.name then
+    { s with
+      views := s.views.map fun w => if w.name == v.name then v else w }
+  else
+    s.addView v
 
 /--
-  Well-formedness: table names unique, column names unique within each table.
-  Migrations are only required to preserve this on successful paths.
+  Every view dependency names a table or view in the schema.
+-/
+def ViewDepsResolved (s : Schema) : Prop :=
+  ∀ v ∈ s.views, ∀ d ∈ v.deps, d ∈ s.relationNames
+
+/--
+  View list is a topological order of the view→view dependency graph:
+  if view `v` depends on view `d`, then `d` appears earlier in `s.views`.
+
+  This is a convenient witness of acyclicity (Phase 1).
+-/
+def ViewsTopoOrdered (s : Schema) : Prop :=
+  ∀ i : Nat, i < s.views.length →
+    ∀ d ∈ s.views[i]!.deps,
+      (s.findView d).isNone ∨
+        ∃ j : Nat, j < i ∧ s.views[j]!.name = d
+
+/--
+  Well-formed schema:
+  * unique relation names (tables and views share a namespace)
+  * unique column names within each relation
+  * view dependencies resolve
+  * view dependencies among views are acyclic (topo-ordered list)
 -/
 def WellFormed (s : Schema) : Prop :=
-  s.tableNames.Nodup ∧ ∀ t ∈ s.tables, t.colNames.Nodup
+  s.relationNames.Nodup ∧
+    (∀ t ∈ s.tables, t.colNames.Nodup) ∧
+    (∀ v ∈ s.views, v.colNames.Nodup) ∧
+    ViewDepsResolved s ∧
+    ViewsTopoOrdered s
 
 end Schema
 

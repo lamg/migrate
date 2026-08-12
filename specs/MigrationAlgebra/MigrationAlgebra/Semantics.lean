@@ -86,6 +86,10 @@ end Instance
 /--
   Apply a schema morphism to an instance.
 
+  Base-table ops reshape stored rows. View catalog ops (`createView`,
+  `dropView`, `recreateView`) are **identity on instances**: views are not
+  stored row bags in this model (Phase 1).
+
   Missing tables are treated leniently (no-op) so partial instances still
   transform; a stricter model can require `conforms db s₀` as a precondition.
 -/
@@ -97,9 +101,13 @@ def applyMig {s₀ s₁ : Schema} : SchemaMig s₀ s₁ → Instance → Instanc
   | .addColumn table c, db => db.addColumn table c.name
   | .dropColumn table col, db => db.dropColumn table col
   | .renameColumn table fr to, db => db.renameColumn table fr to
+  | .createView _, db => db
+  | .dropView _, db => db
+  | .recreateView _, db => db
   | .seq m₂ m₁, db => applyMig m₂ (applyMig m₁ db)
 
-/-- Optional conformance: every schema table exists in the instance. -/
+/-- Optional conformance: every schema **table** exists in the instance.
+    Views are catalog-only and are not required as instance keys. -/
 def conforms (db : Instance) (s : Schema) : Prop :=
   ∀ t ∈ s.tables, (db.find t.name).isSome
 

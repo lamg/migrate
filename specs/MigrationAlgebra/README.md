@@ -21,22 +21,29 @@ lake build
 
 | Module | Role |
 |--------|------|
-| `MigrationAlgebra.Schema` | `SqlType`, `Column`, `Table`, `Schema` |
+| `MigrationAlgebra.Schema` | `SqlType`, `Column`, `Table`, `View`, `Schema` |
 | `MigrationAlgebra.TableMig` | Table-level morphisms |
 | `MigrationAlgebra.SchemaMig` | Schema-level morphisms + composition |
-| `MigrationAlgebra.Semantics` | Instances and `apply` |
-| `MigrationAlgebra.Laws` | Identity / composition properties |
+| `MigrationAlgebra.Semantics` | Instances and `applyMig` |
+| `MigrationAlgebra.Laws` | Identity / composition / view data-preservation |
 
 ## Design sketch
 
 ```text
-Schemas  = objects
+Schemas  = objects (tables + views)
 Mig S₀ S₁ = morphisms  S₀ ⟶ S₁
-apply     : Mig S₀ S₁ → Instance S₀ → Instance S₁
+apply     : Mig S₀ S₁ → Instance → Instance
 
 id        : Mig S S
 (∘)       : Mig S₁ S₂ → Mig S₀ S₁ → Mig S₀ S₂
 ```
 
+**Views (Phase 1):** catalog objects with `name`, `cols`, `deps`. Morphisms
+`createView` / `dropView` / `recreateView`. `applyMig` is **identity on stored
+rows** for pure view ops. Well-formedness: shared name space, resolved deps,
+topo-ordered view list (acyclicity witness).
+
 Ordered SQL scripts (as in migrate) are a *presentation* of such morphisms;
 many script lists may denote the same abstract migration.
+
+Codegen annotations (`select_with`, etc.) stay outside this algebra.

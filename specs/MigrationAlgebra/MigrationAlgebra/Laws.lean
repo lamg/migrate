@@ -58,11 +58,25 @@ theorem applyMig_flatten_cons_nil {s₀ s₁ : Schema}
     applyMig (MigPath.flatten (.cons m .nil)) db = applyMig m db := by
   simp [MigPath.flatten, applyMig]
 
+/-! ### View catalog ops preserve stored data -/
+
+@[simp] theorem applyMig_createView {s : Schema} (v : View) (db : Instance) :
+    applyMig (SchemaMig.createView (s := s) v) db = db :=
+  rfl
+
+@[simp] theorem applyMig_dropView {s : Schema} (n : String) (db : Instance) :
+    applyMig (SchemaMig.dropView (s := s) n) db = db :=
+  rfl
+
+@[simp] theorem applyMig_recreateView {s : Schema} (v : View) (db : Instance) :
+    applyMig (SchemaMig.recreateView (s := s) v) db = db :=
+  rfl
+
 /-!
-  ## Worked example
+  ## Worked examples
 
   Create a table, then add a column. Dependent types track schema shape
-  through composition.
+  through composition. Then attach a view over that table (data unchanged).
 -/
 
 def users0 : Table :=
@@ -84,5 +98,34 @@ def migBoth : SchemaMig s0 s2 := migAddEmail ∘ₛ migCreate
 theorem migBoth_apply (db : Instance) :
     applyMig migBoth db = applyMig migAddEmail (applyMig migCreate db) := by
   simp [migBoth, SchemaMig.comp]
+
+def activeUsers : View :=
+  { name := "active_users"
+    cols := [{ name := "id", ty := .integer, nullable := false }]
+    deps := ["users"] }
+
+def s3 : Schema := s2.addView activeUsers
+def migCreateView : SchemaMig s2 s3 := .createView activeUsers
+def migTableThenView : SchemaMig s0 s3 := migCreateView ∘ₛ migBoth
+
+/-- View creation does not change the stored instance produced by table migs. -/
+theorem migTableThenView_data (db : Instance) :
+    applyMig migTableThenView db = applyMig migBoth db := by
+  simp [migTableThenView, migCreateView, SchemaMig.comp, applyMig]
+
+/-- Recreating a view is still data-preserving. -/
+def activeUsers' : View where
+  name := "active_users"
+  cols :=
+    [ { name := "id", ty := .integer, nullable := false }
+      , { name := "email", ty := .text, nullable := true } ]
+  deps := ["users"]
+
+def s4 : Schema := s3.upsertView activeUsers'
+def migRecreate : SchemaMig s3 s4 := .recreateView activeUsers'
+
+theorem recreateView_preserves (db : Instance) :
+    applyMig migRecreate db = db := by
+  simp [migRecreate, applyMig]
 
 end MigrationAlgebra
