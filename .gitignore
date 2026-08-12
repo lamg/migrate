@@ -10,6 +10,7 @@
 *.sqlite-shm
 *.sqlite-wal
 
+.lake
 # User-specific files
 *.rsuser
 *.suo
