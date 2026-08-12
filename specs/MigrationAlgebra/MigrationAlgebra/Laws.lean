@@ -6,10 +6,13 @@
   here is the important *semantic* structure:
 
   * `applyMig` is a functor: preserves identity and composition.
+  * view catalog ops preserve stored data
+  * Phase 2: dependency-gated drops (examples)
 -/
 
 import MigrationAlgebra.SchemaMig
 import MigrationAlgebra.Semantics
+import MigrationAlgebra.Coupling
 
 namespace MigrationAlgebra
 
@@ -60,23 +63,23 @@ theorem applyMig_flatten_cons_nil {s₀ s₁ : Schema}
 
 /-! ### View catalog ops preserve stored data -/
 
-@[simp] theorem applyMig_createView {s : Schema} (v : View) (db : Instance) :
-    applyMig (SchemaMig.createView (s := s) v) db = db :=
+@[simp] theorem applyMig_createView {s : Schema} (v : View)
+    (h : CanCreateView s v) (db : Instance) :
+    applyMig (SchemaMig.createView (s := s) v h) db = db :=
   rfl
 
-@[simp] theorem applyMig_dropView {s : Schema} (n : String) (db : Instance) :
-    applyMig (SchemaMig.dropView (s := s) n) db = db :=
+@[simp] theorem applyMig_dropView {s : Schema} (n : String)
+    (h : NoDependentView s n) (db : Instance) :
+    applyMig (SchemaMig.dropView (s := s) n h) db = db :=
   rfl
 
-@[simp] theorem applyMig_recreateView {s : Schema} (v : View) (db : Instance) :
-    applyMig (SchemaMig.recreateView (s := s) v) db = db :=
+@[simp] theorem applyMig_recreateView {s : Schema} (v : View)
+    (h : CanRecreateView s v) (db : Instance) :
+    applyMig (SchemaMig.recreateView (s := s) v h) db = db :=
   rfl
 
 /-!
-  ## Worked examples
-
-  Create a table, then add a column. Dependent types track schema shape
-  through composition. Then attach a view over that table (data unchanged).
+  ## Worked examples (Phase 1 + Phase 2)
 -/
 
 def users0 : Table :=
@@ -104,8 +107,22 @@ def activeUsers : View :=
     cols := [{ name := "id", ty := .integer, nullable := false }]
     deps := ["users"] }
 
+theorem canCreate_activeUsers : CanCreateView s2 activeUsers := by
+  refine ⟨?_, ?_, ?_⟩
+  · -- fresh name
+    decide
+  · -- deps resolve
+    intro d hd
+    have : d = "users" := by
+      simp [activeUsers] at hd
+      exact hd
+    subst this
+    decide
+  · -- col names nodup
+    decide
+
 def s3 : Schema := s2.addView activeUsers
-def migCreateView : SchemaMig s2 s3 := .createView activeUsers
+def migCreateView : SchemaMig s2 s3 := .createView activeUsers canCreate_activeUsers
 def migTableThenView : SchemaMig s0 s3 := migCreateView ∘ₛ migBoth
 
 /-- View creation does not change the stored instance produced by table migs. -/
@@ -113,7 +130,6 @@ theorem migTableThenView_data (db : Instance) :
     applyMig migTableThenView db = applyMig migBoth db := by
   simp [migTableThenView, migCreateView, SchemaMig.comp, applyMig]
 
-/-- Recreating a view is still data-preserving. -/
 def activeUsers' : View where
   name := "active_users"
   cols :=
@@ -121,11 +137,87 @@ def activeUsers' : View where
       , { name := "email", ty := .text, nullable := true } ]
   deps := ["users"]
 
+theorem canRecreate_activeUsers' : CanRecreateView s3 activeUsers' := by
+  refine ⟨?_, ?_, ?_⟩
+  · decide
+  · intro d hd
+    have : d = "users" := by
+      simp [activeUsers'] at hd
+      exact hd
+    subst this
+    decide
+  · decide
+
 def s4 : Schema := s3.upsertView activeUsers'
-def migRecreate : SchemaMig s3 s4 := .recreateView activeUsers'
+def migRecreate : SchemaMig s3 s4 := .recreateView activeUsers' canRecreate_activeUsers'
 
 theorem recreateView_preserves (db : Instance) :
     applyMig migRecreate db = db := by
   simp [migRecreate, applyMig]
+
+/-!
+  ### Phase 2 path: drop dependent view, then drop table
+
+  Algebraic style is local gates (`NoDependentView`), not “drop every view”.
+  Order: drop `active_users` (nothing depends on it) → drop `users`.
+-/
+
+theorem noDep_on_activeUsers : NoDependentView s3 "active_users" := by
+  decide
+
+/-- After the view is gone, nothing depends on `users`. -/
+def s3_noView : Schema := s3.dropView "active_users"
+
+theorem noDep_on_users_after_view_drop : NoDependentView s3_noView "users" := by
+  decide
+
+def migDropActive : SchemaMig s3 s3_noView :=
+  .dropView "active_users" noDep_on_activeUsers
+
+def s_emptyish : Schema := s3_noView.dropTable "users"
+
+def migDropUsers : SchemaMig s3_noView s_emptyish :=
+  .dropTable "users" noDep_on_users_after_view_drop
+
+/-- Composite: tear down view then table (proof-carrying at each step). -/
+def migTeardown : SchemaMig s3 s_emptyish :=
+  migDropUsers ∘ₛ migDropActive
+
+theorem migTeardown_apply (db : Instance) :
+    applyMig migTeardown db = db.erase "users" := by
+  simp [migTeardown, migDropUsers, migDropActive, SchemaMig.comp, applyMig, Instance.erase]
+
+/-- Nested view: must drop the leaf before the middle view. -/
+def vipUsers : View :=
+  { name := "vip_users"
+    cols := [{ name := "id", ty := .integer, nullable := false }]
+    deps := ["active_users"] }
+
+theorem canCreate_vip : CanCreateView s3 vipUsers := by
+  refine ⟨?_, ?_, ?_⟩
+  · decide
+  · intro d hd
+    have : d = "active_users" := by
+      simp [vipUsers] at hd
+      exact hd
+    subst this
+    decide
+  · decide
+
+def s3vip : Schema := s3.addView vipUsers
+
+/-- Cannot drop `active_users` while `vip_users` depends on it — gate fails. -/
+example : noDependentViewb s3vip "active_users" = false := by decide
+
+theorem noDep_vip : NoDependentView s3vip "vip_users" := by decide
+
+def s3vip_mid : Schema := s3vip.dropView "vip_users"
+def migDropVip : SchemaMig s3vip s3vip_mid := .dropView "vip_users" noDep_vip
+
+theorem noDep_active_after_vip : NoDependentView s3vip_mid "active_users" := by decide
+
+def s3vip_base : Schema := s3vip_mid.dropView "active_users"
+def migDropActiveAfterVip : SchemaMig s3vip_mid s3vip_base :=
+  .dropView "active_users" noDep_active_after_vip
 
 end MigrationAlgebra

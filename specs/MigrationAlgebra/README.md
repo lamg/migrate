@@ -25,7 +25,8 @@ lake build
 | `MigrationAlgebra.TableMig` | Table-level morphisms |
 | `MigrationAlgebra.SchemaMig` | Schema-level morphisms + composition |
 | `MigrationAlgebra.Semantics` | Instances and `applyMig` |
-| `MigrationAlgebra.Laws` | Identity / composition / view data-preservation |
+| `MigrationAlgebra.Coupling` | Phase 2: dep-gated drops preserve resolved deps |
+| `MigrationAlgebra.Laws` | Identity / composition / view data-preservation / examples |
 
 ## Design sketch
 
@@ -42,6 +43,14 @@ id        : Mig S S
 `createView` / `dropView` / `recreateView`. `applyMig` is **identity on stored
 rows** for pure view ops. Well-formedness: shared name space, resolved deps,
 topo-ordered view list (acyclicity witness).
+
+**Coupling (Phase 2):** destructive drops are **dependency-gated**, not
+“drop all views”:
+
+- `NoDependentView s n` — no view lists `n` in `deps`
+- `dropView` / `dropTable` require that proof
+- `CanCreateView` / `CanRecreateView` gate create/recreate
+- SQL “drop many views then alter” is only one *path* that discharges gates
 
 Ordered SQL scripts (as in migrate) are a *presentation* of such morphisms;
 many script lists may denote the same abstract migration.

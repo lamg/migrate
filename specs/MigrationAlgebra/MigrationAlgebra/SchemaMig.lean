@@ -6,7 +6,10 @@
   Identity = SchemaMig.id
   Compose  = SchemaMig.seq  (apply first morphism, then second)
 
-  Phase 1 view ops: createView / dropView / recreateView (catalog only).
+  Phase 1: view catalog ops (create / drop / recreate).
+  Phase 2: dependency-gated drop (and gated create/recreate):
+    drop only with `NoDependentView`; create/recreate with Can* proofs.
+    We do **not** encode “drop all views” as a primitive — only local gates.
 -/
 
 import MigrationAlgebra.Schema
@@ -20,8 +23,9 @@ inductive SchemaMig : Schema → Schema → Type where
   | id {s : Schema} : SchemaMig s s
   /-- Create a new base table. -/
   | createTable {s : Schema} (t : Table) : SchemaMig s (s.addTable t)
-  /-- Drop a base table by name. -/
-  | dropTable {s : Schema} (n : String) : SchemaMig s (s.dropTable n)
+  /-- Drop a base table; requires no view still depends on its name. -/
+  | dropTable {s : Schema} (n : String) (h : NoDependentView s n) :
+      SchemaMig s (s.dropTable n)
   /-- Rename a base table. -/
   | renameTable {s : Schema} (fromName toName : String) :
       SchemaMig s (s.renameTable fromName toName)
@@ -32,12 +36,15 @@ inductive SchemaMig : Schema → Schema → Type where
       SchemaMig s (s.updateTable tableName (·.dropColumn colName))
   | renameColumn {s : Schema} (tableName fromName toName : String) :
       SchemaMig s (s.updateTable tableName (·.renameColumn fromName toName))
-  /-- Create a view in the catalog (no stored rows). -/
-  | createView {s : Schema} (v : View) : SchemaMig s (s.addView v)
-  /-- Drop a view by name. -/
-  | dropView {s : Schema} (n : String) : SchemaMig s (s.dropView n)
-  /-- Replace body/shape of a view (insert-or-replace by name). -/
-  | recreateView {s : Schema} (v : View) : SchemaMig s (s.upsertView v)
+  /-- Create a view; requires `CanCreateView` (fresh name, deps resolve). -/
+  | createView {s : Schema} (v : View) (h : CanCreateView s v) :
+      SchemaMig s (s.addView v)
+  /-- Drop a view; requires no other view depends on its name. -/
+  | dropView {s : Schema} (n : String) (h : NoDependentView s n) :
+      SchemaMig s (s.dropView n)
+  /-- Replace a view definition; requires `CanRecreateView`. -/
+  | recreateView {s : Schema} (v : View) (h : CanRecreateView s v) :
+      SchemaMig s (s.upsertView v)
   /-- Sequential composition: `seq m₂ m₁` means apply `m₁` then `m₂`. -/
   | seq {s₀ s₁ s₂ : Schema} :
       SchemaMig s₁ s₂ → SchemaMig s₀ s₁ → SchemaMig s₀ s₂
@@ -59,9 +66,9 @@ def onTableId {s : Schema} (_tableName : String) : SchemaMig s s :=
 /-- True when the morphism only touches the view catalog (syntactic class). -/
 def isViewCatalog : {s₀ s₁ : Schema} → SchemaMig s₀ s₁ → Bool
   | _, _, .id => true
-  | _, _, .createView _ => true
-  | _, _, .dropView _ => true
-  | _, _, .recreateView _ => true
+  | _, _, .createView _ _ => true
+  | _, _, .dropView _ _ => true
+  | _, _, .recreateView _ _ => true
   | _, _, .seq m₂ m₁ => isViewCatalog m₂ && isViewCatalog m₁
   | _, _, _ => false
 

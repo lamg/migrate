@@ -175,4 +175,45 @@ def WellFormed (s : Schema) : Prop :=
 
 end Schema
 
+/-! ### Phase 2: dependency gates (not “drop all views”) -/
+
+/--
+  No view in the catalog lists `n` as a dependency.
+
+  Required to **drop** relation `n` (table or view): nothing may still point at it.
+  This is the algebraic gate; dropping many views in SQL is only one way to
+  discharge a chain of such gates.
+-/
+def NoDependentView (s : Schema) (n : String) : Prop :=
+  ∀ v ∈ s.views, n ∉ v.deps
+
+/-- Boolean checker for `NoDependentView` (for `decide` / examples). -/
+def noDependentViewb (s : Schema) (n : String) : Bool :=
+  s.views.all fun v => !v.deps.contains n
+
+theorem noDependentViewb_eq (s : Schema) (n : String) :
+    noDependentViewb s n = true ↔ NoDependentView s n := by
+  simp [noDependentViewb, NoDependentView, List.all_eq_true]
+
+instance (s : Schema) (n : String) : Decidable (NoDependentView s n) :=
+  decidable_of_iff _ (noDependentViewb_eq s n)
+
+/--
+  Side conditions to **create** a view: fresh name, deps already in the catalog,
+  unique column names on the view.
+-/
+def CanCreateView (s : Schema) (v : View) : Prop :=
+  v.name ∉ s.relationNames ∧
+    (∀ d ∈ v.deps, d ∈ s.relationNames) ∧
+    v.colNames.Nodup
+
+/--
+  Side conditions to **recreate** a view: name already a view, new deps resolve
+  in the current catalog, unique columns.
+-/
+def CanRecreateView (s : Schema) (v : View) : Prop :=
+  v.name ∈ s.viewNames ∧
+    (∀ d ∈ v.deps, d ∈ s.relationNames) ∧
+    v.colNames.Nodup
+
 end MigrationAlgebra

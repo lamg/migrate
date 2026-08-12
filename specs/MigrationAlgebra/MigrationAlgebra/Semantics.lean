@@ -96,14 +96,14 @@ end Instance
 def applyMig {s₀ s₁ : Schema} : SchemaMig s₀ s₁ → Instance → Instance
   | .id, db => db
   | .createTable t, db => db.upsert t.name []
-  | .dropTable n, db => db.erase n
+  | .dropTable n _, db => db.erase n
   | .renameTable fr to, db => db.renameTable fr to
   | .addColumn table c, db => db.addColumn table c.name
   | .dropColumn table col, db => db.dropColumn table col
   | .renameColumn table fr to, db => db.renameColumn table fr to
-  | .createView _, db => db
-  | .dropView _, db => db
-  | .recreateView _, db => db
+  | .createView _ _, db => db
+  | .dropView _ _, db => db
+  | .recreateView _ _, db => db
   | .seq m₂ m₁, db => applyMig m₂ (applyMig m₁ db)
 
 /-- Optional conformance: every schema **table** exists in the instance.
