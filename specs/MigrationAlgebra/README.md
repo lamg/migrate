@@ -25,6 +25,7 @@ lake build
 | `MigrationAlgebra.SchemaMig` | Schema-level morphisms + `MigPath` |
 | `MigrationAlgebra.Semantics` | Instances and `applyMig` |
 | `MigrationAlgebra.Coupling` | Dependency preservation under gated drops/creates |
+| `MigrationAlgebra.WellFormed` | Full `WellFormed` for `dropTable` / `dropColumn` |
 | `MigrationAlgebra.Laws` | Functoriality, examples |
 | `MigrationAlgebra.Policy` | Phase 3 law pack / admissibility |
 
@@ -53,6 +54,8 @@ primitive:
 
 - `NoDependentView s n` — no view lists `n` in `deps`
 - `dropView` / `dropTable` require that proof
+- `dropColumn` / `renameTable` also require a name-level gate
+  (`NoDependentView` on the table / `CanRenameTable`)
 - `CanCreateView` / `CanRecreateView` gate create/recreate
 - Multi-view teardown is a **path** of local gates
 
@@ -65,7 +68,8 @@ Module `Policy` packages the contracts:
    (`DataPreserving_of_isViewCatalog`)
 3. **Gated drops/creates** — constructors carry `NoDependentView` / `Can*`
 4. **`PreservesResolvedDeps`** — gated create/drop keep view deps resolved
-5. **`DepSafePath`** — path-level policy on resolved deps along `MigPath`
+5. **`PreservesWellFormed`** — `dropTable` / `dropColumn` keep full `WellFormed`
+6. **`DepSafePath`** — path-level policy on resolved deps along `MigPath`
 6. **Catalog vs data** — `conforms` is about tables; view steps leave rows alone
 
 Out of scope here: query bodies, column-level reads, codegen annotations.

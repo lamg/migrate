@@ -7,5 +7,6 @@ import MigrationAlgebra.TableMig
 import MigrationAlgebra.SchemaMig
 import MigrationAlgebra.Semantics
 import MigrationAlgebra.Coupling
+import MigrationAlgebra.WellFormed
 import MigrationAlgebra.Laws
 import MigrationAlgebra.Policy

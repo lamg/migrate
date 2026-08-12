@@ -151,13 +151,13 @@ def ViewDepsResolved (s : Schema) : Prop :=
   View list is a topological order of the view→view dependency graph:
   if view `v` depends on view `d`, then `d` appears earlier in `s.views`.
 
-  This is a convenient witness of acyclicity (Phase 1).
+  Stated via list splits so preservation proofs stay local.
 -/
 def ViewsTopoOrdered (s : Schema) : Prop :=
-  ∀ i : Nat, i < s.views.length →
-    ∀ d ∈ s.views[i]!.deps,
-      (s.findView d).isNone ∨
-        ∃ j : Nat, j < i ∧ s.views[j]!.name = d
+  ∀ pref rest (v : View),
+    s.views = pref ++ v :: rest →
+      ∀ d ∈ v.deps,
+        (s.findView d).isNone ∨ ∃ w ∈ pref, w.name = d
 
 /--
   Well-formed schema:
@@ -215,5 +215,13 @@ def CanRecreateView (s : Schema) (v : View) : Prop :=
   v.name ∈ s.viewNames ∧
     (∀ d ∈ v.deps, d ∈ s.relationNames) ∧
     v.colNames.Nodup
+
+/--
+  Rename a base table only if nothing depends on the old name, and the new
+  name is the same or unused (name-level; no column provenance).
+-/
+def CanRenameTable (s : Schema) (fromName toName : String) : Prop :=
+  NoDependentView s fromName ∧
+    (toName = fromName ∨ toName ∉ s.relationNames)
 
 end MigrationAlgebra

@@ -96,9 +96,9 @@ def applyMig {s₀ s₁ : Schema} : SchemaMig s₀ s₁ → Instance → Instanc
   | .id, db => db
   | .createTable t, db => db.upsert t.name []
   | .dropTable n _, db => db.erase n
-  | .renameTable fr to, db => db.renameTable fr to
+  | .renameTable fr to _, db => db.renameTable fr to
   | .addColumn table c, db => db.addColumn table c.name
-  | .dropColumn table col, db => db.dropColumn table col
+  | .dropColumn table col _, db => db.dropColumn table col
   | .renameColumn table fr to, db => db.renameColumn table fr to
   | .createView _ _, db => db
   | .dropView _ _, db => db

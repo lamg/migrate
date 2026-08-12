@@ -10,6 +10,7 @@ import MigrationAlgebra.Schema
 import MigrationAlgebra.SchemaMig
 import MigrationAlgebra.Semantics
 import MigrationAlgebra.Coupling
+import MigrationAlgebra.WellFormed
 
 namespace MigrationAlgebra
 
@@ -99,6 +100,20 @@ theorem PreservesResolvedDeps_createView {s : Schema} (v : View)
     PreservesResolvedDeps (SchemaMig.createView (s := s) v h) :=
   fun hres => Schema.viewDepsResolved_addView s v hres h
 
+/-- Source well-formed implies target well-formed. -/
+def PreservesWellFormed {s₀ s₁ : Schema} (_m : SchemaMig s₀ s₁) : Prop :=
+  Schema.WellFormed s₀ → Schema.WellFormed s₁
+
+theorem PreservesWellFormed_dropTable {s : Schema} (n : String)
+    (h : NoDependentView s n) :
+    PreservesWellFormed (SchemaMig.dropTable (s := s) n h) :=
+  fun hwf => Schema.wellFormed_dropTable s n hwf h
+
+theorem PreservesWellFormed_dropColumn {s : Schema} (table col : String)
+    (h : NoDependentView s table) :
+    PreservesWellFormed (SchemaMig.dropColumn (s := s) table col h) :=
+  fun hwf => Schema.wellFormed_dropColumn s table col hwf h
+
 theorem PreservesResolvedDeps_id (s : Schema) :
     PreservesResolvedDeps (SchemaMig.id (s := s)) :=
   fun h => h
@@ -115,7 +130,10 @@ A path is **dep-safe** when every prefix stays `ViewDepsResolved`.
 This is the path-level policy for gated catalog/table teardown without
 requiring full `WellFormed` proofs for every free table operator.
 
-Full `WellFormed` chains remain a strengthening for later.
+`WellFormed` is preserved for gated `dropTable` and `dropColumn`
+(`PreservesWellFormed_*`). `dropView` / `createView` still have
+`ViewDepsResolved` preservation; full `WellFormed` there is the same
+shape of argument (nodup + topo on filtered/extended view lists).
 -/
 
 /--

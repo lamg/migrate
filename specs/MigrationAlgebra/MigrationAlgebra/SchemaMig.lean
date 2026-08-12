@@ -26,13 +26,16 @@ inductive SchemaMig : Schema → Schema → Type where
   /-- Drop a base table; requires no view still depends on its name. -/
   | dropTable {s : Schema} (n : String) (h : NoDependentView s n) :
       SchemaMig s (s.dropTable n)
-  /-- Rename a base table. -/
-  | renameTable {s : Schema} (fromName toName : String) :
+  /-- Rename a base table; requires `CanRenameTable`. -/
+  | renameTable {s : Schema} (fromName toName : String)
+      (h : CanRenameTable s fromName toName) :
       SchemaMig s (s.renameTable fromName toName)
   /-- Add a column on a base table. -/
   | addColumn {s : Schema} (tableName : String) (c : Column) :
       SchemaMig s (s.updateTable tableName (·.addColumn c))
-  | dropColumn {s : Schema} (tableName : String) (colName : String) :
+  /-- Drop a column; requires no view depends on the table name (name-level). -/
+  | dropColumn {s : Schema} (tableName : String) (colName : String)
+      (h : NoDependentView s tableName) :
       SchemaMig s (s.updateTable tableName (·.dropColumn colName))
   | renameColumn {s : Schema} (tableName fromName toName : String) :
       SchemaMig s (s.updateTable tableName (·.renameColumn fromName toName))
