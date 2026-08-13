@@ -181,6 +181,44 @@ CREATE TABLE item (
         Assert.Contains(a.filters, fun f -> f.name = "min_score" && f.kind = FilterKind.Gte && f.columns = [ "score" ]))
 
 [<Fact>]
+let ``parses in filter kind`` () =
+  withTempMigrations
+    [ "001.sql",
+      """
+-- mig:ops filter_search(game_pk), filter_count
+-- mig:filter venue eq venue
+-- mig:filter game_pks in game_pk
+CREATE TABLE link (
+  game_pk INTEGER NOT NULL,
+  venue TEXT NOT NULL
+) STRICT;
+""" ]
+    (fun dir ->
+      match parseMigrationsDirectory dir with
+      | Error e -> Assert.Fail e
+      | Ok anns ->
+        let a = anns.Head
+
+        Assert.Contains(a.filters, fun f -> f.name = "game_pks" && f.kind = FilterKind.In && f.columns = [ "game_pk" ]))
+
+[<Fact>]
+let ``rejects in with two columns`` () =
+  withTempMigrations
+    [ "001.sql",
+      """
+-- mig:ops filter_count
+-- mig:filter game_pks in game_pk, venue
+CREATE TABLE link (
+  game_pk INTEGER NOT NULL,
+  venue TEXT NOT NULL
+) STRICT;
+""" ]
+    (fun dir ->
+      match parseMigrationsDirectory dir with
+      | Ok _ -> Assert.Fail "expected error"
+      | Error msg -> Assert.Contains("requires exactly one column", msg))
+
+[<Fact>]
 let ``rejects unknown filter kind`` () =
   withTempMigrations
     [ "001.sql",

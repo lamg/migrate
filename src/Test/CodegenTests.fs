@@ -518,6 +518,36 @@ CREATE TABLE item (
       Assert.Contains("SELECT COUNT(*) FROM [item] WHERE \" + where", source))
 
 [<Fact>]
+let ``generate emits in filter as list option and IN clause`` () =
+  withTempDir (fun dir ->
+    let migrations = Path.Combine(dir, "migrations")
+    let output = Path.Combine(dir, "Stores")
+    Directory.CreateDirectory migrations |> ignore
+
+    File.WriteAllText(
+      Path.Combine(migrations, "001.sql"),
+      """
+-- mig:ops filter_search(game_pk), filter_count
+-- mig:filter venue eq venue
+-- mig:filter game_pks in game_pk
+CREATE TABLE link (
+  game_pk INTEGER NOT NULL,
+  venue TEXT NOT NULL
+) STRICT;
+"""
+    )
+
+    match generate migrations output "TestApp.Data.Stores" with
+    | Error e -> Assert.Fail e
+    | Ok _ ->
+      let source = File.ReadAllText(Path.Combine(output, "Link.fs"))
+      Assert.Contains("Venue: string option", source)
+      Assert.Contains("GamePks: int64 list option", source)
+      Assert.Contains("if vs.IsEmpty then", source)
+      Assert.Contains("clauses.Add \"1=0\"", source)
+      Assert.Contains("[game_pk] IN (", source))
+
+[<Fact>]
 let ``generate emits filter ops on views`` () =
   withTempDir (fun dir ->
     let migrations = Path.Combine(dir, "migrations")

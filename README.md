@@ -63,7 +63,7 @@ Rules:
 - `count` emits unfiltered `SELECT COUNT(*) FROM [relation]` as `let count : TxnStep<int64>` (tables and views).
 - **Filter catalog** (`-- mig:filter name kind column[, column…]` plus `filter_search` / `filter_count`):
   - Emits `{Rel}Filter` (each field `T option`), `emptyFilter`, public `applyFilter` (WHERE + params for hand SQL), `search filter skip take`, and/or `countByFilter filter`.
-  - Kinds: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like_prefix` (binds `v + "%"`), `eq_any` (OR across 2+ columns, one bind).
+  - Kinds: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like_prefix` (binds `v + "%"`), `eq_any` (OR across 2+ columns, one bind), `in` (`T list`; empty list is `1=0`).
   - Present `Some` values become AND clauses; all-`None` uses `WHERE 1=1`.
   - Requires at least one `-- mig:filter` with `filter_search` and/or `filter_count` (and vice versa). At most one of each filter op per relation.
 - `-- mig:rel Name` is optional; otherwise the F# name is derived from the SQL identifier.
