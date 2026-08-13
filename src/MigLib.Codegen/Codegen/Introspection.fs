@@ -8,13 +8,22 @@ module internal Introspection =
   open MigLib.Codegen.Types
 
   let private affinity (declaredType: string) =
-    let t = if isNull declaredType then "" else declaredType.Trim().ToUpperInvariant()
+    let t =
+      if isNull declaredType then
+        ""
+      else
+        declaredType.Trim().ToUpperInvariant()
 
-    if t.Contains "INT" then "INTEGER"
-    elif t.Contains "CHAR" || t.Contains "CLOB" || t.Contains "TEXT" then "TEXT"
-    elif t.Contains "BLOB" || t = "" then "BLOB"
-    elif t.Contains "REAL" || t.Contains "FLOA" || t.Contains "DOUB" then "REAL"
-    else "NUMERIC"
+    if t.Contains "INT" then
+      "INTEGER"
+    elif t.Contains "CHAR" || t.Contains "CLOB" || t.Contains "TEXT" then
+      "TEXT"
+    elif t.Contains "BLOB" || t = "" then
+      "BLOB"
+    elif t.Contains "REAL" || t.Contains "FLOA" || t.Contains "DOUB" then
+      "REAL"
+    else
+      "NUMERIC"
 
   let private readTableSql (conn: SqliteConnection) (name: string) =
     use cmd = conn.CreateCommand()
@@ -36,7 +45,6 @@ module internal Introspection =
       FROM sqlite_master
       WHERE type IN ('table', 'view')
         AND name NOT LIKE 'sqlite_%'
-        AND name NOT LIKE 'SchemaVersions'
       ORDER BY name
       """
 
@@ -45,6 +53,7 @@ module internal Introspection =
 
     while reader.Read() do
       let name = reader.GetString 0
+
       let kind =
         if reader.GetString(1).Equals("view", StringComparison.OrdinalIgnoreCase) then
           RelationKind.View
@@ -63,8 +72,7 @@ module internal Introspection =
 
     let autoIncInSql =
       match createSql with
-      | Some sql ->
-        sql.IndexOf("AUTOINCREMENT", StringComparison.OrdinalIgnoreCase) >= 0
+      | Some sql -> sql.IndexOf("AUTOINCREMENT", StringComparison.OrdinalIgnoreCase) >= 0
       | None -> false
 
     while reader.Read() do
@@ -80,9 +88,9 @@ module internal Introspection =
         | RelationKind.Table -> reader.GetInt64 3 <> 0L
 
       let pkOrdinal = int (reader.GetInt64 5)
+
       columns.Add
-        {
-          name = colName
+        { name = colName
           declaredType = declaredType
           notNull = notNull
           pkOrdinal = pkOrdinal
@@ -93,9 +101,7 @@ module internal Introspection =
 
     let integerPkColumns =
       cols
-      |> List.filter (fun c ->
-        c.pkOrdinal > 0
-        && affinity c.declaredType = "INTEGER")
+      |> List.filter (fun c -> c.pkOrdinal > 0 && affinity c.declaredType = "INTEGER")
 
     // Only omit columns from insert inputs when the CREATE TABLE uses AUTOINCREMENT.
     // Sole INTEGER PRIMARY KEY without AUTOINCREMENT is still a rowid alias in SQLite,
@@ -128,14 +134,11 @@ module internal Introspection =
           let columns = loadColumns conn name kind sql
 
           name,
-          {
-            name = name
+          { name = name
             kind = kind
-            columns = columns
-          })
+            columns = columns })
         |> Map.ofList
 
       Ok map
     with ex ->
       Error ex.Message
-

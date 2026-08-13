@@ -36,9 +36,7 @@ module Api =
     let map = Runtime.TxnStep.map
     let fail = Runtime.TxnStep.fail
 
-  /// Apply ordered named migration scripts to the database file.
-  /// Script names are SchemaVersions keys; list order is apply order.
-  /// Prefer the list generated into `{namespace}.Migrations.scripts` by `mig codegen`
-  /// (ordinary F# string constants compiled into the app — AOT-friendly; no resources or reflection).
-  let migrateScripts (dbPath: string) (scripts: (string * string) list) : Task<Result<unit, string>> =
-    Migrate.migrateScripts dbPath scripts
+  /// Apply snapshot (empty DB) or hop + catalog check.
+  /// Apps should call generated <c>{namespace}.Migration.migrate dbPath</c>.
+  let migrate (dbPath: string) (expectedSchema: string) (migrationSql: string) : Task<Result<DbTxnBuilder, MigError>> =
+    Migrate.migrate dbPath expectedSchema migrationSql

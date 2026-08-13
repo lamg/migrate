@@ -65,11 +65,12 @@ CREATE TABLE app_user (
       Assert.Contains("let deleteById ", source)
       Assert.Contains("bool", source)
       Assert.Contains("DateTimeOffset", source)
-      let migrationsPath = Path.Combine(output, "Migrations.fs")
-      Assert.True(File.Exists migrationsPath)
-      let migSource = File.ReadAllText migrationsPath
-      Assert.Contains("module TestApp.Data.Stores.Migrations", migSource)
-      Assert.Contains("001_users.sql", migSource)
+      let migrationPath = Path.Combine(output, "Migration.fs")
+      Assert.True(File.Exists migrationPath)
+      let migSource = File.ReadAllText migrationPath
+      Assert.Contains("module TestApp.Data.Stores.Migration", migSource)
+      Assert.Contains("let migrate (dbPath: string) : Task<Result<DbTxnBuilder, MigError>>", migSource)
+      Assert.Contains("Migrate.migrate dbPath expectedSchema migrationSql", migSource)
       Assert.Contains("CREATE TABLE app_user", migSource))
 
 [<Fact>]
@@ -807,10 +808,10 @@ CREATE TABLE orphan (
     | Ok result ->
       Assert.Equal(0, result.relationCount)
       Assert.Equal(1, result.generatedFiles.Length)
-      let migrationsPath = Path.Combine(output, "Migrations.fs")
-      Assert.True(File.Exists migrationsPath)
+      let migrationPath = Path.Combine(output, "Migration.fs")
+      Assert.True(File.Exists migrationPath)
       Assert.False(File.Exists(Path.Combine(output, "Orphan.fs")))
-      let migSource = File.ReadAllText migrationsPath
+      let migSource = File.ReadAllText migrationPath
       Assert.True(migSource.Contains "CREATE TABLE orphan")
       Assert.Equal(1, Directory.GetFiles(output, "*.fs").Length))
 
@@ -850,7 +851,7 @@ CREATE TABLE keep_me (id INTEGER NOT NULL PRIMARY KEY) STRICT;
     | Ok result ->
       Assert.Equal(1, result.relationCount)
       Assert.True(File.Exists(Path.Combine(output, "KeepMe.fs")))
-      Assert.True(File.Exists(Path.Combine(output, "Migrations.fs")))
+      Assert.True(File.Exists(Path.Combine(output, "Migration.fs")))
       Assert.False(File.Exists(Path.Combine(output, "Stale.fs")))
       Assert.True(File.Exists(Path.Combine(output, "HandWritten.fs"))))
 
@@ -874,18 +875,18 @@ CREATE TABLE note (
 
     let dbPath = Path.Combine(dir, "app.sqlite")
 
-    match MigLib.Migrate.loadScriptsFromDirectory migrations with
+    match MigLib.Migrate.loadSchemaDirectory migrations with
     | Error e -> Assert.Fail e
-    | Ok scripts ->
-      match await (migrateScripts dbPath scripts) with
-      | Error e -> Assert.Fail e
-      | Ok() ->
+    | Ok loaded ->
+      match await (migrate dbPath loaded.ExpectedSchema loaded.Migration) with
+      | Error e -> Assert.Fail(string e)
+      | Ok db ->
         let insertSql = "INSERT INTO [note] ([email], [body]) VALUES (@email, @body)"
 
         let selectSql = "SELECT [id], [email], [body] FROM [note] WHERE [id] = @id LIMIT 1"
 
         let run =
-          dbTxn dbPath {
+          db {
             do!
               Query.exec insertSql [ "@email", box "a@b.c"; "@body", box "hello" ]
               |> TxnStep.map ignore
@@ -908,7 +909,7 @@ CREATE TABLE note (
         | Ok(_, None) -> Assert.Fail "row not found")
 
 [<Fact>]
-let ``generate refuses relation named Migrations`` () =
+let ``generate refuses relation named Migration`` () =
   withTempDir (fun dir ->
     let migrations = Path.Combine(dir, "migrations")
     let output = Path.Combine(dir, "Stores")
@@ -917,7 +918,7 @@ let ``generate refuses relation named Migrations`` () =
     File.WriteAllText(
       Path.Combine(migrations, "001.sql"),
       """
--- mig:rel Migrations
+-- mig:rel Migration
 -- mig:ops select_all
 CREATE TABLE migrations_table (id INTEGER NOT NULL PRIMARY KEY) STRICT;
 """
@@ -928,7 +929,7 @@ CREATE TABLE migrations_table (id INTEGER NOT NULL PRIMARY KEY) STRICT;
     | Error msg -> Assert.Contains("reserved", msg))
 
 [<Fact>]
-let ``stale cleanup keeps Migrations.fs when relations change`` () =
+let ``stale cleanup keeps Migration.fs when relations change`` () =
   withTempDir (fun dir ->
     let migrations = Path.Combine(dir, "migrations")
     let output = Path.Combine(dir, "Stores")
@@ -947,7 +948,7 @@ CREATE TABLE alpha (id INTEGER NOT NULL PRIMARY KEY) STRICT;
     | Ok _ -> ()
 
     Assert.True(File.Exists(Path.Combine(output, "Alpha.fs")))
-    Assert.True(File.Exists(Path.Combine(output, "Migrations.fs")))
+    Assert.True(File.Exists(Path.Combine(output, "Migration.fs")))
 
     File.WriteAllText(
       Path.Combine(migrations, "001.sql"),
@@ -962,12 +963,13 @@ CREATE TABLE beta (id INTEGER NOT NULL PRIMARY KEY) STRICT;
     | Ok _ ->
       Assert.False(File.Exists(Path.Combine(output, "Alpha.fs")))
       Assert.True(File.Exists(Path.Combine(output, "Beta.fs")))
-      Assert.True(File.Exists(Path.Combine(output, "Migrations.fs")))
-      let migSource = File.ReadAllText(Path.Combine(output, "Migrations.fs"))
-      Assert.Contains("CREATE TABLE beta", migSource))
+      Assert.True(File.Exists(Path.Combine(output, "Migration.fs")))
+      let migSource = File.ReadAllText(Path.Combine(output, "Migration.fs"))
+      Assert.Contains("CREATE TABLE beta", migSource)
+      Assert.Contains("let migrate (dbPath: string)", migSource))
 
 [<Fact>]
-let ``embedded Migrations.scripts apply via migrateScripts`` () =
+let ``loadSchemaDirectory snapshot applies via migrate`` () =
   withTempDir (fun dir ->
     let migrations = Path.Combine(dir, "migrations")
     let output = Path.Combine(dir, "Stores")
@@ -986,20 +988,17 @@ CREATE TABLE widget (
     match generate migrations output "TestApp.Data.Stores" with
     | Error e -> Assert.Fail e
     | Ok _ ->
-      match MigLib.Migrate.loadScriptsFromDirectory migrations with
+      match MigLib.Migrate.loadSchemaDirectory migrations with
       | Error e -> Assert.Fail e
-      | Ok scripts ->
-        // Same list shape as generated Migrations.scripts
+      | Ok loaded ->
         let dbPath = Path.Combine(dir, "app.sqlite")
 
-        match await (migrateScripts dbPath scripts) with
-        | Error e -> Assert.Fail e
-        | Ok() ->
+        match await (migrate dbPath loaded.ExpectedSchema loaded.Migration) with
+        | Error e -> Assert.Fail(string e)
+        | Ok db ->
           match
             await (
-              dbTxn dbPath {
-                return! Query.scalar "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='widget'" []
-              }
+              db { return! Query.scalar "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='widget'" [] }
             )
           with
           | Error e -> Assert.Fail(string e)

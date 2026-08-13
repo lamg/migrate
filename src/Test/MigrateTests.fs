@@ -31,123 +31,117 @@ let private withTempDb (action: string -> unit) =
       with _ ->
         ()
 
-[<Fact>]
-let ``migrateScripts applies named scripts`` () =
-  withTempDb (fun dbPath ->
-    let scripts =
-      [ "001_init.sql",
-        """
+let private itemTable =
+  """
 CREATE TABLE item (
   id INTEGER NOT NULL PRIMARY KEY,
   name TEXT NOT NULL
 ) STRICT;
-""" ]
+"""
 
-    match await (migrateScripts dbPath scripts) with
-    | Error e -> Assert.Fail e
-    | Ok() ->
-      match
-        await (
-          dbTxn dbPath {
-            return! Query.scalar "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='item'" []
-          }
-        )
-      with
-      | Error e -> Assert.Fail(string e)
-      | Ok count -> Assert.Equal(1L, Convert.ToInt64 count))
+let private errorText =
+  function
+  | MigError.Message s -> s
+  | e -> string e
 
 [<Fact>]
-let ``migrateScripts is idempotent via SchemaVersions`` () =
+let ``migrate bootstraps empty database from expected schema`` () =
   withTempDb (fun dbPath ->
-    let scripts =
-      [ "001_init.sql",
-        """
+    match await (migrate dbPath itemTable "") with
+    | Error e -> Assert.Fail(errorText e)
+    | Ok db ->
+      Assert.Equal(dbPath, db.DbPath)
+
+      match await (migrate dbPath itemTable "") with
+      | Error e -> Assert.Fail("second migrate should be a no-op: " + errorText e)
+      | Ok db2 -> Assert.Equal(dbPath, db2.DbPath))
+
+[<Fact>]
+let ``migrate applies hop then requires expected catalog`` () =
+  withTempDb (fun dbPath ->
+    let initial =
+      """
 CREATE TABLE item (
-  id INTEGER NOT NULL PRIMARY KEY,
-  name TEXT NOT NULL
+  id INTEGER NOT NULL PRIMARY KEY
 ) STRICT;
-""" ]
+"""
 
-    match await (migrateScripts dbPath scripts) with
-    | Error e -> Assert.Fail e
-    | Ok() -> ()
+    match await (migrate dbPath initial "") with
+    | Error e -> Assert.Fail(errorText e)
+    | Ok _ ->
+      let hop = "ALTER TABLE item ADD COLUMN name TEXT NOT NULL DEFAULT '';"
 
-    match await (migrateScripts dbPath scripts) with
-    | Error e -> Assert.Fail e
-    | Ok() -> ()
-
-    match await (dbTxn dbPath { return! Query.scalar "SELECT COUNT(*) FROM SchemaVersions" [] }) with
-    | Error e -> Assert.Fail(string e)
-    | Ok count -> Assert.Equal(1L, Convert.ToInt64 count))
+      match await (migrate dbPath itemTable hop) with
+      | Error e -> Assert.Fail(errorText e)
+      | Ok _ ->
+        match await (migrate dbPath itemTable hop) with
+        | Error e -> Assert.Fail("idempotent hop: " + errorText e)
+        | Ok db -> Assert.Equal(dbPath, db.DbPath))
 
 [<Fact>]
-let ``migrateScripts does not journal a failed script`` () =
+let ``migrate errors when hop does not yield expected catalog`` () =
   withTempDb (fun dbPath ->
-    let scripts = [ "001_bad.sql", "CREATE TABLE broken (;" ]
+    let initial =
+      """
+CREATE TABLE item (
+  id INTEGER NOT NULL PRIMARY KEY
+) STRICT;
+"""
 
-    match await (migrateScripts dbPath scripts) with
-    | Ok() -> Assert.Fail "expected migration failure"
-    | Error _ ->
-      match await (dbTxn dbPath { return! Query.scalar "SELECT COUNT(*) FROM SchemaVersions" [] }) with
-      | Error e -> Assert.Fail(string e)
-      | Ok count -> Assert.Equal(0L, Convert.ToInt64 count))
+    match await (migrate dbPath initial "") with
+    | Error e -> Assert.Fail(errorText e)
+    | Ok _ ->
+      match await (migrate dbPath itemTable "ALTER TABLE item ADD COLUMN other TEXT;") with
+      | Ok _ -> Assert.Fail "expected catalog mismatch"
+      | Error e -> Assert.Contains("does not match expected schema", errorText e))
 
 [<Fact>]
-let ``migrateScripts empty list succeeds`` () =
+let ``migrate errors when hop is missing on a non-empty database`` () =
   withTempDb (fun dbPath ->
-    match await (migrateScripts dbPath []) with
-    | Error e -> Assert.Fail e
-    | Ok() ->
-      match await (dbTxn dbPath { return! Query.scalar "SELECT COUNT(*) FROM SchemaVersions" [] }) with
-      | Error e -> Assert.Fail(string e)
-      | Ok count -> Assert.Equal(0L, Convert.ToInt64 count))
+    match
+      await (
+        migrate
+          dbPath
+          """
+CREATE TABLE item (
+  id INTEGER NOT NULL PRIMARY KEY
+) STRICT;
+"""
+          ""
+      )
+    with
+    | Error e -> Assert.Fail(errorText e)
+    | Ok _ ->
+      match await (migrate dbPath itemTable "") with
+      | Ok _ -> Assert.Fail "expected missing hop error"
+      | Error e -> Assert.Contains("_migration.sql", errorText e))
 
 [<Fact>]
-let ``migrateScripts applies in list order`` () =
-  withTempDb (fun dbPath ->
-    // Names intentionally reverse of alphabetical order; list order is authoritative.
-    let scripts =
-      [ "002_second.sql", "CREATE TABLE second (id INTEGER NOT NULL PRIMARY KEY) STRICT;"
-        "001_first.sql", "CREATE TABLE first (id INTEGER NOT NULL PRIMARY KEY) STRICT;" ]
-
-    match await (migrateScripts dbPath scripts) with
-    | Error e -> Assert.Fail e
-    | Ok() ->
-      match
-        await (
-          dbTxn dbPath {
-            return!
-              Query.queryList "SELECT [ScriptName] FROM [SchemaVersions] ORDER BY [SchemaVersionID]" [] (fun r ->
-                r.GetString 0)
-          }
-        )
-      with
-      | Error e -> Assert.Fail(string e)
-      | Ok names -> Assert.Equal<string list>([ "002_second.sql"; "001_first.sql" ], names))
-
-[<Fact>]
-let ``loadScriptsFromDirectory rejects missing directory`` () =
-  match loadScriptsFromDirectory "/no/such/migrations/dir" with
+let ``loadSchemaDirectory rejects missing directory`` () =
+  match loadSchemaDirectory "/no/such/schema/dir" with
   | Ok _ -> Assert.Fail "expected error"
   | Error msg -> Assert.Contains("not found", msg)
 
 [<Fact>]
-let ``loadScriptsFromDirectory orders by file name`` () =
+let ``loadSchemaDirectory joins nested snapshot files and excludes root hop`` () =
   let root =
     Path.Combine(Path.GetTempPath(), "mig-load-" + Guid.NewGuid().ToString("N"))
 
-  let migrations = Path.Combine(root, "migrations")
-  Directory.CreateDirectory migrations |> ignore
+  let schema = Path.Combine(root, "schema")
+  Directory.CreateDirectory(Path.Combine(schema, "views")) |> ignore
 
   try
-    File.WriteAllText(Path.Combine(migrations, "002_b.sql"), "B")
-    File.WriteAllText(Path.Combine(migrations, "001_a.sql"), "A")
+    File.WriteAllText(Path.Combine(schema, "b.sql"), "B")
+    File.WriteAllText(Path.Combine(schema, "a.sql"), "A")
+    File.WriteAllText(Path.Combine(schema, "views", "c.sql"), "C")
+    File.WriteAllText(Path.Combine(schema, "_migration.sql"), "HOP")
+    File.WriteAllText(Path.Combine(schema, "views", "_migration.sql"), "NESTED")
 
-    match loadScriptsFromDirectory migrations with
+    match loadSchemaDirectory schema with
     | Error e -> Assert.Fail e
-    | Ok scripts ->
-      Assert.Equal<string list>([ "001_a.sql"; "002_b.sql" ], scripts |> List.map fst)
-      Assert.Equal<string list>([ "A"; "B" ], scripts |> List.map snd)
+    | Ok loaded ->
+      Assert.Equal("A\nB\nNESTED\nC", loaded.ExpectedSchema)
+      Assert.Equal("HOP", loaded.Migration)
   finally
     try
       Directory.Delete(root, true)

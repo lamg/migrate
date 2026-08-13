@@ -6,9 +6,9 @@ Status: implemented on branch `rewrite/sql-first-dbup` (v10 greenfield)
 
 Rewrite migrate so that:
 
-1. **Ordered `*.sql` migrations** are the **dev-time** schema source of truth.
-2. **`mig codegen`** generates F# types and query helpers only for relations the user annotates, **and** writes `Migrations.fs` so scripts ship **with the executable** as ordinary F# string constants.
-3. **Runtime** uses `Microsoft.Data.Sqlite` and MigLib’s existing transaction model (`DbTxnBuilder` / `TxnStep`); apps call `migrateScripts` with that generated list only.
+1. A **schema directory** (snapshot `*.sql` + optional `_migration.sql`) is the **dev-time** schema source of truth.
+2. **`mig codegen`** generates F# types and query helpers only for relations the user annotates, **and** writes `Migration.fs` so `Migration.migrate` ships **with the executable**.
+3. **Runtime** uses `Microsoft.Data.Sqlite` and MigLib’s existing transaction model (`DbTxnBuilder` / `TxnStep`); apps call `Migration.migrate dbPath`.
 4. **AOT-friendly migration carrier**: no loose `*.sql` at deploy, no `EmbeddedResource` / content files, no reflection to discover or load scripts.
 5. **No** F#-first schema DSL, normalization, SqlProvider, DbUp, or declarative hot-migrate pipeline.
 First dogfood consumer: **marketbot** (replace SqlProvider stores).
@@ -26,24 +26,25 @@ First dogfood consumer: **marketbot** (replace SqlProvider stores).
 
 ```
 User app
-  Migrations/*.sql          -- ordered *.sql + -- mig: annotations (dev only)
+  schema/**/*.sql           -- snapshot + -- mig: annotations (dev only)
+  schema/_migration.sql     -- optional hop (reserved; not part of snapshot)
   Stores/*.fs               -- one generated module file per relation
-  Stores/Migrations.fs      -- scripts as F# string constants (ships in binary)
+  Stores/Migration.fs       -- migrate dbPath (ships in binary)
   (hand-written companions) -- co-located helpers next to generated modules
-  startup / build.fsx       -- MigLib.codegen + MigLib.migrate helpers
+  startup / build.fsx       -- MigLib.codegen + Migration.migrate
 
 mig codegen  (CLI and MigLib.Codegen public API)
-  1. Collect migration scripts (ordered by file name)
-  2. Apply via MigLib migrator to temporary SQLite
+  1. Collect schema directory (recursive *.sql; exclude root _migration.sql from snapshot)
+  2. Apply snapshot via MigLib.migrate to temporary SQLite
   3. Introspect tables/views/columns/PKs (PRAGMA / catalog)
-  4. Scan scripts for `-- mig:` annotation lines only
+  4. Scan snapshot scripts for `-- mig:` annotation lines only
   5. Emit one .fs file per annotated relation into --output directory
-  6. Emit Migrations.fs with (scriptName, sql) string constants
+  6. Emit Migration.fs with let migrate dbPath
 
 MigLib
   - DbTxnBuilder / TxnStep / readOnlyDbTxn (current model)
   - Shared helpers used by generated code (read/map/exec/bind params)
-  - Public migrate: migrateScripts : dbPath -> (string * string) list -> Task<Result<unit,string>>
+  - Public migrate: dbPath -> expectedSchema -> migrationSql -> Task<Result<DbTxnBuilder, MigError>>
 
 MigLib.Codegen
   - Public generate (same behavior as `mig codegen`; for build.fsx)
@@ -55,11 +56,11 @@ Package layout: **`migtool` CLI + `MigLib` (runtime) + `MigLib.Codegen` (generat
 
 | Concern | Owner |
 |--------|--------|
-| DDL, seeds, backfills (authoring) | `*.sql` scripts in the app repo (dev-time) |
-| Runtime migration carrier | Generated `Stores/Migrations.fs` (`scripts` list of F# string constants; AOT-friendly, no resources/reflection) |
-| Applied-script journal | MigLib (`SchemaVersions` table) |
+| DDL, seeds, backfills (authoring) | `schema/**/*.sql` in the app repo (dev-time) |
+| Runtime migration carrier | Generated `Stores/Migration.fs` (`migrate dbPath`; AOT-friendly) |
+| Applied-schema check | Live catalog vs expected snapshot catalog |
 | Typed F# surface | `mig codegen` / `MigLib.Codegen` from annotations + introspection |
-| Running migrations | User app, via `migrateScripts dbPath Migrations.scripts` |
+| Running migrations | User app, via `Migration.migrate dbPath` |
 | Normalization | User (out of scope) |
 
 ## Annotation language (style 1)
@@ -178,21 +179,21 @@ Naming of generated members: PascalCase F# from snake_case columns and op names 
 
 ## Codegen pipeline
 
-1. **Inputs**: migrations directory, **output directory**, root namespace (`--namespace` / API param).
-2. **Apply scripts**: MigLib filesystem migrator against a temporary SQLite file.
+1. **Inputs**: schema directory (snapshot `*.sql` + optional root `_migration.sql`), **output directory**, root namespace (`--namespace` / API param).
+2. **Apply snapshot**: `migrate` with empty hop against a temporary SQLite file.
 3. **Introspect**: list tables and views; for each, columns, types, nullability, PK columns, autoincrement.
 4. **Annotation scan** (minimal text scan, not a SQL parser):
-   - Read each migration file in order.
+   - Read each snapshot `*.sql` file in relative-path order (root `_migration.sql` is skipped).
    - Collect consecutive `-- mig:...` lines.
    - Associate them with the next `CREATE TABLE` / `CREATE VIEW` relation name (light tokenization of the statement head only).
    - Validate: annotated relation exists; override columns exist; ops allowed for table vs view; PK present where required.
 5. **Emit F#**:
    - **One file per annotated relation**: `{Name}.fs` in the output directory (`module {namespace}.{Name}`).
-   - **`Migrations.fs`**: `module {namespace}.Migrations` with `scripts : (string * string) list` — each body is a normal F# string literal so the data is part of the compiled assembly (runtime carrier; not EmbeddedResource).
+   - **`Migration.fs`**: `module {namespace}.Migration` with `let migrate dbPath` — snapshot and hop SQL are private compiled string constants (runtime carrier; not EmbeddedResource).
    - No monolithic `Generated.fs` and no thin facade that only re-exports generated types.
    - Row type + op functions only for that relation’s ops.
    - Generated code calls **MigLib** shared helpers.
-   - Stale auto-generated `.fs` files (header `// <auto-generated />`) for removed relations are deleted; hand-written files are left alone; `Migrations.fs` is always retained (reserved name).
+   - Stale auto-generated `.fs` files (header `// <auto-generated />`) for removed relations are deleted; hand-written files are left alone; `Migration.fs` is always retained (reserved name).
 6. **No Fantomas** in the tool.
 
 Annotation association scans SQL **text for comments and relation names**. Full DDL parsing is avoided by relying on the live schema after migrations.
@@ -246,16 +247,17 @@ val generate:
 
 Same behavior as `mig codegen --namespace ...`.
 
-**Migrate (public, for app startup):**
+**Migrate (public, for app startup and generated `Migration.migrate`):**
 
 ```fsharp
-val migrateScripts:
+val migrate:
   dbPath: string ->
-  scripts: (string * string) list ->
-  Task<Result<unit, string>>
+  expectedSchema: string ->
+  migrationSql: string ->
+  Task<Result<DbTxnBuilder, MigError>>
 ```
 
-List order is apply order; script names are `SchemaVersions` keys. Apps pass codegen’s `Migrations.scripts` (compile-time F# string constants in the executable — AOT-friendly; no filesystem SQL, no EmbeddedResource, no reflection at runtime). Directory loading exists only as an internal helper for codegen. Errors as `Result`.
+Empty database applies `expectedSchema`. Otherwise the hop (`migrationSql`) runs and the live catalog must match the snapshot. Success is a `DbTxnBuilder` for that path. No `SchemaVersions` journal. Apps call generated `Migration.migrate dbPath` (compile-time F# string constants — AOT-friendly). Directory loading is an internal helper for codegen.
 
 ### Remove
 
@@ -264,12 +266,13 @@ List order is apply order; script names are `SchemaVersions` keys. Apps pass cod
 - Attribute DSL as schema source.
 - Normalization / normalized query generators.
 - Any SqlProvider coupling.
+- `migrateScripts`, the `SchemaVersions` journal, and the `SchemaMigration` record.
 
 ## CLI surface (v1)
 
 | Command | Role |
 |---------|------|
-| `mig codegen` | Apply migrations to temp DB, introspect, read annotations, emit one `.fs` module per relation |
+| `mig codegen` | Apply schema snapshot to temp DB, introspect, read annotations, emit one `.fs` module per relation plus `Migration.fs` |
 
 Flags (minimum):
 
@@ -288,9 +291,9 @@ Out of scope for now: `mig migrate`, `mig status`, `mig init`, `mig plan`, `mig 
 
 ## End-to-end story
 
-1. Author `Migrations/001_....sql` with `CREATE TABLE` / `CREATE VIEW` and `-- mig:` lines.
-2. From CLI or `build.fsx`: run codegen → one `{Name}.fs` per relation **and** `Migrations.fs` under the output directory / namespace.
-3. At app startup: call `migrateScripts dbPath Migrations.scripts` (no `*.sql` directory required at runtime).
+1. Author `schema/**/*.sql` (desired catalog) plus optional `schema/_migration.sql` (one hop) with `CREATE TABLE` / `CREATE VIEW` and `-- mig:` lines.
+2. From CLI or `build.fsx`: run codegen → one `{Name}.fs` per relation **and** `Migration.fs` under the output directory / namespace.
+3. At app startup: call `Migration.migrate dbPath` (no `*.sql` directory required at runtime).
 4. Domain code uses `dbTxn` + generated ops; complex filters live as annotated views (read ops only).
 
 ## Remaining implementation choices (non-blocking)
