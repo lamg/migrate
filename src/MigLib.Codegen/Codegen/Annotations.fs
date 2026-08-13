@@ -320,9 +320,19 @@ module internal Annotations =
       if not (Directory.Exists migrationsDir) then
         Error $"migrations directory not found: {migrationsDir}"
       else
+        let root = Path.GetFullPath migrationsDir
+
         let files =
-          Directory.GetFiles(migrationsDir, "*.sql")
-          |> Array.sortBy (fun f -> f.ToLowerInvariant())
+          Directory.GetFiles(root, "*.sql", SearchOption.AllDirectories)
+          |> Array.sortWith (fun a b ->
+            let rel p =
+              Path.GetRelativePath(root, p).Replace(Path.DirectorySeparatorChar, '/')
+
+            String.Compare(rel a, rel b, StringComparison.Ordinal))
+          |> Array.filter (fun path ->
+            let rel = Path.GetRelativePath(root, path).Replace(Path.DirectorySeparatorChar, '/')
+
+            not (rel.Equals("_migration.sql", StringComparison.OrdinalIgnoreCase)))
           |> Array.toList
 
         let annotations = ResizeArray<RelationAnnotation>()

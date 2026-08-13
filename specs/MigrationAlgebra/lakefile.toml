@@ -1,0 +1,6 @@
+name = "MigrationAlgebra"
+version = "0.1.0"
+defaultTargets = ["MigrationAlgebra"]
+
+[[lean_lib]]
+name = "MigrationAlgebra"

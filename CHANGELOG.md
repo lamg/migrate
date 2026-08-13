@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [12.0.0] - 2026-08-13
+
+### Changed
+
+- **Breaking (MigLib)**: removed `migrateScripts`, the `SchemaVersions` journal, and the `SchemaMigration` record. Runtime API is `migrate dbPath expectedSchema migrationSql` returning `Task<Result<DbTxnBuilder, MigError>>`. Empty DB applies the snapshot; otherwise the hop runs and the live catalog must match.
+- **Breaking (codegen / CLI)**: schema directory is recursive snapshot `*.sql` plus optional root `_migration.sql`. Emits `{output}/Migration.fs` with `let migrate dbPath` (no `Migrations.scripts`). Module name `Migration` is reserved.
+- **mig CLI / package versions**: MigLib, MigLib.Codegen, and migtool aligned at `12.0.0`.
+
 ## [11.2.0] - 2026-08-04
 
 ### Added

@@ -4,6 +4,7 @@ module Generate =
   open System
   open System.IO
   open System.Threading.Tasks
+  open MigLib
   open MigLib.Migrate
   open MigLib.Codegen
 
@@ -52,28 +53,28 @@ module Generate =
           File.Delete path
 
   /// Generate one F# module file per annotated relation into <paramref name="outputDir"/>,
-  /// plus Migrations.fs with ordered SQL scripts as F# string constants for runtime migrateScripts.
-  let generate (migrationsDir: string) (outputDir: string) (namespaceName: string) : Result<CodegenResult, string> =
-    if String.IsNullOrWhiteSpace migrationsDir then
-      Error "migrations directory is required"
+  /// plus Migration.fs with <c>let migrate dbPath</c>.
+  let generate (schemaDir: string) (outputDir: string) (namespaceName: string) : Result<CodegenResult, string> =
+    if String.IsNullOrWhiteSpace schemaDir then
+      Error "schema directory is required"
     elif String.IsNullOrWhiteSpace outputDir then
       Error "output directory is required"
     elif String.IsNullOrWhiteSpace namespaceName then
       Error "namespace is required"
-    elif not (Directory.Exists migrationsDir) then
-      Error $"migrations directory not found: {migrationsDir}"
+    elif not (Directory.Exists schemaDir) then
+      Error $"schema directory not found: {schemaDir}"
     else
-      match loadScriptsFromDirectory migrationsDir with
+      match loadSchemaDirectory schemaDir with
       | Error e -> Error e
-      | Ok scripts ->
+      | Ok loaded ->
         withTempDb (fun dbPath ->
-          match await (migrateScripts dbPath scripts) with
-          | Error e -> Error $"failed to apply migrations: {e}"
-          | Ok() ->
+          match await (migrate dbPath loaded.ExpectedSchema "") with
+          | Error e -> Error $"failed to apply schema snapshot: {e}"
+          | Ok _ ->
             match Introspection.introspect dbPath with
             | Error e -> Error $"introspection failed: {e}"
             | Ok schema ->
-              match Annotations.parseMigrationsDirectory migrationsDir with
+              match Annotations.parseMigrationsDirectory schemaDir with
               | Error e -> Error e
               | Ok annotations ->
                 let fullDir = Path.GetFullPath outputDir
@@ -87,10 +88,9 @@ module Generate =
                 with
                 | Error e -> Error e
                 | Ok relations ->
-                  match relations |> List.tryFind (fun r -> r.fsName = Emit.migrationsModuleName) with
+                  match relations |> List.tryFind (fun r -> r.fsName = Emit.migrationModuleName) with
                   | Some _ ->
-                    Error
-                      $"relation F# name '{Emit.migrationsModuleName}' is reserved for embedded migration scripts; use -- mig:rel OtherName"
+                    Error $"relation F# name '{Emit.migrationModuleName}' is reserved; use -- mig:rel OtherName"
                   | None ->
                     let written = ResizeArray<string>()
 
@@ -100,16 +100,16 @@ module Generate =
                       File.WriteAllText(filePath, source)
                       written.Add(Path.GetFullPath filePath)
 
-                    let migrationsPath = Path.Combine(fullDir, Emit.migrationsModuleName + ".fs")
-                    let migrationsSource = Emit.emitMigrationsFile namespaceName scripts
-                    File.WriteAllText(migrationsPath, migrationsSource)
-                    written.Add(Path.GetFullPath migrationsPath)
+                    let migrationPath = Path.Combine(fullDir, Emit.migrationModuleName + ".fs")
+
+                    let migrationSource =
+                      Emit.emitMigrationFile namespaceName loaded.ExpectedSchema loaded.Migration
+
+                    File.WriteAllText(migrationPath, migrationSource)
+                    written.Add(Path.GetFullPath migrationPath)
 
                     let keep =
-                      relations
-                      |> List.map _.fsName
-                      |> Set.ofList
-                      |> Set.add Emit.migrationsModuleName
+                      relations |> List.map _.fsName |> Set.ofList |> Set.add Emit.migrationModuleName
 
                     deleteStaleGenerated fullDir keep
 

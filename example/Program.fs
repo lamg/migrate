@@ -13,14 +13,14 @@ let main _ =
     let dbPath =
         Path.Combine(Path.GetTempPath(), "example-" + Guid.NewGuid().ToString("N") + ".sqlite")
 
-    match await (migrateScripts dbPath Migrations.scripts) with
+    match await (Migration.migrate dbPath) with
     | Error e ->
-        Console.Error.WriteLine("migrate failed: " + e)
+        Console.Error.WriteLine("migrate failed: " + string e)
         1
-    | Ok() ->
+    | Ok db ->
         match
             await (
-                dbTxn dbPath {
+                db {
                     let! id = Student.insert { Name = "Ada"; Age = 36L }
 
                     let! byId = Student.selectById id
