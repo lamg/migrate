@@ -273,7 +273,10 @@ module internal Emit =
 
     let notNullCol = { col with notNull = true }
     let ty, _, boxFn = resolveFsType notNullCol rel.overrides
-    ty + " option", boxFn
+
+    match filter.kind with
+    | FilterKind.In -> ty + " list option", boxFn
+    | _ -> ty + " option", boxFn
 
   let private emitFilterSqlClause (filter: FilterDef) (param: string) : string =
     match filter.kind, filter.columns with
@@ -339,18 +342,43 @@ module internal Emit =
 
       for filter, fieldName, _, boxFn in fieldMeta do
         let param = filterParamName filter.name
-        let clause = emitFilterSqlClause filter param
-        let clauseLit = clause.Replace("\"", "\\\"")
         let boxedV = boxFn "v"
         let boxedLike = boxFn "(v + \"%\")"
         sb.AppendLine $"  match f.{fieldName} with" |> ignore
         sb.AppendLine "  | None -> ()" |> ignore
-        sb.AppendLine "  | Some v ->" |> ignore
-        sb.AppendLine $"      clauses.Add \"{clauseLit}\"" |> ignore
 
         match filter.kind with
-        | FilterKind.LikePrefix -> sb.AppendLine $"      pars.Add(\"{param}\", {boxedLike})" |> ignore
-        | _ -> sb.AppendLine $"      pars.Add(\"{param}\", {boxedV})" |> ignore
+        | FilterKind.In ->
+          let colSql = Naming.quoteSqlIdent filter.columns.Head
+          let colSqlLit = colSql.Replace("\"", "\\\"")
+          sb.AppendLine "  | Some vs ->" |> ignore
+          sb.AppendLine "      if vs.IsEmpty then" |> ignore
+          sb.AppendLine "        clauses.Add \"1=0\"" |> ignore
+          sb.AppendLine "      else" |> ignore
+          sb.AppendLine "        let names =" |> ignore
+
+          sb.AppendLine $"          vs |> List.mapi (fun i _ -> \"{param}_\" + string i)"
+          |> ignore
+
+          sb.AppendLine $"        clauses.Add(\"{colSqlLit} IN (\" + String.Join(\", \", names) + \")\")"
+          |> ignore
+
+          sb.AppendLine "        vs" |> ignore
+
+          sb.AppendLine $"        |> List.iteri (fun i v -> pars.Add(names[i], {boxedV}))"
+          |> ignore
+        | FilterKind.LikePrefix ->
+          let clause = emitFilterSqlClause filter param
+          let clauseLit = clause.Replace("\"", "\\\"")
+          sb.AppendLine "  | Some v ->" |> ignore
+          sb.AppendLine $"      clauses.Add \"{clauseLit}\"" |> ignore
+          sb.AppendLine $"      pars.Add(\"{param}\", {boxedLike})" |> ignore
+        | _ ->
+          let clause = emitFilterSqlClause filter param
+          let clauseLit = clause.Replace("\"", "\\\"")
+          sb.AppendLine "  | Some v ->" |> ignore
+          sb.AppendLine $"      clauses.Add \"{clauseLit}\"" |> ignore
+          sb.AppendLine $"      pars.Add(\"{param}\", {boxedV})" |> ignore
 
       sb.AppendLine "  let where =" |> ignore
       sb.AppendLine "    if clauses.Count = 0 then \"1=1\"" |> ignore

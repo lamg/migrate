@@ -69,6 +69,8 @@ module internal Types =
     | LikePrefix
     /// ([c1] = @p OR [c2] = @p OR …) — single bind value, 2+ columns
     | EqAny
+    /// [col] IN (@p_0, @p_1, …) — bound as T list; empty list is 1=0
+    | In
 
   /// One optional filter field on a relation (columns resolved during validation).
   type FilterDef =

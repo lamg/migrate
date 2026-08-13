@@ -191,7 +191,8 @@ module internal Annotations =
     | "lte" -> Ok FilterKind.Lte
     | "like_prefix" -> Ok FilterKind.LikePrefix
     | "eq_any" -> Ok FilterKind.EqAny
-    | other -> Error $"unknown filter kind '{other}' (expected eq, neq, gt, gte, lt, lte, like_prefix, eq_any)"
+    | "in" -> Ok FilterKind.In
+    | other -> Error $"unknown filter kind '{other}' (expected eq, neq, gt, gte, lt, lte, like_prefix, eq_any, in)"
 
   /// Parse: name kind col[, col…]
   let private parseFilterBody (rest: string) : Result<FilterDef, string> =
