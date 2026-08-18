@@ -5,6 +5,7 @@ References that may be useful for further development of migrate (schema design,
 ## Schema and migrations
 
 - [Declarative migrations for SQLite](https://david.rothlis.net/declarative-schema-migration-for-sqlite/)
+- [Acadia, Rethinking Database Programming](https://acadia.engineering/blog/rethinking-database-programming)
 
 ## SQLite concurrency and production
 
